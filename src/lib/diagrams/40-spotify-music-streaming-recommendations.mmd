@@ -1,0 +1,26 @@
+flowchart TB
+    Client([Client App])
+    Catalog[Catalog Service<br/>metadata]
+    CDN[(Audio Storage / CDN<br/>multi-bitrate + DRM)]
+    Recs[Recommendation Service<br/>weekly playlist + radio]
+    Events[(Play Events Stream<br/>partitioned)]
+    Royalty[Royalty Pipeline<br/>aggregator + payout]
+    Models[(Embeddings + CF Models<br/>offline trained)]
+
+    Client --> Catalog
+    Client -->|stream chunks| CDN
+    Client --> Recs
+    Client -.->|behaviour events| Events
+    Events --> Royalty
+    Events -.-> Models
+    Models --> Recs
+    Catalog --> Recs
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class Catalog,Recs,Royalty service
+    class CDN,Events,Models store

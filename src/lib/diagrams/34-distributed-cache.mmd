@@ -1,0 +1,27 @@
+flowchart TB
+    App([App Server])
+    Client[Cache Client<br/>in-process lib<br/>or Twemproxy]
+    Node1[(Redis / Memcached<br/>Node 1 RAM)]
+    Node2[(Redis / Memcached<br/>Node 2 RAM)]
+    NodeN[(Redis / Memcached<br/>Node N RAM)]
+    Replica[(Replica<br/>per shard)]
+    Sentinel[Redis Sentinel<br/>failover + gossip]
+
+    App -->|get / set| Client
+    Client -->|consistent hash| Node1
+    Client -->|consistent hash| Node2
+    Client -->|consistent hash| NodeN
+    Node1 -.->|async repl| Replica
+    Sentinel -.->|monitor| Node1
+    Sentinel -.->|monitor| Node2
+    Sentinel -.->|monitor| NodeN
+    Sentinel -.->|promote on failure| Replica
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class App external
+    class Client,Sentinel service
+    class Node1,Node2,NodeN,Replica store

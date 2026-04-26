@@ -1,0 +1,26 @@
+flowchart LR
+    Client([Client])
+    Hasher[Hash Function<br/>MurmurHash3]
+    Lookup[Ring Lookup<br/>walk clockwise]
+    Ring[(Hash Ring<br/>sorted vnode positions)]
+    VNodeMap[(vnode to server<br/>mapping)]
+    Server[Owning Server<br/>S1 / S2 / S3]
+    Gossip[Gossip Membership<br/>epoch + heartbeat]
+
+    Client -->|key K| Hasher
+    Hasher -->|hash position| Lookup
+    Lookup -->|first vnode >= hash| Ring
+    Lookup -->|resolve owner| VNodeMap
+    VNodeMap -->|route| Server
+    Gossip -.->|membership updates| Ring
+    Gossip -.->|membership updates| VNodeMap
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class Hasher,Lookup,Server service
+    class Ring,VNodeMap store
+    class Gossip config

@@ -1,0 +1,28 @@
+flowchart LR
+    Client([Client])
+    TweetSvc[Tweet Service]
+    TweetsDB[(Tweets Store<br/>wide-column,<br/>partition by author)]
+    FanOut[Fan-out Service<br/>push if &lt;10k followers<br/>skip for celebs]
+    Timelines[(Home Timeline Cache<br/>sorted-set per user)]
+    TimelineSvc[Timeline Service<br/>merge push + pull-celebs<br/>+ ML rank]
+    SearchIdx[(Search Index<br/>time-partitioned)]
+    Trending[Trending Pipeline<br/>stream processor top-K]
+
+    Client -->|post| TweetSvc
+    TweetSvc --> TweetsDB
+    TweetSvc --> FanOut
+    FanOut -->|push| Timelines
+    TweetSvc -.->|event stream| SearchIdx
+    TweetSvc -.->|event stream| Trending
+    Client -->|read feed| TimelineSvc
+    TimelineSvc -->|push-built| Timelines
+    TimelineSvc -->|pull celebs| TweetsDB
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class TweetSvc,FanOut,TimelineSvc,Trending service
+    class TweetsDB,Timelines,SearchIdx store

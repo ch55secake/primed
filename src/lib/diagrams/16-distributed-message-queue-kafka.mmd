@@ -1,0 +1,33 @@
+flowchart LR
+    Producers([Producers])
+    Consumers([Consumer Group])
+    Broker1[Kafka Broker 1<br/>P0 Leader, P1 Replica]
+    Broker2[Kafka Broker 2<br/>P1 Leader, P2 Replica]
+    Broker3[Kafka Broker 3<br/>P2 Leader, P0 Replica]
+    Log[("Partition Logs<br/>(append-only,<br/>segmented)")]
+    Coord[KRaft / ZooKeeper<br/>broker registry,<br/>leader election]
+
+    Producers -->|send key,value| Broker1
+    Producers -->|send| Broker2
+    Producers -->|send| Broker3
+    Broker1 <-->|replicate ISR| Broker2
+    Broker2 <-->|replicate ISR| Broker3
+    Broker1 --> Log
+    Broker2 --> Log
+    Broker3 --> Log
+    Consumers -->|pull batches<br/>commit offsets| Broker1
+    Consumers -->|pull| Broker2
+    Consumers -->|pull| Broker3
+    Coord -.->|metadata, election| Broker1
+    Coord -.->|metadata, election| Broker2
+    Coord -.->|metadata, election| Broker3
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Producers,Consumers external
+    class Broker1,Broker2,Broker3 service
+    class Log store
+    class Coord config

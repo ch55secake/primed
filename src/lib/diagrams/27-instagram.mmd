@@ -1,0 +1,30 @@
+flowchart TB
+    Client([Client])
+    UploadURL[Pre-signed URL Service]
+    ObjectStore[(Object Store<br/>raw + variants)]
+    Processor[Image Processor<br/>thumb / small / med / full]
+    CDN[(CDN<br/>edge cache)]
+    PostSvc[Post Service<br/>metadata + fan-out]
+    MetaDB[(Posts Metadata<br/>wide-column,<br/>partition by user)]
+    FeedSvc[Feed Service<br/>hybrid push/pull + rank]
+
+    Client -->|request URL| UploadURL
+    Client -->|PUT media| ObjectStore
+    ObjectStore -.->|event trigger| Processor
+    Processor --> ObjectStore
+    Processor --> CDN
+    Processor -.->|notify| PostSvc
+    PostSvc --> MetaDB
+    Client -->|read feed| FeedSvc
+    FeedSvc --> MetaDB
+    FeedSvc -->|signed URLs| CDN
+    CDN -->|media| Client
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class UploadURL,Processor,PostSvc,FeedSvc service
+    class ObjectStore,CDN,MetaDB store

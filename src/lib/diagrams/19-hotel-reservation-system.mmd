@@ -1,0 +1,28 @@
+flowchart LR
+    Client([Client])
+    Search[Search Service<br/>read path]
+    Booking[Booking Service<br/>Saga orchestrator]
+    Inventory[Hotel / Inventory Service<br/>row-level locks]
+    InvDB[("Transactional Store<br/>sharded by hotel_id")]
+    Index[("Search Index<br/>denormalized hotels")]
+    Payment[Payment Service]
+    Notify[Notification Service]
+
+    Client -->|search| Search
+    Search --> Index
+    Client -->|book / cancel| Booking
+    Booking -->|reserve FOR UPDATE| Inventory
+    Inventory --> InvDB
+    Booking -->|charge| Payment
+    Payment -.->|on fail compensate| Booking
+    Booking -.->|confirm| Notify
+    InvDB -.->|CDC| Index
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class Search,Booking,Inventory,Payment,Notify service
+    class InvDB,Index store

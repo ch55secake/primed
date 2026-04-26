@@ -1,0 +1,30 @@
+flowchart TB
+    ClientA([Client A])
+    ClientB([Client B])
+    MS1[MS Server<br/>workspace sticky]
+    MS2[MS Server<br/>workspace sticky]
+    Bus[(Pub/Sub Bus<br/>per-workspace<br/>channel topics)]
+    Persist[Persist Service]
+    Messages[(Messages Store<br/>partition by channel)]
+    Search[(Search Index<br/>per workspace)]
+    Notif[Notification Service]
+
+    ClientA <-->|WebSocket| MS1
+    ClientB <-->|WebSocket| MS2
+    MS1 --> Bus
+    MS2 --> Bus
+    Bus --> MS1
+    Bus --> MS2
+    Bus --> Persist
+    Persist --> Messages
+    Persist -.-> Search
+    Persist -.->|push if offline| Notif
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class ClientA,ClientB external
+    class MS1,MS2,Persist,Notif service
+    class Bus,Messages,Search store

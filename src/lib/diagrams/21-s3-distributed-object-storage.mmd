@@ -1,0 +1,25 @@
+flowchart LR
+    Client([Client])
+    Bucket[Bucket Service<br/>ACL, policies]
+    Meta[Metadata Service<br/>bucket,key to<br/>piece locations]
+    MetaStore[("Metadata Store<br/>sharded, replicated")]
+    Data[Data Nodes<br/>erasure-coded 6+3<br/>across racks/AZs]
+    Pieces[("Piece Storage<br/>D1 D2 D3 ... P1 P2 P3")]
+    BG[Background Jobs<br/>GC, Repair, Scrub]
+
+    Client -->|PUT/GET auth| Bucket
+    Client -->|lookup / write meta| Meta
+    Meta --> MetaStore
+    Client -->|stream pieces| Data
+    Data --> Pieces
+    BG -.->|repair / scrub| Pieces
+    BG -.->|update locations| MetaStore
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class Bucket,Meta,Data,BG service
+    class MetaStore,Pieces store

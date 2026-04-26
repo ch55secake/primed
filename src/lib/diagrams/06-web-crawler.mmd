@@ -1,0 +1,24 @@
+flowchart LR
+    Frontier[(URL Frontier<br/>per-domain priority queues)]
+    Fetcher[Fetcher Pool<br/>async I/O]
+    DNS[(DNS Cache)]
+    Parser[HTML Parser]
+    Filter[Content Filter<br/>SimHash dedup]
+    Seen[(URL Seen<br/>Bloom + embedded KV)]
+    Pages[(Page Archive<br/>object store)]
+
+    Frontier -->|next URL| Fetcher
+    Fetcher <-->|resolve| DNS
+    Fetcher -->|html| Parser
+    Parser -->|content| Filter
+    Parser -->|extracted links| Seen
+    Seen -.->|new URLs| Frontier
+    Filter -->|store page| Pages
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Fetcher,Parser,Filter service
+    class Frontier,DNS,Seen,Pages store

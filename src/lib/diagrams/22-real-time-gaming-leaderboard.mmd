@@ -1,0 +1,27 @@
+flowchart LR
+    Client([Game Client])
+    LB[Leaderboard Service]
+    Daily[("Sorted Set Cache<br/>Redis ZSET<br/>lb:daily")]
+    Weekly[("Sorted Set Cache<br/>Redis ZSET<br/>lb:weekly")]
+    AllTime[("Sorted Set Cache<br/>Redis ZSET<br/>lb:alltime<br/>(score-range sharded)")]
+    AOF[("Append-Only Log<br/>+ Replicas")]
+    Snap[("Blob Store<br/>hourly snapshots")]
+
+    Client -->|POST score| LB
+    Client -->|GET top-N / my rank| LB
+    LB -->|ZADD / ZREVRANGE| Daily
+    LB -->|ZADD / ZREVRANGE| Weekly
+    LB -->|ZADD / ZREVRANGE| AllTime
+    Daily -.->|persist| AOF
+    Weekly -.->|persist| AOF
+    AllTime -.->|persist| AOF
+    AOF -.->|snapshot| Snap
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class LB service
+    class Daily,Weekly,AllTime,AOF,Snap store

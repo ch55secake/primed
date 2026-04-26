@@ -1,0 +1,23 @@
+flowchart LR
+    Client([Client Device])
+    Control[Control Plane<br/>users, billing, catalog,<br/>recs, session start]
+    OpenConnect[Open Connect CDN<br/>appliances co-located<br/>in ISPs]
+    Catalog[(Catalog &amp; Encodings<br/>metadata)]
+    Recs[(Recommendations<br/>cache)]
+    Origin[(Encoded Chunks<br/>object store)]
+
+    Client -->|start session| Control
+    Control -->|manifest + token<br/>+ CDN URLs| Client
+    Control --> Catalog
+    Control --> Recs
+    Client -.->|streaming chunks| OpenConnect
+    Origin -.->|push during<br/>off-peak| OpenConnect
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class Control,OpenConnect service
+    class Catalog,Recs,Origin store

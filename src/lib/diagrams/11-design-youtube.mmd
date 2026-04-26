@@ -1,0 +1,27 @@
+flowchart LR
+    Uploader([Uploader])
+    Viewer([Viewer])
+    Origin[Edge Origin<br/>chunked upload]
+    RawStore[(Raw Object Store)]
+    Transcoder[Transcoding DAG<br/>GPU workers]
+    EncStore[(Encoded Object Store<br/>HLS chunks + manifest)]
+    CDN[Global CDN]
+    JobQueue[(Job Event Stream)]
+
+    Uploader -->|chunked PUT| Origin
+    Origin --> RawStore
+    RawStore -.->|trigger| JobQueue
+    JobQueue -.->|pull jobs| Transcoder
+    Transcoder --> EncStore
+    EncStore --> CDN
+    Viewer -->|manifest + chunks| CDN
+    CDN -.->|miss| EncStore
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Uploader,Viewer external
+    class Origin,Transcoder,CDN service
+    class RawStore,EncStore,JobQueue store

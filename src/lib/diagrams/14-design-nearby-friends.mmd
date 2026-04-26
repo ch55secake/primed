@@ -1,0 +1,24 @@
+flowchart LR
+    Mobile([Mobile<br/>adaptive GPS])
+    Friend([Friend Device])
+    LocSvc[Location Service]
+    SubSvc[Subscription Service<br/>ACL + radius filter]
+    LocCache[(Latest Location<br/>in-memory cache TTL 5m)]
+    History[(Wide-Column Store<br/>history, opt-in)]
+    Bus[(Pub-Sub<br/>topic per user)]
+
+    Mobile -->|/location| LocSvc
+    LocSvc --> LocCache
+    LocSvc -.->|opt-in| History
+    LocSvc -.->|publish| Bus
+    Bus -.->|subscribe| SubSvc
+    SubSvc -.->|WS push| Friend
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Mobile,Friend external
+    class LocSvc,SubSvc service
+    class LocCache,History,Bus store

@@ -1,0 +1,26 @@
+flowchart TB
+    JobsStore[(Jobs Store<br/>schedules + state)]
+    Scheduler[Scheduler Service<br/>tick + leader election]
+    Coord[Coordination Service<br/>leader election]
+    Queue[(Durable Job Queue)]
+    Workers[Worker Pool<br/>lease + execute]
+    Leases[(Lease Cache<br/>TTL = job timeout)]
+    History[(Status / History Store)]
+    Alerts[Notifications / Alerts]
+
+    JobsStore --> Scheduler
+    Coord <--> Scheduler
+    Scheduler -->|enqueue due jobs| Queue
+    Queue --> Workers
+    Workers <-->|acquire lease| Leases
+    Workers -->|update status| History
+    Workers -.->|on failure| Alerts
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Scheduler,Workers,Alerts service
+    class JobsStore,Queue,Leases,History store
+    class Coord config

@@ -1,0 +1,32 @@
+flowchart LR
+    Driver([Driver App])
+    Rider([Rider App])
+    LocIngest[Location Ingest<br/>WebSocket]
+    GeoCache[(Driver Geo Index<br/>Redis GEO,<br/>TTL 10s)]
+    LocLog[(Location History<br/>partitioned stream)]
+    Match[Matching Service<br/>geo query + score<br/>+ sequential offer]
+    Trip[Trip Service<br/>FSM: requested -&gt; matched<br/>-&gt; on_trip -&gt; completed]
+    Routing[Routing Service<br/>Maps + ETA]
+    Pricing[Pricing Service<br/>surge per cell]
+    Payment[Payment Service]
+
+    Driver -.->|loc / 4s| LocIngest
+    LocIngest --> GeoCache
+    LocIngest -.-> LocLog
+    Rider -->|request ride| Match
+    Match --> GeoCache
+    Match -.->|offer via WS| Driver
+    Match -->|on accept| Trip
+    Trip <--> Routing
+    Trip <--> Pricing
+    Trip --> Payment
+    Trip -.->|status| Rider
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Driver,Rider external
+    class LocIngest,Match,Trip,Routing,Pricing,Payment service
+    class GeoCache,LocLog store

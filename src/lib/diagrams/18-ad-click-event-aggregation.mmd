@@ -1,0 +1,29 @@
+flowchart TB
+    Clients([Ad Clicks<br/>web, mobile, networks])
+    API[Click API]
+    Stream[("Event Stream<br/>(partitioned by ad_id)")]
+    StreamProc[Stream Processor<br/>1-min tumbling windows]
+    OLAP[("OLAP Store<br/>(columnar)")]
+    Dash([Dashboards])
+    Raw[("Object Store<br/>raw events")]
+    Batch[Batch Processor<br/>hourly / daily]
+    Billing([Billing System])
+
+    Clients -->|click event| API
+    API --> Stream
+    Stream -->|real-time path| StreamProc
+    StreamProc --> OLAP
+    OLAP --> Dash
+    Stream -.->|archive| Raw
+    Raw --> Batch
+    Batch -->|authoritative aggregates| Billing
+    Batch -.->|reconcile vs stream| OLAP
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Clients,Dash,Billing external
+    class API,StreamProc,Batch service
+    class Stream,OLAP,Raw store

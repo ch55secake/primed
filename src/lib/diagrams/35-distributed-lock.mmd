@@ -1,0 +1,30 @@
+flowchart TB
+    Client([Client / Worker])
+    Resource[Protected Resource<br/>checks fencing token]
+
+    subgraph ZK["ZooKeeper / etcd path"]
+        ZKSvc[ZK / etcd<br/>ZAB / Raft consensus]
+        ZNodes[(Ephemeral seq znodes<br/>/locks/key/lock-N<br/>+ leases)]
+    end
+
+    subgraph Redlock["Redis Redlock path"]
+        R1[(Redis 1<br/>SETNX key NX EX)]
+        R2[(Redis 2<br/>SETNX key NX EX)]
+        R3[(Redis 3<br/>SETNX key NX EX)]
+    end
+
+    Client -->|create ephemeral<br/>lowest seq wins| ZKSvc
+    ZKSvc --> ZNodes
+    Client -->|SET on majority<br/>within ttl/2| R1
+    Client -->|SET on majority<br/>within ttl/2| R2
+    Client -->|SET on majority<br/>within ttl/2| R3
+    Client -->|write + fencing token| Resource
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class ZKSvc,Resource service
+    class ZNodes,R1,R2,R3 store

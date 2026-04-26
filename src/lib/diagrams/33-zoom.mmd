@@ -1,0 +1,29 @@
+flowchart TB
+    P1([Participant 1])
+    P2([Participant 2])
+    PN([Participant N])
+    Signal[Signaling Service<br/>WebSocket control plane<br/>join, mute, raise hand]
+    SFU[SFU<br/>Selective Forwarding<br/>1 up, N-1 down]
+    MCU[MCU<br/>Mixing Conference Unit<br/>composes single stream]
+    Recordings[(Recordings<br/>object store)]
+
+    P1 <-->|signaling| Signal
+    P2 <-->|signaling| Signal
+    PN <-->|signaling| Signal
+    P1 -->|WebRTC SRTP| SFU
+    P2 -->|WebRTC SRTP| SFU
+    PN -->|WebRTC SRTP| SFU
+    SFU -->|forward streams| P1
+    SFU -->|forward streams| P2
+    SFU -->|forward streams| PN
+    SFU -.->|webinar mode| MCU
+    MCU -.-> Recordings
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class P1,P2,PN external
+    class Signal,SFU,MCU service
+    class Recordings store

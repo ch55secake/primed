@@ -1,0 +1,37 @@
+flowchart LR
+    Client([Client])
+    Ingest[Ingestion Service<br/>validate / dedupe / route]
+    Prefs[(Preferences Store)]
+    Templates[(Template Store)]
+    Idem[(Idempotency Cache<br/>in-memory KV, 24h TTL)]
+    PushQ[(Push Queue)]
+    EmailQ[(Email Queue)]
+    SMSQ[(SMS Queue)]
+    PushW[APNs / FCM Workers]
+    EmailW[SES Workers]
+    SMSW[Twilio Workers]
+    Status[(Status Store + DLQ)]
+
+    Client -->|notify request| Ingest
+    Ingest -->|lookup| Prefs
+    Ingest -->|render| Templates
+    Ingest <-->|dedup check| Idem
+    Ingest -->|route| PushQ
+    Ingest -->|route| EmailQ
+    Ingest -->|route| SMSQ
+    PushQ --> PushW
+    EmailQ --> EmailW
+    SMSQ --> SMSW
+    PushW -.->|ack / fail| Status
+    EmailW -.->|ack / fail| Status
+    SMSW -.->|ack / fail| Status
+    Status -.->|retry via DLQ| PushQ
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client external
+    class Ingest,PushW,EmailW,SMSW service
+    class Prefs,Templates,Idem,PushQ,EmailQ,SMSQ,Status store

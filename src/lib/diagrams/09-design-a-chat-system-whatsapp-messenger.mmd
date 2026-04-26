@@ -1,0 +1,29 @@
+flowchart LR
+    UserA([User A])
+    UserB([User B])
+    ChatSvrA[Chat Server A<br/>sticky WS]
+    ChatSvrB[Chat Server B<br/>sticky WS]
+    Bus[(Message Bus<br/>partitioned event stream)]
+    Persist[Persist Service]
+    PushSvc[Push Notif Service]
+    History[(Wide-Column<br/>Message Store)]
+    Registry[(Session Registry<br/>in-memory cache)]
+
+    UserA <-->|WebSocket| ChatSvrA
+    UserB <-->|WebSocket| ChatSvrB
+    ChatSvrA --> Persist
+    ChatSvrB --> Persist
+    Persist --> History
+    ChatSvrA -.->|publish| Bus
+    Bus -.->|subscribe| ChatSvrB
+    ChatSvrA -->|lookup| Registry
+    Persist -.->|if offline| PushSvc
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class UserA,UserB external
+    class ChatSvrA,ChatSvrB,Persist,PushSvc service
+    class Bus,History,Registry store

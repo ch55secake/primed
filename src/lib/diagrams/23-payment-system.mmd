@@ -1,0 +1,28 @@
+flowchart TB
+    Client([Client])
+    API[Payment API<br/>validate + idempotency]
+    Orchestrator[Payment Orchestrator<br/>Saga: risk, auth, capture]
+    IdemCache[(Idempotency Cache<br/>key-value store)]
+    Risk[Risk Service]
+    PSP([External PSP<br/>Stripe / Adyen])
+    Ledger[(Ledger<br/>append-only<br/>double-entry log)]
+    Recon[Reconciliation Job]
+
+    Client -->|charge req| API
+    API <-->|check + write| IdemCache
+    API --> Orchestrator
+    Orchestrator --> Risk
+    Orchestrator -->|authorize / capture| PSP
+    Orchestrator -->|debit + credit| Ledger
+    PSP -.->|3DS / async webhook| Orchestrator
+    Recon -->|daily diff| Ledger
+    Recon <-->|settlement report| PSP
+
+    classDef external fill:#1e2533,stroke:#3a4a6e,color:#cfd6e6
+    classDef service fill:#1a3a2e,stroke:#3a6e54,color:#cfe6d6
+    classDef store fill:#1e2a3e,stroke:#3a5a8e,color:#cfdcef
+    classDef config fill:#3a2e1a,stroke:#6e5a3a,color:#efdfcf
+
+    class Client,PSP external
+    class API,Orchestrator,Risk,Recon service
+    class IdemCache,Ledger store
