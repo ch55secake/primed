@@ -153,8 +153,10 @@ export function Section({
 
   const hldParts = isHld ? splitHldContent(section.content) : null;
 
+  const sectionId = `section-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
   return (
-    <div className="section-card">
+    <div className="section-card" id={sectionId}>
       <div
         className="section-header"
         onClick={onToggle}

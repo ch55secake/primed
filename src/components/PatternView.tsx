@@ -12,6 +12,16 @@ interface Props {
   onRevealNext: () => void;
 }
 
+const sectionDomId = (name: string) =>
+  `section-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+const scrollToSection = (name: string) => {
+  requestAnimationFrame(() => {
+    const el = document.getElementById(sectionDomId(name));
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+};
+
 export function PatternView({
   pattern,
   revealed,
@@ -27,14 +37,43 @@ export function PatternView({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !(e.target as HTMLElement).matches("input, textarea, button")) {
+      const target = e.target as HTMLElement;
+      if (target.matches("input, textarea, button")) return;
+
+      if (e.code === "Space") {
         e.preventDefault();
-        onRevealNext();
+        const ordered = sortedSections.map((s) => s.name);
+        const next = ordered.find((n) => !revealed.has(n));
+        if (next) {
+          onRevealNext();
+          scrollToSection(next);
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        const ordered = sortedSections.map((s) => s.name);
+        let lastRevealed: string | null = null;
+        for (const n of ordered) {
+          if (revealed.has(n)) lastRevealed = n;
+        }
+        if (!lastRevealed || lastRevealed === ordered[0]) return;
+        onToggle(lastRevealed);
+        const idx = ordered.indexOf(lastRevealed);
+        const prev = idx > 0 ? ordered[idx - 1] : ordered[0];
+        scrollToSection(prev);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onRevealNext]);
+  }, [revealed, sortedSections, onRevealNext, onToggle]);
+
+  const handleRevealNextClick = () => {
+    const ordered = sortedSections.map((s) => s.name);
+    const next = ordered.find((n) => !revealed.has(n));
+    if (next) {
+      onRevealNext();
+      scrollToSection(next);
+    }
+  };
 
   return (
     <main className="flex-1 overflow-y-auto">
@@ -53,8 +92,8 @@ export function PatternView({
           </span>
         </header>
 
-        <div className="flex gap-2 mb-6">
-          <button type="button" className="btn btn-primary" onClick={onRevealNext}>
+        <div className="flex gap-2 mb-6 flex-wrap">
+          <button type="button" className="btn btn-primary" onClick={handleRevealNextClick}>
             Reveal next ↓
           </button>
           <button type="button" className="btn" onClick={onShowAll}>
@@ -65,10 +104,12 @@ export function PatternView({
           </button>
           <span className="ml-auto self-center text-xs text-[var(--color-text-dim)]">
             <kbd className="font-mono px-1.5 py-0.5 bg-[var(--color-panel-2)] rounded border border-[var(--color-border)] mx-0.5">Space</kbd>
-            reveal next ·
+            reveal ·
+            <kbd className="font-mono px-1.5 py-0.5 bg-[var(--color-panel-2)] rounded border border-[var(--color-border)] mx-0.5">Esc</kbd>
+            collapse last ·
             <kbd className="font-mono px-1.5 py-0.5 bg-[var(--color-panel-2)] rounded border border-[var(--color-border)] mx-0.5">←</kbd>
             <kbd className="font-mono px-1.5 py-0.5 bg-[var(--color-panel-2)] rounded border border-[var(--color-border)] mx-0.5">→</kbd>
-            switch pattern
+            switch
           </span>
         </div>
 
