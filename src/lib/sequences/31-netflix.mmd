@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant C as Client (Player)
+    participant CP as Control Plane
+    participant DRM as License Svc
+    participant OCA as Open Connect (CDN)
+    participant Org as Origin (fallback)
+
+    Note over C,Org: Playback start -> ABR chunk streaming
+    C->>CP: POST /playback/start {title_id, profile}
+    CP->>CP: auth + geo check + rights
+    CP-->>C: manifest URL + session token + edge list
+    C->>DRM: request license (device id + token)
+    DRM-->>C: short-lived decryption key
+    C->>OCA: GET manifest (DASH/HLS)
+    OCA-->>C: variants ladder (240p..4K)
+    Note over C: client measures bandwidth, picks bitrate
+    loop chunk-by-chunk ABR (4-10s chunks)
+        C->>OCA: GET chunk @ chosen bitrate
+        alt OCA has chunk (pre-positioned)
+            OCA-->>C: encrypted chunk
+        else cache miss
+            OCA->>Org: fill from origin
+            Org-->>OCA: chunk
+            OCA-->>C: encrypted chunk
+        end
+        C->>C: decrypt + decode + measure throughput
+        Note over C: switch up if buffer healthy, down if dipping
+    end
+    C-)CP: heartbeat (position, buffer health)

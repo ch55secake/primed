@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant R as Rider
+    participant M as Matching Svc
+    participant Geo as Redis GEO
+    participant D as Driver (WS)
+    participant T as Trip Svc (FSM)
+    participant P as Pricing/Payment
+
+    Note over R,P: Ride request -> match -> trip lifecycle
+    R->>M: POST /ride {pickup, dropoff}
+    M->>P: get surge multiplier for cell
+    P-->>M: multiplier
+    M->>Geo: GEORADIUS drivers 2km
+    Geo-->>M: candidate drivers
+    M->>M: score (ETA, rating, completion)
+    loop offer to top driver (TTL 10-15s)
+        M-)D: WS offer
+        alt driver accepts
+            D--)M: accept
+            M->>T: create trip (REQUESTED -> MATCHED)
+            T-->>R: matched {driver, ETA}
+        else reject or timeout
+            Note over M: pick next candidate
+        end
+    end
+    Note over T: MATCHED -> DRIVER_ENROUTE
+    D-)T: arrived at pickup
+    Note over T: -> ARRIVED -> ON_TRIP
+    D-)T: completed at dropoff
+    Note over T: ON_TRIP -> COMPLETED
+    T->>P: charge fare (server-computed route)
+    P-->>T: payment OK
+    T-->>R: receipt + rate prompt

@@ -1,0 +1,54 @@
+erDiagram
+    USER ||--o{ REPO : owns
+    REPO ||--o{ BRANCH : contains
+    BRANCH ||--o{ COMMIT : points_to
+    REPO ||--o{ PULL_REQUEST : has
+    REPO ||--o{ ISSUE : tracks
+    USER ||--o{ PULL_REQUEST : authors
+    USER ||--o{ ISSUE : opens
+
+    USER {
+        bigint user_id PK
+        string login
+        string email
+        enum type
+    }
+    REPO {
+        bigint repo_id PK
+        bigint owner_id FK
+        string name
+        enum visibility
+        string default_branch
+        string primary_shard
+    }
+    BRANCH {
+        bigint repo_id FK
+        string name PK
+        string head_sha
+        bool protected
+    }
+    COMMIT {
+        string sha PK
+        bigint repo_id FK
+        string author
+        string message
+        timestamp committed_at
+    }
+    PULL_REQUEST {
+        bigint pr_id PK
+        bigint repo_id FK
+        bigint author_id FK
+        string head_sha FK
+        string base_sha FK
+        enum state
+        string title
+    }
+    ISSUE {
+        bigint issue_id PK
+        bigint repo_id FK
+        bigint author_id FK
+        enum state
+        json labels
+        string title
+        string body
+    }

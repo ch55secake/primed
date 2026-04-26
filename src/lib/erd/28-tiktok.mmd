@@ -1,0 +1,66 @@
+erDiagram
+    USER {
+        bigint user_id PK
+        string handle
+        string region
+        string language
+        timestamp created_at
+    }
+    VIDEO {
+        bigint video_id PK
+        bigint creator_id FK
+        int duration_s
+        bigint sound_id FK
+        json hashtags
+        string manifest_url
+        string thumbnail_url
+        enum status "processing|ready|blocked"
+        timestamp ts
+    }
+    SOUND {
+        bigint sound_id PK
+        bigint original_video_id FK
+        string title
+        bigint usage_count
+        string audio_fingerprint
+    }
+    INTERACTION {
+        bigint user_id PK,FK
+        bigint video_id PK,FK
+        timestamp ts PK
+        enum type "view|like|share|comment|skip|follow"
+        float watch_pct
+    }
+    USER_EMBEDDING {
+        bigint user_id PK,FK
+        bytes vector
+        int version
+        timestamp updated_at
+    }
+    VIDEO_EMBEDDING {
+        bigint video_id PK,FK
+        bytes vector
+        int version
+        timestamp updated_at
+    }
+    HASHTAG {
+        string tag PK
+        bigint usage_count
+        bigint trend_rank
+    }
+    CANDIDATE_CACHE {
+        bigint user_id PK,FK
+        bigint video_id PK,FK
+        float retrieval_score
+        timestamp generated_at
+    }
+
+    USER ||--o{ VIDEO : "creates"
+    VIDEO }o--|| SOUND : "uses"
+    USER ||--o{ INTERACTION : "performs"
+    VIDEO ||--o{ INTERACTION : "receives"
+    USER ||--|| USER_EMBEDDING : "represented by"
+    VIDEO ||--|| VIDEO_EMBEDDING : "represented by"
+    VIDEO }o--o{ HASHTAG : "tagged with"
+    USER ||--o{ CANDIDATE_CACHE : "served from"
+    VIDEO ||--o{ CANDIDATE_CACHE : "appears in"

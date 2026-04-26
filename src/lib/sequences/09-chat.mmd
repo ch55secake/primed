@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant A as User A
+    participant CSA as Chat Server A
+    participant Reg as Session Registry
+    participant Bus as Message Bus
+    participant CSB as Chat Server B
+    participant Store as Message Store
+    participant Push as Push Notif (APNs/FCM)
+    participant B as User B
+
+    A->>CSA: WS send {to:B, body, client_msg_id}
+    CSA->>Store: persist message (sync)
+    Store-->>CSA: server_msg_id, ts
+    CSA-->>A: ack {server_msg_id, ts}
+    CSA->>Reg: lookup B's chat server
+    alt B online
+        Reg-->>CSA: chat_server_B
+        CSA->>Bus: publish to recipient topic
+        Bus-)CSB: deliver
+        CSB->>B: WS receive {from:A, body, server_msg_id}
+        B-->>CSB: delivered receipt
+        CSB->>Bus: publish receipt
+        Bus-)CSA: receipt event
+        CSA->>A: WS receipt {state: delivered}
+    else B offline
+        Reg-->>CSA: not connected
+        CSA->>Push: send push notification
+        Note over B,Push: B reconnects later, syncs from last_read_msg_id
+    end

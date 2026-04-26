@@ -1,0 +1,65 @@
+erDiagram
+    USER {
+        bigint user_id PK
+        string handle
+        string bio
+        bool is_private
+    }
+    POST {
+        bigint post_id PK
+        bigint user_id FK
+        string caption
+        string location
+        timestamp created_at
+    }
+    MEDIA_VARIANT {
+        bigint post_id PK,FK
+        enum variant "thumb|small|med|full"
+        string cdn_url
+        int width
+        int height
+        string format
+    }
+    LIKE_SHARD {
+        bigint post_id PK,FK
+        int shard_id PK
+        bigint count
+        timestamp updated_at
+    }
+    LIKE_EVENT {
+        bigint event_id PK
+        bigint post_id FK
+        bigint user_id FK
+        timestamp ts
+    }
+    COMMENT {
+        bigint post_id PK,FK
+        bigint comment_id PK
+        bigint user_id FK
+        string text
+        timestamp ts
+    }
+    STORY {
+        bigint user_id PK,FK
+        bigint story_id PK
+        string media_url
+        timestamp ts
+        timestamp expires_at
+        json viewer_ids
+    }
+    FOLLOW {
+        bigint follower_id PK,FK
+        bigint followee_id PK,FK
+        timestamp followed_at
+    }
+
+    USER ||--o{ POST : "creates"
+    POST ||--o{ MEDIA_VARIANT : "rendered as"
+    POST ||--o{ LIKE_SHARD : "counted via"
+    POST ||--o{ LIKE_EVENT : "logged as"
+    USER ||--o{ LIKE_EVENT : "performs"
+    POST ||--o{ COMMENT : "discussed in"
+    USER ||--o{ COMMENT : "writes"
+    USER ||--o{ STORY : "publishes"
+    USER ||--o{ FOLLOW : "follows"
+    USER ||--o{ FOLLOW : "followed by"

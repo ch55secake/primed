@@ -1,0 +1,44 @@
+sequenceDiagram
+    participant C as Client
+    participant Feed as Feed Service
+    participant Rec as Recommendation Service
+    participant ANN as Vector Store (ANN)
+    participant Rank as Ranking Model
+    participant DB as Metadata Store
+    participant Ev as Interaction Stream
+
+    Note over C,Ev: FOR YOU FEED (two-tower retrieve -> rank -> serve)
+    C->>Feed: GET /foryou?cursor
+    Feed->>Rec: get candidates (user_id, context)
+
+    Note over Rec,ANN: RETRIEVAL (millions -> hundreds)
+    Rec->>Rec: lookup user embedding (two-tower user vector)
+    Rec->>ANN: ANN search by cosine similarity
+    ANN-->>Rec: ~1000 nearest video_ids
+    Rec->>Rec: blend trending + follows + diversification
+    Rec->>Rec: filter (already-seen, blocks, region eligibility)
+
+    Note over Rec,Rank: RANKING (hundreds -> ~50)
+    Rec->>Rank: score candidates (multi-task: watch_pct, like, share)
+    alt ranker available
+        Rank-->>Rec: top ~50 with scores
+    else ranker degraded
+        Note over Rec: fallback to per-user candidate cache + Following + Trending
+        Rec-->>Rec: degraded list
+    end
+
+    Rec-->>Feed: ranked video_ids
+    Feed->>DB: hydrate metadata + manifest URLs
+    DB-->>Feed: video records
+    Feed-->>C: ordered list (manifest URLs + prefetch hints)
+
+    Note over C,Ev: PLAYBACK + PRELOAD
+    C->>C: play video[0] from CDN
+    par background preload
+        C->>C: fetch manifest + first chunk for video[1..3]
+    end
+
+    Note over C,Ev: INTERACTION FEEDBACK (online learning)
+    C-)Ev: POST /interaction (watch_pct, like, skip, share)
+    Ev-)Rank: stream features for online training
+    Ev-)Rec: refresh user embedding (hourly batch)

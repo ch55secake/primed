@@ -1,0 +1,43 @@
+sequenceDiagram
+    participant GW as MarketDataGateway
+    participant TICKS as TickStream
+    participant EVAL as RuleEvaluator
+    participant FIRED as FiredAlertsStream
+    participant DISP as AlertDispatcher
+    participant IDEM as IdempotencyCache
+    participant NOTIF as NotificationSystem
+
+    Note over EVAL: local state co-partitioned by instrument_id<br/>(subs index + last_price + armed flags)
+
+    GW->>TICKS: publish tick {instrument, price, ts} key=instrument_id
+    TICKS->>EVAL: consume tick (partition for instrument)
+    EVAL->>EVAL: prev = state.last_price[instrument]
+    EVAL->>EVAL: state.last_price[instrument] = price
+    EVAL->>EVAL: lookup subs[instrument] in local state
+    loop for each ARMED sub on instrument
+        alt cross detected (prev < threshold, price >= threshold)
+            EVAL->>EVAL: alert.state = FIRED (local flag)
+            EVAL-)FIRED: emit alert_fired {alert_id, user_id, price, arm_epoch, idem_key}
+        else no crossing
+            Note over EVAL: skip (no level re-fire)
+        end
+    end
+
+    FIRED->>DISP: consume fired event
+    DISP->>IDEM: SETNX idem:{alert_id}:{arm_epoch} TTL=1h
+    alt idem key set (first time)
+        IDEM-->>DISP: OK (new)
+        DISP->>DISP: check user prefs / quiet hours
+        alt within quiet hours
+            DISP->>DISP: suppress or defer
+        else deliver
+            DISP->>NOTIF: dispatch push/email/SMS
+            NOTIF-->>DISP: delivered
+            DISP->>DISP: update alerts.state = FIRED, last_fired_at
+        end
+    else duplicate (replay after evaluator restart)
+        IDEM-->>DISP: already exists
+        DISP-X NOTIF: drop duplicate
+    end
+
+    Note over EVAL,DISP: re-arm service reads FIRED stream<br/>schedules delayed re-arm after cooldown_sec<br/>increments arm_epoch on next arming

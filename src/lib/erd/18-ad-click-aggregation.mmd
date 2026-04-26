@@ -1,0 +1,54 @@
+erDiagram
+    AD {
+        bigint ad_id PK
+        bigint advertiser_id FK
+        string creative_url
+        enum status
+    }
+    ADVERTISER {
+        bigint advertiser_id PK
+        string name
+        float balance
+    }
+    RAW_CLICK {
+        string click_id PK
+        bigint ad_id FK
+        bigint advertiser_id FK
+        bigint user_id
+        timestamp ts
+        string geo
+        string ip
+        string user_agent
+    }
+    AGG_MINUTE {
+        bigint ad_id PK,FK
+        timestamp ts_minute PK
+        bigint count
+        bigint unique_users
+        bigint fraud_count
+    }
+    AGG_HOUR {
+        bigint ad_id PK,FK
+        timestamp ts_hour PK
+        bigint count
+        bigint unique_users
+    }
+    AGG_DAY {
+        bigint ad_id PK,FK
+        timestamp ts_day PK
+        bigint count
+        bigint unique_users
+    }
+    FRAUD_FLAG {
+        string click_id PK,FK
+        string reason
+        timestamp ts
+        float score
+    }
+
+    ADVERTISER ||--o{ AD : "owns"
+    AD ||--o{ RAW_CLICK : "generates"
+    RAW_CLICK ||--o| FRAUD_FLAG : "flagged as"
+    AD ||--o{ AGG_MINUTE : "rolled up to"
+    AD ||--o{ AGG_HOUR : "rolled up to"
+    AD ||--o{ AGG_DAY : "rolled up to"

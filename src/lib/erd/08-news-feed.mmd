@@ -1,0 +1,37 @@
+erDiagram
+    USER ||--o{ POST : "authors"
+    USER ||--o{ FOLLOW : "follower"
+    USER ||--o{ FOLLOW : "followee"
+    USER ||--|| TIMELINE_CACHE : "has"
+    POST ||--o{ MEDIA : "attaches"
+
+    USER {
+        bigint user_id PK
+        string username
+        int follower_count
+        timestamp created_at
+    }
+    POST {
+        bigint post_id PK
+        bigint author_id FK
+        string content
+        timestamp ts
+    }
+    FOLLOW {
+        bigint follower_id FK
+        bigint followee_id FK
+        timestamp ts
+    }
+    TIMELINE_CACHE {
+        bigint user_id PK
+        json post_ids
+        timestamp generated_at
+        int ttl_sec
+    }
+    MEDIA {
+        string media_id PK
+        bigint post_id FK
+        enum type
+        string cdn_url
+        bigint size_bytes
+    }

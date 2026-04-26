@@ -1,0 +1,52 @@
+erDiagram
+    USER ||--o{ ALERT : owns
+    INSTRUMENT ||--o{ ALERT : watched_by
+    ALERT ||--o{ FIRED_EVENT : produces
+    ALERT ||--o{ IDEMPOTENCY_KEY : guarded_by
+    FIRED_EVENT ||--|| AUDIT_LOG : recorded_in
+
+    USER {
+        bigint user_id PK
+        string email
+        json delivery_prefs
+    }
+    INSTRUMENT {
+        bigint instrument_id PK
+        string symbol
+        enum asset_class
+        string market
+        bool open_24_7
+    }
+    ALERT {
+        bigint alert_id PK
+        bigint user_id FK
+        bigint instrument_id FK
+        enum rule_type
+        float rule_value
+        int window_sec
+        enum state
+        int cooldown_sec
+        timestamp last_fired_at
+        timestamp created_at
+    }
+    FIRED_EVENT {
+        bigint event_id PK
+        bigint alert_id FK
+        float trigger_price
+        json rule_snapshot
+        timestamp triggered_at
+        timestamp delivered_at
+    }
+    IDEMPOTENCY_KEY {
+        string key PK
+        bigint alert_id FK
+        bigint arm_epoch
+        timestamp expires_at
+    }
+    AUDIT_LOG {
+        bigint event_id FK
+        bigint alert_id FK
+        bigint user_id FK
+        bigint instrument_id FK
+        timestamp partition_date
+    }

@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant C as Client
+    participant Co as Coordinator<br/>(any node)
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+    participant R3 as Replica 3
+
+    Note over C,R3: Write flow (W=2, N=3)
+    C->>Co: PUT key, value
+    Co->>Co: hash(key) -> ring lookup
+    par fan-out to replicas
+        Co->>R1: write (value, vclock)
+        Co->>R2: write (value, vclock)
+        Co->>R3: write (value, vclock)
+    end
+    R1-->>Co: ack
+    R2-->>Co: ack
+    Co-->>C: success (W=2 met)
+    R3-->>Co: ack (async)
+    alt R3 down
+        Note over Co,R3: hinted handoff stored<br/>on neighbor; replays on revive
+    end
+
+    Note over C,R3: Read flow (R=2, N=3)
+    C->>Co: GET key
+    par query replicas
+        Co->>R1: read
+        Co->>R2: read
+        Co->>R3: read
+    end
+    R1-->>Co: value, vclock_a
+    R2-->>Co: value, vclock_b
+    Co->>Co: compare vector clocks (R=2 met)
+    alt versions agree
+        Co-->>C: value
+    else conflict (concurrent vclocks)
+        Co-->>C: all conflicting versions
+        Note over Co,R3: read repair pushes<br/>newest to stale replica
+    end

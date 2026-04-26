@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant C1 as Client (Device 1)
+    participant Meta as Metadata Service
+    participant Block as Block Service
+    participant Notify as Notify Service
+    participant C2 as Client (Device 2)
+
+    Note over C1,Block: UPLOAD (chunk-based dedup)
+    C1->>C1: split file into 4MB chunks, SHA-256 each
+    C1->>Meta: POST /file {metadata, chunk_hashes[]}
+    Meta->>Meta: check ref-counts for each hash
+    Meta-->>C1: {file_id, missing_chunks: [hash...]}
+    loop only missing chunks
+        C1->>Block: PUT /chunk/{hash} bytes
+        Block-->>C1: stored
+    end
+    C1->>Meta: finalize version
+    Meta->>Meta: bump current_version, incr ref_counts
+    Meta-->>C1: version_id committed
+    Meta-)Notify: file_changed event
+
+    Note over Notify,C2: SYNC TO OTHER DEVICE
+    Notify-)C2: WS {event: file_changed, file_id, version}
+    C2->>Meta: GET /file/{id}
+    Meta-->>C2: metadata + chunk_list
+    C2->>C2: diff vs local chunks
+    loop missing chunks only
+        C2->>Block: GET /chunk/{hash}
+        Block-->>C2: bytes (CDN)
+    end
+    C2->>C2: reassemble file locally

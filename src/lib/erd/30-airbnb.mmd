@@ -1,0 +1,49 @@
+erDiagram
+    HOST ||--o{ LISTING : owns
+    LISTING ||--o{ CALENDAR_INVENTORY : has
+    LISTING ||--o{ BOOKING : receives
+    GUEST ||--o{ BOOKING : makes
+    BOOKING ||--o{ REVIEW : produces
+
+    HOST {
+        bigint host_id PK
+        string name
+        timestamp joined_at
+    }
+    GUEST {
+        bigint guest_id PK
+        string name
+        string payment_method
+    }
+    LISTING {
+        bigint listing_id PK
+        bigint host_id FK
+        string title
+        string address
+        float lat
+        float lng
+        json amenities
+        json policies
+    }
+    CALENDAR_INVENTORY {
+        bigint listing_id FK
+        timestamp date PK
+        enum status
+        float price_override
+    }
+    BOOKING {
+        bigint booking_id PK
+        bigint guest_id FK
+        bigint listing_id FK
+        timestamp checkin
+        timestamp checkout
+        float total
+        enum state
+    }
+    REVIEW {
+        bigint review_id PK
+        bigint booking_id FK
+        int rating
+        string text
+        timestamp ts
+    }

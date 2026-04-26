@@ -1,0 +1,40 @@
+erDiagram
+    USER ||--o{ MEETING : hosts
+    MEETING ||--o{ PARTICIPANT : includes
+    USER ||--o{ PARTICIPANT : joins_as
+    MEETING ||--|| RECORDING : produces
+    MEETING ||--o{ SFU_SESSION : routed_via
+
+    USER {
+        bigint user_id PK
+        bigint account_id
+        string email
+    }
+    MEETING {
+        bigint meeting_id PK
+        bigint host_id FK
+        timestamp scheduled_at
+        timestamp started_at
+        timestamp ended_at
+        string passcode
+    }
+    PARTICIPANT {
+        bigint meeting_id FK
+        bigint user_id FK
+        timestamp joined_at
+        timestamp left_at
+        enum role
+    }
+    RECORDING {
+        bigint meeting_id FK
+        string mp4_url
+        string transcript_url
+        int duration_sec
+    }
+    SFU_SESSION {
+        bigint session_id PK
+        bigint meeting_id FK
+        string region
+        int participant_count
+        timestamp started_at
+    }

@@ -1,0 +1,49 @@
+sequenceDiagram
+    participant C as Client (Holder)
+    participant LS as Lock Service
+    participant ZK as ZK Quorum
+    participant R as Redis Node(s)
+    participant Res as Protected Resource
+
+    Note over C,Res: acquire(key) -> work -> release, with fencing token
+    C->>LS: acquire(key, ttl)
+    alt ZooKeeper / etcd path
+        LS->>ZK: create ephemeral sequential /locks/{key}/lock-N
+        ZK-->>LS: znode + seq
+        alt my seq is lowest
+            ZK-->>LS: lock granted
+            LS-->>C: token = monotonic_seq
+        else not lowest
+            LS->>ZK: watch znode just-before-mine
+            Note over LS,ZK: wait for predecessor delete
+            ZK-)LS: predecessor released
+            LS-->>C: token = monotonic_seq
+        end
+    else Redis SETNX path
+        LS->>R: SET key owner_id NX EX ttl
+        alt OK
+            R-->>LS: acquired
+            LS-->>C: token (best-effort, not monotonic under failover)
+        else nil (held)
+            R-->>LS: nil
+            LS-X C: not acquired (retry with backoff)
+        end
+    end
+
+    Note over C,Res: critical section -> writes carry fencing token
+    C->>Res: write(payload, token)
+    Res->>Res: check token >= last_seen_token
+    alt token valid
+        Res-->>C: write OK; last_seen_token = token
+    else token stale (GC pause / partition)
+        Res-X C: REJECTED (fencing guard)
+    end
+
+    C->>LS: release(key, owner_id)
+    alt ZK path
+        LS->>ZK: delete znode (or session ends -> auto-release)
+    else Redis path
+        LS->>R: Lua: if get(key)==owner_id then del(key)
+    end
+    LS-->>C: released
+    Note over LS: TTL expiry is the safety net for crashed holders

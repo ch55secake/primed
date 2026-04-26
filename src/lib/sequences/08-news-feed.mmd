@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant U as User
+    participant Post as Post Service
+    participant FO as Fan-out Service
+    participant PDB as Posts Store
+    participant TL as Timeline Cache
+    participant Feed as Feed Service
+    participant Rank as Ranker
+
+    Note over U,Rank: WRITE PATH (post + hybrid fan-out)
+    U->>Post: POST /post
+    Post->>PDB: persist post
+    PDB-->>Post: post_id
+    Post-)FO: enqueue fan-out
+    Post-->>U: 200 {post_id}
+    alt author followers < 10k (push)
+        FO->>FO: load follower list
+        loop each follower
+            FO->>TL: ZADD timeline (cap 1000)
+        end
+    else celebrity (>= 10k followers)
+        Note over FO: skip push, mark for pull-on-read
+    end
+
+    Note over U,Rank: READ PATH (timeline merge)
+    U->>Feed: GET /feed
+    Feed->>TL: read pre-built timeline (push)
+    TL-->>Feed: post_ids
+    Feed->>PDB: pull recent celebrity posts
+    PDB-->>Feed: celeb posts
+    Feed->>Rank: score(candidates)
+    Rank-->>Feed: top 50 ranked
+    Feed->>PDB: hydrate post details
+    PDB-->>Feed: enriched posts
+    Feed-->>U: paginated feed

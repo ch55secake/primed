@@ -1,0 +1,36 @@
+erDiagram
+    %% Lock state is in-memory; logical entities shown for fencing/lease semantics
+    LOCK ||--o| LEASE : held_via
+    LOCK ||--o{ WAITER : queued_by
+    LEASE ||--o{ FENCING_TOKEN : issues
+    OWNER ||--o{ LEASE : acquires
+
+    LOCK {
+        string key PK
+        string current_owner_id FK
+        int refcount
+        timestamp acquired_at
+    }
+    LEASE {
+        string lease_id PK
+        string key FK
+        string owner_id FK
+        timestamp expires_at
+        timestamp last_renewed_at
+    }
+    FENCING_TOKEN {
+        bigint token PK
+        string lease_id FK
+        timestamp issued_at
+    }
+    WAITER {
+        string key FK
+        string client_id
+        bigint sequence
+        timestamp enqueued_at
+    }
+    OWNER {
+        string owner_id PK
+        string session_id
+        timestamp session_start
+    }

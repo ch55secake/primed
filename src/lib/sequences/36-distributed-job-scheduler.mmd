@@ -1,0 +1,42 @@
+sequenceDiagram
+    participant SCH as Scheduler
+    participant JOBS as JobsStore
+    participant Q as DurableQueue
+    participant W as Worker
+    participant LEASE as LeaseCache
+    participant HIST as JobRunsStore
+    participant DLQ as DLQ
+
+    Note over SCH: Tick every 30s (leader-elected)
+    SCH->>JOBS: SELECT jobs WHERE next_run_at <= NOW()
+    JOBS-->>SCH: due jobs
+    loop for each due job
+        SCH->>Q: enqueue (job_id, scheduled_at)
+        SCH->>JOBS: UPDATE next_run_at = compute_next(cron)
+    end
+
+    W->>Q: poll / pull
+    Q-->>W: job_run (job_id, scheduled_at)
+    W->>LEASE: SETNX lease:(job_id, scheduled_at) TTL=timeout
+    alt lease acquired
+        LEASE-->>W: OK
+        W->>HIST: write started (attempt N)
+        loop heartbeat every Ns
+            W->>LEASE: renew TTL
+        end
+        Note over W: execute job payload
+        alt success
+            W->>HIST: write COMPLETED
+            W->>LEASE: release
+            W->>Q: ack
+        else failure (retryable)
+            W->>HIST: write FAILED (attempt N)
+            W->>LEASE: release
+            W-)Q: enqueue retry with backoff
+        else exhausted retries
+            W-X DLQ: route to DLQ + alert
+        end
+    else lease taken
+        LEASE-->>W: already held
+        W->>Q: ack (skip duplicate)
+    end

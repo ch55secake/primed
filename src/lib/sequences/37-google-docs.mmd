@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant CA as ClientA
+    participant CB as ClientB
+    participant SRV as DocActor
+    participant LOG as OpLog
+    participant SNAP as SnapshotStore
+
+    Note over SRV: Single-threaded actor per doc_id
+    CA->>SRV: op{insert 'x' @ pos10, rev=R}
+    Note over SRV: server already at rev R+5
+    SRV->>SRV: OT transform op against missed ops [R+1..R+5]
+    SRV->>SRV: apply transformed op -> rev R+6
+    SRV->>LOG: append (rev R+6, transformed_op)
+    SRV-->>CA: ack{server_rev=R+6}
+    SRV-)CB: remote_op{ops', rev=R+6}
+    CB->>CB: apply remote op locally
+
+    Note over CB: concurrent local edit
+    CB->>SRV: op{delete range, rev=R+6}
+    SRV->>SRV: apply (no transform needed, on tip)
+    SRV->>LOG: append (rev R+7)
+    SRV-->>CB: ack{server_rev=R+7}
+    SRV-)CA: remote_op{rev=R+7}
+
+    Note over SRV,SNAP: every N ops
+    SRV-)SNAP: persist snapshot(doc, rev=R+7)
+    SRV->>LOG: GC ops < snapshot rev

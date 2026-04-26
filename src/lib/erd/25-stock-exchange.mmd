@@ -1,0 +1,74 @@
+erDiagram
+    INSTRUMENT {
+        string symbol PK
+        string name
+        enum asset_class "equity|future|option"
+        string currency
+        float tick_size
+    }
+    CLIENT {
+        bigint client_id PK
+        string firm
+        json risk_limits
+        bool kill_switch
+    }
+    ORDER {
+        bigint order_id PK
+        bigint client_id FK
+        string symbol FK
+        enum side "buy|sell"
+        bigint price
+        bigint qty_total
+        bigint qty_remaining
+        enum tif "day|ioc|fok|gtc"
+        enum status "new|partial|filled|cancelled|rejected"
+        bigint sequence_num
+        timestamp ts
+    }
+    TRADE {
+        bigint trade_id PK
+        string symbol FK
+        bigint buy_order_id FK
+        bigint sell_order_id FK
+        bigint price
+        bigint qty
+        timestamp ts
+        bigint sequence_num
+    }
+    ORDER_BOOK_LEVEL {
+        string symbol PK,FK
+        enum side PK
+        bigint price PK
+        bigint total_qty
+        int order_count
+    }
+    POSITION {
+        bigint client_id PK,FK
+        string symbol PK,FK
+        bigint net_qty
+        bigint avg_price
+        bigint realized_pnl
+    }
+    INPUT_LOG {
+        bigint sequence_num PK
+        string symbol FK
+        enum event_type "new|cancel|replace"
+        bytes payload
+        timestamp ts
+    }
+    MARKET_DATA_TICK {
+        string symbol PK,FK
+        bigint sequence_num PK
+        enum channel "trades|book|stats"
+        json payload
+        timestamp ts
+    }
+
+    INSTRUMENT ||--o{ ORDER : "traded as"
+    CLIENT ||--o{ ORDER : "submits"
+    ORDER ||--o{ TRADE : "matched into"
+    INSTRUMENT ||--o{ ORDER_BOOK_LEVEL : "priced at"
+    CLIENT ||--o{ POSITION : "holds"
+    INSTRUMENT ||--o{ POSITION : "of"
+    INSTRUMENT ||--o{ INPUT_LOG : "sequenced for"
+    INSTRUMENT ||--o{ MARKET_DATA_TICK : "publishes"

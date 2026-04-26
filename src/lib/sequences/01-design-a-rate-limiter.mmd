@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant C as Client
+    participant GW as API Gateway
+    participant MW as Rate Limit<br/>Middleware
+    participant Cfg as Config Service<br/>(rules + pub/sub)
+    participant Store as Counter Store<br/>(sharded, atomic)
+    participant BE as Backend
+
+    C->>GW: request
+    GW->>MW: forward + identity, endpoint
+    MW->>Cfg: lookup rule (local cache)
+    Cfg-->>MW: algo, limit, window
+    MW->>Store: atomic check+incr (Lua)
+    alt within limit
+        Store-->>MW: count, allowed
+        MW->>BE: forward request
+        BE-->>C: 200 OK + X-RateLimit-* headers
+    else over limit
+        Store-->>MW: count, denied
+        MW-->>C: 429 + Retry-After
+    else store unreachable
+        Store--xMW: timeout
+        Note over MW: circuit-break, fail open
+        MW->>BE: forward request
+        BE-->>C: 200 OK
+    end

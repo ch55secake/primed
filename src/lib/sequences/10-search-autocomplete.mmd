@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant C as Client
+    participant CDN as CDN Edge
+    participant API as Suggest API
+    participant Shard as Trie Shard
+    participant Build as Build Pipeline
+    participant Snap as Snapshot Store
+
+    Note over Build,Snap: OFFLINE BUILD (hourly)
+    Build->>Build: aggregate query freqs from logs
+    Build->>Build: build trie bottom-up, cache top-K per node
+    Build->>Snap: write trie snapshot
+    Snap-)Shard: push + atomic swap
+
+    Note over C,Shard: ONLINE SERVE (per keystroke)
+    C->>CDN: GET /suggest?q=goo
+    alt popular prefix cached
+        CDN-->>C: top-K suggestions
+    else miss
+        CDN->>API: forward request
+        API->>API: route by prefix to shard
+        API->>Shard: walk to node "goo"
+        Shard-->>API: cached top-K (no subtree scan)
+        API-->>CDN: top-K + cache
+        CDN-->>C: suggestions
+    end

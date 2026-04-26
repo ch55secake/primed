@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant P as Participant
+    participant Sig as Signaling (WS)
+    participant SFU1 as SFU (local)
+    participant SFU2 as SFU (remote, cascade)
+    participant O as Other Participants
+
+    Note over P,O: Join meeting -> media publish + forward (simulcast)
+    P->>Sig: WS connect + join {meeting_id, jwt}
+    Sig->>Sig: validate JWT, check waiting room
+    Sig-->>P: SFU endpoint + ICE creds + roster
+    P->>SFU1: WebRTC offer (DTLS-SRTP)
+    SFU1-->>P: answer + ICE candidates
+    Note over P,SFU1: UDP media channel established
+    par publish simulcast
+        P-)SFU1: RTP low (180p) + med (480p) + high (720p+) + audio
+    and forward to peers
+        loop for each receiver
+            SFU1-)O: forward stream at appropriate layer
+            Note over SFU1: active speaker -> high; thumbnails -> low
+        end
+    end
+    alt cross-region participant
+        SFU1-)SFU2: cascade forward (SFU-to-SFU)
+        SFU2-)O: forward to remote-region peers
+    end
+    O-)SFU1: TWCC feedback (loss, RTT)
+    SFU1-)P: bandwidth estimate -> sender adjusts bitrate
+    P->>Sig: mute / raise hand (control)
+    Sig-)O: roster update

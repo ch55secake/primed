@@ -1,0 +1,30 @@
+erDiagram
+    TRIE_NODE ||--o{ TRIE_NODE : "child_of"
+    TRIE_NODE ||--o{ TOP_K_ENTRY : "caches"
+    QUERY_LOG ||--o{ QUERY_FREQUENCY : "aggregates_to"
+    QUERY_FREQUENCY ||--o{ TOP_K_ENTRY : "ranks_into"
+
+    TRIE_NODE {
+        string prefix PK
+        string parent_prefix FK
+        string shard_id
+        timestamp built_at
+    }
+    TOP_K_ENTRY {
+        string prefix FK
+        string query
+        float score
+        int rank
+    }
+    QUERY_LOG {
+        bigint log_id PK
+        string query
+        bigint user_id
+        timestamp ts
+    }
+    QUERY_FREQUENCY {
+        string query PK
+        bigint count
+        timestamp window_start
+        timestamp window_end
+    }

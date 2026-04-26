@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant U as User
+    participant TS as Tweet Service
+    participant DB as Tweets Store
+    participant FO as Fan-out Service
+    participant TL as Timeline Cache
+    participant Feed as Timeline Service
+    participant Rank as Ranker
+
+    Note over U,Rank: WRITE PATH (post tweet + hybrid fan-out)
+    U->>TS: POST /tweet
+    TS->>DB: persist tweet (Snowflake id, partition by author)
+    DB-->>TS: tweet_id
+    TS-)FO: enqueue fan-out
+    TS-)Feed: emit to search + trending pipelines
+    TS-->>U: 200 {tweet_id}
+    alt author followers < 10k (push)
+        FO->>FO: load follower list
+        loop each follower (smeared on mass-follow events)
+            FO->>TL: ZADD home_timeline (score=tweet_id, cap 800)
+        end
+    else celebrity (>= 10k followers)
+        Note over FO: skip push, mark celebrity tweet for pull-on-read
+    end
+
+    Note over U,Rank: READ PATH (home timeline merge)
+    U->>Feed: GET /timeline/home?cursor
+    Feed->>TL: read pre-built timeline (push)
+    TL-->>Feed: tweet_ids
+    Feed->>DB: pull recent tweets from followed celebrities
+    DB-->>Feed: celeb tweets
+    Feed->>Rank: ML-rank merged candidates
+    Rank-->>Feed: top ~50
+    Feed->>DB: hydrate tweet bodies + entities
+    DB-->>Feed: enriched tweets
+    Feed-->>U: paginated home timeline

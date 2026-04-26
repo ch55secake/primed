@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant Client as Ad Click Source
+    participant Stream as Event Stream (by ad_id)
+    participant Streamer as Stream Processor
+    participant OLAP as OLAP Store
+    participant Lake as Object Store (raw)
+    participant Batch as Batch Processor
+    participant Billing as Billing System
+
+    Note over Client,Stream: Ingest
+    Client->>Stream: POST /click (ad_id, user, ts, ip)
+    Stream->>Stream: Append to ad_id partition
+
+    Note over Stream,OLAP: Real-time path (5-min freshness)
+    Streamer->>Stream: Read partition (transactional)
+    Streamer->>Streamer: keyBy(ad_id), tumbling 1-min window
+    alt Late event within allowed lateness
+        Streamer->>Streamer: Update past bucket
+    else Outside lateness
+        Streamer->>Streamer: Side output (drop from main agg)
+    end
+    Streamer->>Streamer: Checkpoint state + offsets atomically
+    Streamer->>OLAP: Write (ad_id, ts_minute, count) idempotent
+
+    Note over Stream,Lake: Batch path (authoritative)
+    Stream-)Lake: Tee raw events to Parquet
+    loop Nightly
+        Batch->>Lake: Read full day raw events
+        Batch->>Batch: Recompute aggregates
+        Batch->>OLAP: Reconcile vs streaming output
+        Batch->>Billing: Authoritative daily totals
+    end

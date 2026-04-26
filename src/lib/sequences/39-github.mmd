@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant DEV as DevClient
+    participant PROXY as GitProxy
+    participant AUTH as AuthService
+    participant META as MetadataStore
+    participant SHARD as PrimaryShard
+    participant REPL as ReplicaShard
+    participant HOOK as WebhookQueue
+
+    DEV->>PROXY: git push (HTTPS/SSH)
+    PROXY->>AUTH: validate token / SSH key + ACL
+    AUTH-->>PROXY: ok (user, perms)
+    PROXY->>META: lookup repo_id -> primary_shard
+    META-->>PROXY: shard_id
+    PROXY->>SHARD: forward git-receive-pack stream
+    SHARD->>SHARD: validate refs, write packfile, update refs
+    SHARD-)REPL: replicate (log shipping)
+    SHARD-->>PROXY: push ok
+    PROXY-->>DEV: refs updated
+
+    SHARD-)HOOK: enqueue push event {repo, refs, sha}
+    HOOK-)HOOK: deliver to subscribers (CI, integrations)
+    Note over HOOK: triggers Actions runner pool job

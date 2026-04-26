@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant A as Sender (WS)
+    participant MS1 as MS Server A
+    participant Bus as Pub/Sub (workspace)
+    participant Per as Persist Svc
+    participant MS2 as MS Server B
+    participant B as Recipient (WS)
+
+    Note over A,B: Send message in channel -> fan-out to subscribers
+    A->>MS1: WS send {channel_id, text}
+    MS1->>MS1: auth + rate limit
+    MS1-)Per: persist to wide-column (channel partition)
+    MS1-)Bus: publish to channel topic
+    Per->>Per: write messages table
+    Per-)Per: index in ES (async)
+    Bus-)MS1: deliver to local subscribers
+    Bus-)MS2: deliver to remote MS server
+    MS2-)B: WS push message
+    MS1-->>A: ack {message_ts}
+    alt recipient offline OR mention
+        Per-)Per: Notif Svc consumes stream
+        Note over Per: APNs/FCM push (deduped by user_id, message_ts)
+    end

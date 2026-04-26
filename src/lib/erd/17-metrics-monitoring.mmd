@@ -1,0 +1,51 @@
+erDiagram
+    METRIC {
+        string metric_name PK
+        enum kind "counter|gauge|histogram"
+        string unit
+        string owner_team
+    }
+    SERIES {
+        bigint series_id PK
+        string metric_name FK
+        string label_hash
+        timestamp first_seen
+    }
+    LABEL {
+        bigint series_id PK,FK
+        string key PK
+        string value PK
+    }
+    SAMPLE_BLOCK {
+        bigint series_id PK,FK
+        timestamp block_start PK
+        enum tier "hot|warm|cold"
+        bytes compressed_samples
+        int sample_count
+    }
+    LABEL_INDEX {
+        string key PK
+        string value PK
+        bigint series_id PK,FK
+    }
+    ALERT_RULE {
+        string rule_id PK
+        string expr
+        float threshold
+        int duration_s
+        enum severity
+    }
+    ALERT_INSTANCE {
+        string alert_id PK
+        string rule_id FK
+        bigint series_id FK
+        enum state "firing|resolved|silenced"
+        timestamp started_at
+    }
+
+    METRIC ||--o{ SERIES : "instantiates"
+    SERIES ||--o{ LABEL : "tagged with"
+    SERIES ||--o{ SAMPLE_BLOCK : "stores"
+    LABEL }o--o{ LABEL_INDEX : "indexed by"
+    ALERT_RULE ||--o{ ALERT_INSTANCE : "evaluates to"
+    SERIES ||--o{ ALERT_INSTANCE : "fires"

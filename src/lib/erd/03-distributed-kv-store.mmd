@@ -1,0 +1,47 @@
+erDiagram
+    PARTITION ||--o{ KEY_VALUE : "owns"
+    PARTITION ||--o{ SSTABLE : "persists_to"
+    PARTITION ||--|| MEMTABLE : "buffers_in"
+    PARTITION ||--o{ WAL_ENTRY : "logs_to"
+    REPLICA }o--o{ PARTITION : "stores"
+
+    PARTITION {
+        int partition_id PK
+        uint32 ring_position
+        string primary_node
+        int replication_factor
+    }
+    KEY_VALUE {
+        string key PK
+        int partition_id FK
+        bytes value
+        json vector_clock
+        int ttl_sec
+        timestamp updated_at
+    }
+    MEMTABLE {
+        int partition_id PK
+        int size_bytes
+        timestamp flushed_at
+    }
+    SSTABLE {
+        string sstable_id PK
+        int partition_id FK
+        int level
+        bigint min_key
+        bigint max_key
+        timestamp created_at
+    }
+    WAL_ENTRY {
+        bigint lsn PK
+        int partition_id FK
+        string key
+        bytes value
+        timestamp ts
+    }
+    REPLICA {
+        string node_id PK
+        string rack
+        string az
+        enum state
+    }

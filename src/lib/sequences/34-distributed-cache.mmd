@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant App as App / Cache Client
+    participant Ring as Consistent Hash Ring
+    participant N as Cache Node (shard)
+    participant DB as Database
+
+    Note over App,DB: Read-through with miss + write-through update
+    App->>Ring: hash(key) -> shard
+    Ring-->>App: node = N
+    App->>N: GET key
+    alt cache hit
+        N-->>App: value
+    else cache miss
+        N-->>App: nil
+        App->>App: acquire single-flight lock (per key)
+        App->>DB: SELECT value WHERE key=...
+        DB-->>App: value
+        App->>N: SET key value EX ttl_jittered
+        N-->>App: OK
+        App->>App: release single-flight lock
+        Note over App: concurrent waiters read freshly-set key
+    end
+
+    Note over App,DB: Write-through update path
+    App->>DB: UPDATE record (source of truth)
+    DB-->>App: OK
+    App->>N: DEL key (invalidate, do not SET)
+    N-->>App: OK
+    Note over N: next reader misses -> reloads fresh value

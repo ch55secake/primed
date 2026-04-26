@@ -1,0 +1,41 @@
+erDiagram
+    RULE ||--o{ COUNTER_WINDOW : "scopes"
+    RULE ||--o{ TOKEN_BUCKET : "scopes"
+    IDENTITY ||--o{ COUNTER_WINDOW : "tracked_by"
+    IDENTITY ||--o{ TOKEN_BUCKET : "tracked_by"
+    ENDPOINT ||--o{ RULE : "governed_by"
+
+    RULE {
+        bigint rule_id PK
+        string scope
+        string identifier_pattern
+        string endpoint_pattern
+        enum algorithm
+        int limit
+        int window_sec
+        int priority
+    }
+    IDENTITY {
+        string identifier PK
+        enum scope
+        timestamp first_seen_at
+    }
+    ENDPOINT {
+        string endpoint PK
+        string method
+    }
+    COUNTER_WINDOW {
+        string key PK
+        string identifier FK
+        string endpoint FK
+        bigint window_start
+        int count
+        int ttl_sec
+    }
+    TOKEN_BUCKET {
+        string key PK
+        string identifier FK
+        string endpoint FK
+        float tokens
+        timestamp last_refill_ts
+    }

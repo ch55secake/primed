@@ -1,0 +1,44 @@
+erDiagram
+    USER ||--o{ CHAT_MEMBER : "joins"
+    CHAT ||--o{ CHAT_MEMBER : "has"
+    CHAT ||--o{ MESSAGE : "contains"
+    USER ||--o{ MESSAGE : "sends"
+    USER ||--|| USER_SESSION : "connects_via"
+    USER ||--|| PRESENCE : "has"
+
+    USER {
+        bigint user_id PK
+        string username
+        timestamp created_at
+    }
+    CHAT {
+        bigint chat_id PK
+        enum type
+        timestamp created_at
+    }
+    CHAT_MEMBER {
+        bigint chat_id FK
+        bigint user_id FK
+        timestamp joined_at
+        bigint last_read_msg_id
+    }
+    MESSAGE {
+        bigint msg_id PK
+        bigint chat_id FK
+        bigint sender_id FK
+        bytes body
+        enum state
+        timestamp ts
+    }
+    USER_SESSION {
+        bigint user_id PK
+        string chat_server_id
+        timestamp last_heartbeat
+        int ttl_sec
+    }
+    PRESENCE {
+        bigint user_id PK
+        enum status
+        timestamp updated_at
+        int ttl_sec
+    }

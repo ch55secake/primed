@@ -1,0 +1,47 @@
+erDiagram
+    DOCUMENT ||--o{ OP_LOG_ENTRY : appends
+    DOCUMENT ||--o{ SNAPSHOT : checkpoints
+    DOCUMENT ||--o{ PRESENCE : tracks
+    DOCUMENT ||--o{ COMMENT : annotated_by
+    USER ||--o{ OP_LOG_ENTRY : authors
+    USER ||--o{ PRESENCE : present_as
+
+    DOCUMENT {
+        bigint doc_id PK
+        bytes snapshot_blob
+        bigint current_rev
+        timestamp last_modified
+    }
+    OP_LOG_ENTRY {
+        bigint doc_id FK
+        bigint rev PK
+        bigint client_id FK
+        json ops_json
+        timestamp ts
+    }
+    SNAPSHOT {
+        bigint doc_id FK
+        bigint rev PK
+        string blob_url
+        timestamp created_at
+    }
+    PRESENCE {
+        bigint doc_id FK
+        bigint user_id FK
+        json cursor
+        json selection
+        timestamp updated_at
+    }
+    COMMENT {
+        bigint comment_id PK
+        bigint doc_id FK
+        bigint author_id FK
+        string anchor
+        string text
+        timestamp created_at
+    }
+    USER {
+        bigint user_id PK
+        string name
+        string color
+    }

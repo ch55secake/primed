@@ -1,0 +1,49 @@
+sequenceDiagram
+    participant P as Player
+    participant Game as Game Server
+    participant LB as Leaderboard Service
+    participant ZSET as Sorted Set Shard
+    participant Log as Append-only Log
+    participant Cache as Friends Cache
+
+    Note over P,Cache: WRITE PATH (score event)
+    P->>Game: report event (kills, lap time)
+    Game->>Game: compute + sign score
+    Game->>LB: POST /score {user, score, lb_id}
+    LB->>Log: append write event
+    Log-->>LB: ack durable
+    LB->>ZSET: ZADD lb:daily:{date} score user
+    ZSET-->>LB: ok
+    LB-->>Game: 200
+
+    Note over P,Cache: READ PATH (top-N)
+    P->>LB: GET /top/{lb_id}?n=100
+    LB->>ZSET: ZREVRANGE 0 99 WITHSCORES
+    ZSET-->>LB: top 100 entries
+    LB-->>P: ranked list
+
+    Note over P,Cache: READ PATH (my rank + neighbors)
+    P->>LB: GET /rank/{lb_id}/{user_id}
+    alt single shard
+        LB->>ZSET: ZREVRANK user
+        ZSET-->>LB: rank, score
+        LB->>ZSET: ZRANGEBYSCORE neighbors
+        ZSET-->>LB: neighbor entries
+    else score-range sharded (>10M users)
+        LB->>ZSET: count higher shards + local rank
+        ZSET-->>LB: aggregated rank
+    end
+    LB-->>P: {rank, score, neighbors}
+
+    Note over P,Cache: FRIENDS LEADERBOARD (cached)
+    P->>LB: GET /friends/{user_id}
+    LB->>Cache: lookup cached ranking
+    alt cache hit
+        Cache-->>LB: sorted friends
+    else cache miss
+        LB->>ZSET: ZSCORE per friend (~200)
+        ZSET-->>LB: scores
+        LB->>LB: sort in memory
+        LB->>Cache: store (TTL 5min)
+    end
+    LB-->>P: friends ranked

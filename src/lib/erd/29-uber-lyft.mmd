@@ -1,0 +1,45 @@
+erDiagram
+    RIDER ||--o{ TRIP : requests
+    DRIVER ||--o{ TRIP : fulfils
+    DRIVER ||--o{ LOCATION_PING : emits
+    TRIP ||--o{ LOCATION_PING : tracks
+    SURGE_ZONE ||--o{ TRIP : prices
+
+    RIDER {
+        bigint rider_id PK
+        string name
+        float rating
+        timestamp created_at
+    }
+    DRIVER {
+        bigint driver_id PK
+        string vehicle_type
+        enum status
+        float rating
+        float completion_rate
+    }
+    TRIP {
+        bigint trip_id PK
+        bigint rider_id FK
+        bigint driver_id FK
+        string surge_zone_id FK
+        enum state
+        json pickup
+        json dropoff
+        float fare
+        timestamp requested_at
+        timestamp completed_at
+    }
+    LOCATION_PING {
+        bigint driver_id FK
+        bigint trip_id FK
+        float lat
+        float lng
+        timestamp ts
+    }
+    SURGE_ZONE {
+        string surge_zone_id PK
+        string h3_cell
+        float multiplier
+        timestamp updated_at
+    }

@@ -1,0 +1,66 @@
+erDiagram
+    USER {
+        bigint user_id PK
+        string email
+        enum status
+    }
+    ACCOUNT {
+        bigint user_id PK,FK
+        string currency PK
+        bigint balance
+        bigint reserved
+        bigint version
+        timestamp updated_at
+    }
+    LEDGER_ENTRY {
+        bigint entry_id PK
+        bigint user_id FK
+        string currency
+        timestamp ts
+        bigint amount
+        enum type "debit|credit|reserve|release"
+        string reference
+        bigint balance_after
+    }
+    TRANSFER {
+        string transfer_id PK
+        bigint from_user FK
+        bigint to_user FK
+        bigint amount
+        string currency
+        enum status "pending|reserved|confirmed|cancelled"
+        string idempotency_key
+        timestamp created_at
+    }
+    RESERVATION {
+        string reservation_id PK
+        string transfer_id FK
+        bigint user_id FK
+        bigint amount
+        enum side "debit|credit"
+        timestamp expires_at
+        enum state "try|confirm|cancel"
+    }
+    FX_QUOTE {
+        string quote_id PK
+        string from_currency
+        string to_currency
+        float rate
+        timestamp expires_at
+    }
+    KAFKA_EVENT {
+        bigint offset PK
+        string topic PK
+        string transfer_id FK
+        json payload
+        timestamp ts
+    }
+
+    USER ||--o{ ACCOUNT : "holds"
+    ACCOUNT ||--o{ LEDGER_ENTRY : "appended to"
+    USER ||--o{ TRANSFER : "sends"
+    USER ||--o{ TRANSFER : "receives"
+    TRANSFER ||--o{ RESERVATION : "creates"
+    TRANSFER ||--o{ LEDGER_ENTRY : "produces"
+    TRANSFER ||--o| FX_QUOTE : "priced by"
+    TRANSFER ||--o{ KAFKA_EVENT : "emits"

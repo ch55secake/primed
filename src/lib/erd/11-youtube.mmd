@@ -1,0 +1,48 @@
+erDiagram
+    USER ||--o{ VIDEO : "uploads"
+    VIDEO ||--o{ VIDEO_VARIANT : "encoded_as"
+    VIDEO ||--|| RAW_BLOB : "stored_as"
+    VIDEO_VARIANT ||--o{ ENCODED_SEGMENT : "split_into"
+    VIDEO ||--o{ SEARCH_INDEX_ENTRY : "indexed_in"
+
+    USER {
+        bigint user_id PK
+        string channel_name
+        timestamp created_at
+    }
+    VIDEO {
+        bigint video_id PK
+        bigint owner_id FK
+        string title
+        string description
+        int duration_sec
+        enum status
+        timestamp created_at
+    }
+    VIDEO_VARIANT {
+        bigint variant_id PK
+        bigint video_id FK
+        string resolution
+        string codec
+        string manifest_url
+        bigint byte_size
+    }
+    RAW_BLOB {
+        bigint video_id PK
+        string blob_key
+        bigint size_bytes
+        string checksum
+    }
+    ENCODED_SEGMENT {
+        string segment_id PK
+        bigint variant_id FK
+        int seq_no
+        string blob_key
+        int duration_ms
+    }
+    SEARCH_INDEX_ENTRY {
+        bigint video_id FK
+        string field
+        string content
+        json tags
+    }

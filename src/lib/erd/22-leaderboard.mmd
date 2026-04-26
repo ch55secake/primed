@@ -1,0 +1,55 @@
+erDiagram
+    LEADERBOARD {
+        string leaderboard_key PK
+        enum kind "daily|weekly|alltime|regional|friends"
+        string scope
+        timestamp created_at
+        timestamp expires_at
+    }
+    LEADERBOARD_ENTRY {
+        string leaderboard_key PK,FK
+        bigint user_id PK
+        bigint score
+        bigint tiebreaker_ts
+        timestamp updated_at
+    }
+    USER {
+        bigint user_id PK
+        string username
+        string region
+        int skill_bracket
+    }
+    FRIEND_EDGE {
+        bigint user_id PK,FK
+        bigint friend_id PK,FK
+        timestamp friended_at
+    }
+    SCORE_EVENT {
+        bigint event_id PK
+        bigint user_id FK
+        string leaderboard_key FK
+        bigint delta
+        timestamp ts
+        string source
+    }
+    SHARD {
+        string leaderboard_key PK,FK
+        int shard_id PK
+        bigint score_min
+        bigint score_max
+        int member_count
+    }
+    SNAPSHOT {
+        string leaderboard_key PK,FK
+        timestamp snapshot_at PK
+        string blob_url
+        int member_count
+    }
+
+    LEADERBOARD ||--o{ LEADERBOARD_ENTRY : "ranks"
+    USER ||--o{ LEADERBOARD_ENTRY : "appears in"
+    USER ||--o{ FRIEND_EDGE : "follows"
+    USER ||--o{ SCORE_EVENT : "earns"
+    LEADERBOARD ||--o{ SCORE_EVENT : "fed by"
+    LEADERBOARD ||--o{ SHARD : "split into"
+    LEADERBOARD ||--o{ SNAPSHOT : "archived as"

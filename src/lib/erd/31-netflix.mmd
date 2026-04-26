@@ -1,0 +1,44 @@
+erDiagram
+    TITLE ||--o{ ENCODING_VARIANT : has
+    PROFILE ||--o{ VIEWING_SESSION : watches
+    TITLE ||--o{ VIEWING_SESSION : streamed_in
+    PROFILE ||--o{ RECOMMENDATION : receives
+    TITLE ||--o{ RECOMMENDATION : suggests
+
+    TITLE {
+        bigint title_id PK
+        string title
+        int year
+        json genres
+        json cast
+        float rating
+    }
+    ENCODING_VARIANT {
+        bigint variant_id PK
+        bigint title_id FK
+        string resolution
+        string codec
+        int bitrate
+        string lang
+        string drm_key
+        string manifest_url
+    }
+    PROFILE {
+        bigint profile_id PK
+        bigint account_id
+        string name
+        string country
+    }
+    VIEWING_SESSION {
+        bigint profile_id FK
+        bigint title_id FK
+        int position_sec
+        bool completed
+        timestamp ts
+    }
+    RECOMMENDATION {
+        bigint profile_id FK
+        bigint title_id FK
+        float score
+        int rank
+    }

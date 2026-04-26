@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant Dev as Mobile Device (User A)
+    participant Loc as Location Service
+    participant Cache as Latest-Loc Cache
+    participant Hist as History Store
+    participant ACL as Privacy / ACL
+    participant Bus as Pub-Sub Bus
+    participant Sub as Subscription Service
+    participant F as Friend Device (User B)
+
+    Note over Dev,F: LOCATION UPDATE + FAN-OUT
+    Dev->>Dev: adaptive sample (10s driving / 30s walking / 5min still)
+    Dev->>Loc: POST /location {lat, lng, ts}
+    Loc->>Cache: SET loc:A (TTL 5min)
+    opt history opt-in
+        Loc-)Hist: append (user_id, ts, lat, lng)
+    end
+    Loc->>Bus: publish to topic user.location.A
+
+    Bus-)Sub: deliver to subscribers of A
+    loop each subscriber
+        Sub->>ACL: check share permission (A -> subscriber)
+        alt permitted AND within radius
+            Sub->>Cache: get subscriber's loc
+            Cache-->>Sub: subscriber loc
+            Sub->>Sub: radius filter (haversine)
+            Sub-)F: WS push location_update {A, lat, lng, ts}
+        else denied or out of radius
+            Note over Sub: drop publish for this pair
+        end
+    end
+
+    Note over ACL,Sub: REVOCATION (immediate)
+    ACL-)Sub: invalidation event (A revokes B)
+    Sub->>Sub: drop (A,B) from in-memory routing table

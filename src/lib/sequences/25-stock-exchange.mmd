@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant Firm as Member Firm
+    participant GW as Order Gateway
+    participant Seq as Sequencer
+    participant Log as Input Log
+    participant ME as Matching Engine (per symbol)
+    participant MD as Market Data Publisher
+
+    Note over Firm,MD: ORDER ENTRY — pre-trade risk + sequence + match
+    Firm->>GW: NewOrder (binary protocol)
+    GW->>GW: auth + validate
+    GW->>GW: pre-trade risk (limits, max size, kill switch)
+    alt risk reject (fat finger / over limit)
+        GW-XFirm: reject (does not enter log)
+    else risk pass
+        GW->>Seq: forward order
+        Seq->>Seq: assign global sequence number
+        Seq->>Log: persist before processing (durability)
+        Log-->>Seq: durable
+        Seq->>ME: dispatch to per-symbol engine
+
+        Note over ME: single-threaded match loop (price-time priority)
+        loop while qty>0 and best opposite price crosses
+            ME->>ME: fill = min(qty, resting.qty)
+            ME->>ME: create trade; decrement resting
+            ME->>ME: pop resting if exhausted
+        end
+        alt residual remains
+            ME->>ME: insert into book at price level
+        end
+
+        ME-)MD: ExecutionReport(s) + TradeReport(s)
+        ME-)Firm: ack via gateway path
+        MD-)Firm: multicast trade + book updates
+    end
+
+    Note over Log,ME: HOT STANDBY replays same log in lockstep — promotes on primary failure

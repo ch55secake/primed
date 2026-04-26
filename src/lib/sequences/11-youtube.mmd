@@ -1,0 +1,51 @@
+sequenceDiagram
+    participant C as Client
+    participant Edge as Edge Origin
+    participant Raw as Raw Object Store
+    participant Q as Job Queue
+    participant GPU as GPU Worker
+    participant Enc as Encoded Store
+    participant CDN as CDN
+    participant Meta as Video Metadata
+
+    Note over C,Meta: UPLOAD + TRANSCODE
+    C->>Edge: POST /upload/init
+    Edge-->>C: upload_id, chunked_url
+    loop chunked upload
+        C->>Edge: PUT /upload/{id}/chunk
+        Edge->>Raw: append bytes
+        Edge-->>C: offset_acked
+    end
+    C->>Edge: POST /upload/{id}/finish
+    Edge->>Meta: create video {status: PROCESSING}
+    Edge-)Q: enqueue transcode job
+    Edge-->>C: video_id
+
+    Note over Q,Enc: TRANSCODING DAG
+    Q-)GPU: split into 6s segments
+    par parallel encode
+        GPU->>GPU: encode 240p
+    and
+        GPU->>GPU: encode 720p
+    and
+        GPU->>GPU: encode 1080p/4K
+    end
+    GPU->>Enc: write HLS chunks + manifest
+    GPU->>Meta: status = READY
+
+    Note over C,CDN: PLAYBACK
+    C->>Meta: GET /video/{id}
+    Meta-->>C: manifest URL
+    C->>CDN: GET manifest.m3u8
+    CDN-->>C: variant list
+    loop ABR per chunk
+        C->>C: measure bandwidth
+        C->>CDN: GET chunk @ chosen bitrate
+        alt CDN hit
+            CDN-->>C: chunk bytes
+        else miss
+            CDN->>Enc: fetch chunk
+            Enc-->>CDN: bytes
+            CDN-->>C: chunk bytes
+        end
+    end

@@ -1,0 +1,72 @@
+erDiagram
+    CHARGE {
+        string charge_id PK
+        bigint customer_id FK
+        bigint amount
+        string currency
+        enum status "pending|authorized|captured|failed|refunded"
+        string psp_charge_id
+        string idempotency_key FK
+        timestamp created_at
+    }
+    IDEMPOTENCY_KEY {
+        string idempotency_key PK
+        string request_hash
+        json cached_response
+        enum status "in_progress|completed"
+        timestamp expires_at
+    }
+    CUSTOMER {
+        bigint customer_id PK
+        string email
+        json psp_token_refs
+    }
+    LEDGER_ENTRY {
+        bigint event_id PK
+        timestamp ts
+        string account_id FK
+        enum entry_type "debit|credit"
+        bigint amount
+        string currency
+        string reference
+    }
+    ACCOUNT {
+        string account_id PK
+        enum kind "card|merchant_payable|merchant_balance|fees|treasury"
+        bigint owner_id
+        string currency
+    }
+    REFUND {
+        string refund_id PK
+        string charge_id FK
+        bigint amount
+        enum status
+        string reason
+        timestamp created_at
+    }
+    SETTLEMENT {
+        string settlement_id PK
+        date settlement_date
+        string psp_provider
+        bigint gross_amount
+        bigint fees
+        bigint net_amount
+        enum reconciliation_status
+    }
+    WEBHOOK_EVENT {
+        string event_id PK
+        string charge_id FK
+        string event_type
+        json payload
+        timestamp received_at
+        bool processed
+    }
+
+    CUSTOMER ||--o{ CHARGE : "initiates"
+    CHARGE ||--|| IDEMPOTENCY_KEY : "deduped by"
+    CHARGE ||--o{ LEDGER_ENTRY : "records"
+    ACCOUNT ||--o{ LEDGER_ENTRY : "balances"
+    CHARGE ||--o{ REFUND : "may have"
+    REFUND ||--o{ LEDGER_ENTRY : "reverses via"
+    CHARGE }o--|| SETTLEMENT : "batched into"
+    CHARGE ||--o{ WEBHOOK_EVENT : "notified by"

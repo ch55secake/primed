@@ -1,0 +1,62 @@
+erDiagram
+    BUCKET {
+        string bucket_id PK
+        bigint owner_id
+        string region
+        json policies
+        timestamp created_at
+    }
+    OBJECT {
+        string bucket_id PK,FK
+        string key PK
+        string version_id PK
+        bigint size
+        string content_type
+        string etag
+        string encryption_key_id
+        json custom_metadata
+        enum storage_class
+        bool is_delete_marker
+    }
+    OBJECT_PIECE {
+        string bucket_id PK,FK
+        string key PK,FK
+        string version_id PK,FK
+        int piece_idx PK
+        string node_id FK
+        string piece_id
+        bytes checksum
+    }
+    STORAGE_NODE {
+        string node_id PK
+        string rack
+        string az
+        bigint capacity_bytes
+        bigint used_bytes
+    }
+    PIECE_BLOB {
+        string piece_id PK
+        string node_id PK,FK
+        bytes data
+        timestamp last_scrubbed
+    }
+    MULTIPART_UPLOAD {
+        string upload_id PK
+        string bucket_id FK
+        string key
+        timestamp initiated_at
+        enum status
+    }
+    UPLOAD_PART {
+        string upload_id PK,FK
+        int part_num PK
+        string etag
+        bigint size
+    }
+
+    BUCKET ||--o{ OBJECT : "contains"
+    OBJECT ||--o{ OBJECT_PIECE : "split into"
+    STORAGE_NODE ||--o{ OBJECT_PIECE : "hosts"
+    STORAGE_NODE ||--o{ PIECE_BLOB : "stores"
+    BUCKET ||--o{ MULTIPART_UPLOAD : "in progress on"
+    MULTIPART_UPLOAD ||--o{ UPLOAD_PART : "composed of"

@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant Client as Client
+    participant Routing as Routing Service
+    participant Graph as Road Network Graph
+    participant Traffic as Traffic Aggregator
+    participant Phones as GPS Pings
+
+    Note over Phones,Traffic: Continuous traffic ingest
+    Phones-)Traffic: Anonymized GPS ping (every 30s)
+    Traffic-)Traffic: Map-match to segment, 5-min window avg
+    Traffic-)Graph: Update edge weights (smoothed speeds)
+
+    Note over Client,Routing: Route request
+    Client->>Routing: POST /route (origin, dest, mode)
+    Routing->>Graph: Load CH-augmented region (in-memory)
+    Routing->>Routing: Bidirectional Dijkstra on upward edges
+    Routing-->>Client: { polyline, steps, ETA }
+
+    Note over Client,Routing: Mid-trip re-route
+    loop While navigating
+        Client->>Client: Compare position to polyline
+        alt Big deviation detected
+            Client->>Routing: Request re-route
+            Routing-->>Client: New polyline + ETA
+        else On-route
+            Client->>Client: Continue from cached polyline
+        end
+    end

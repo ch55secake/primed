@@ -1,0 +1,35 @@
+erDiagram
+    %% Cache is in-memory KV; logical structure shown as entities for clarity
+    SHARD ||--o{ CACHE_ENTRY : stores
+    SHARD ||--o{ REPLICA : has
+    CACHE_ENTRY ||--o| TTL_RECORD : expires_with
+    CACHE_ENTRY ||--o| LRU_NODE : tracked_by
+
+    SHARD {
+        string shard_id PK
+        string ring_position
+        string master_node
+        int virtual_nodes
+    }
+    REPLICA {
+        string replica_id PK
+        string shard_id FK
+        enum role
+        timestamp last_sync
+    }
+    CACHE_ENTRY {
+        string key PK
+        string shard_id FK
+        bytes value
+        int version
+        timestamp written_at
+    }
+    TTL_RECORD {
+        string key FK
+        timestamp expires_at
+    }
+    LRU_NODE {
+        string key FK
+        bigint last_access_ts
+        int access_count
+    }

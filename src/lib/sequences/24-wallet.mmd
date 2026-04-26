@@ -1,0 +1,60 @@
+sequenceDiagram
+    participant C as Client
+    participant W as Wallet Service
+    participant Orch as Transfer Orchestrator
+    participant SA as Shard A (User A)
+    participant SB as Shard B (User B)
+    participant Ev as Event Stream
+
+    Note over C,Ev: TRANSFER (cross-shard TCC)
+    C->>W: POST /transfer (idempotency-key, A, B, amount)
+    W->>W: validate + idempotency check
+    W->>Orch: start transfer (transfer_id)
+
+    alt same shard (fast path)
+        Orch->>SA: BEGIN; debit A; credit B; ledger entries; COMMIT
+        SA-->>Orch: ok
+        Orch-)Ev: emit transfer event
+        Orch-->>W: succeeded
+        W-->>C: 200 {transfer_id, completed}
+    else cross-shard (TCC)
+        Note over Orch,SB: TRY phase — reserve on both shards
+        Orch->>SA: reserve (A.reserved += amount, version check)
+        alt A reserve fails (insufficient / conflict)
+            SA--xOrch: failed
+            Orch-->>W: failed
+            W-->>C: 402 insufficient funds
+        else A reserved
+            SA-->>Orch: ok
+            Orch->>SB: reserve (B.pending += amount)
+            alt B reserve fails
+                SB--xOrch: failed
+                Note over Orch,SA: CANCEL — release A reservation
+                Orch->>SA: release A.reserved
+                SA-->>Orch: released
+                Orch-->>W: failed
+                W-->>C: 500 retryable
+            else B reserved
+                SB-->>Orch: ok
+
+                Note over Orch,SB: CONFIRM — commit both shards
+                Orch->>SA: confirm (reserved -> debit, append ledger)
+                SA-->>Orch: committed
+                Orch->>SB: confirm (pending -> credit, append ledger)
+                alt B confirm fails
+                    SB--xOrch: error
+                    Note over Orch,SB: durable orchestrator retries (idempotent by transfer_id)
+                    Orch->>SB: retry confirm
+                    SB-->>Orch: committed
+                else B confirm ok
+                    SB-->>Orch: committed
+                end
+
+                Orch-)Ev: emit transfer events (audit, fraud, analytics)
+                Orch-->>W: succeeded
+                W-->>C: 200 {transfer_id, completed}
+            end
+        end
+    end
+
+    Note over SA,Ev: TTL backstop auto-cancels stuck reservations beyond lease

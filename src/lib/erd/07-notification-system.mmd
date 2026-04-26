@@ -1,0 +1,48 @@
+erDiagram
+    USER ||--o{ NOTIFICATION : "receives"
+    USER ||--o{ PREFERENCE : "configures"
+    TEMPLATE ||--o{ NOTIFICATION : "renders"
+    NOTIFICATION ||--o{ DELIVERY_ATTEMPT : "logs"
+    NOTIFICATION ||--|| DEDUPE_KEY : "dedupes_by"
+
+    USER {
+        bigint user_id PK
+        string email
+        string phone
+        json device_tokens
+    }
+    NOTIFICATION {
+        uuid notif_id PK
+        bigint user_id FK
+        string template_id FK
+        json channels
+        enum state
+        int attempts
+        timestamp created_at
+    }
+    PREFERENCE {
+        bigint user_id FK
+        enum channel
+        bool enabled
+        json quiet_hours
+    }
+    TEMPLATE {
+        string template_id PK
+        string locale
+        string body
+        timestamp updated_at
+    }
+    DELIVERY_ATTEMPT {
+        bigint attempt_id PK
+        uuid notif_id FK
+        enum channel
+        enum status
+        string provider_id
+        timestamp attempted_at
+    }
+    DEDUPE_KEY {
+        string idempotency_key PK
+        bigint user_id FK
+        uuid notif_id FK
+        int ttl_sec
+    }

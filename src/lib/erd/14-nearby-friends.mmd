@@ -1,0 +1,37 @@
+erDiagram
+    USER ||--|| LOCATION_LATEST : "current_location"
+    USER ||--o{ LOCATION_HISTORY : "trail_of"
+    USER ||--o{ FRIENDSHIP : "user_a"
+    USER ||--o{ FRIENDSHIP : "user_b"
+    FRIENDSHIP ||--|| PRIVACY_SHARE : "controlled_by"
+
+    USER {
+        bigint user_id PK
+        string username
+        timestamp created_at
+    }
+    LOCATION_LATEST {
+        bigint user_id PK
+        float lat
+        float lng
+        timestamp ts
+        int ttl_sec
+    }
+    LOCATION_HISTORY {
+        bigint user_id FK
+        timestamp ts
+        float lat
+        float lng
+        int day_bucket
+    }
+    FRIENDSHIP {
+        bigint user_id FK
+        bigint friend_id FK
+        timestamp ts_added
+    }
+    PRIVACY_SHARE {
+        bigint user_id FK
+        bigint friend_id FK
+        bool enabled
+        timestamp expires_at
+    }

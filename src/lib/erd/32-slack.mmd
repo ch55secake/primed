@@ -1,0 +1,41 @@
+erDiagram
+    WORKSPACE ||--o{ CHANNEL : contains
+    WORKSPACE ||--o{ USER : has
+    CHANNEL ||--o{ MESSAGE : holds
+    USER ||--o{ MESSAGE : authors
+    MESSAGE ||--o{ THREAD_REPLY : spawns
+
+    WORKSPACE {
+        bigint ws_id PK
+        string name
+        enum plan
+        string primary_shard
+    }
+    USER {
+        bigint user_id PK
+        bigint ws_id FK
+        string display_name
+        string email
+    }
+    CHANNEL {
+        bigint channel_id PK
+        bigint ws_id FK
+        enum type
+        json members
+        timestamp created_at
+    }
+    MESSAGE {
+        bigint channel_id FK
+        string message_ts PK
+        bigint user_id FK
+        string text
+        json reactions
+        json edits
+    }
+    THREAD_REPLY {
+        bigint channel_id FK
+        string thread_parent_ts FK
+        string message_ts PK
+        bigint user_id FK
+        string text
+    }

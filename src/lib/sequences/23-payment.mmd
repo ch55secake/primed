@@ -1,0 +1,77 @@
+sequenceDiagram
+    participant C as Client
+    participant API as Payment API
+    participant Idem as Idempotency Cache
+    participant Orch as Saga Orchestrator
+    participant PSP as External PSP
+    participant Ledger as Ledger (event-sourced)
+
+    Note over C,Ledger: CHARGE FLOW (Saga with idempotency)
+    C->>API: POST /charge (idempotency-key, body)
+    API->>Idem: lookup key
+    alt key exists, same body
+        Idem-->>API: cached response
+        API-->>C: 200 prior result
+    else key exists, different body
+        Idem-->>API: conflict
+        API-->>C: 422 programming error
+    else new key
+        API->>Idem: write key=in_progress
+        Idem-->>API: ok
+        API->>Orch: start Saga (charge_id)
+
+        Note over Orch,Ledger: STEP 1 — Risk check
+        Orch->>Orch: reserve risk score
+        alt risk fails
+            Orch-X API: blocked
+            API->>Idem: store fail response
+            API-->>C: 402 declined
+        end
+
+        Note over Orch,Ledger: STEP 2 — Authorize via PSP
+        Orch->>PSP: authorize (idempotency-key)
+        alt PSP timeout / unknown
+            PSP--xOrch: timeout
+            Orch->>Orch: mark requires_verification
+            Note over Orch,PSP: reconcile via PSP GET-by-key
+        else PSP declines
+            PSP-->>Orch: declined
+            Orch->>Orch: release risk reservation
+            Orch-->>API: failed
+            API-->>C: 402 declined
+        else PSP authorizes
+            PSP-->>Orch: auth_token, psp_charge_id
+        end
+
+        Note over Orch,Ledger: STEP 3 — Ledger debit/credit
+        Orch->>Ledger: append debit user_card + credit merchant_payable
+        alt ledger fails
+            Ledger--xOrch: error
+            Orch->>PSP: void auth (compensation)
+            PSP-->>Orch: voided
+            Orch-->>API: failed
+            API-->>C: 500 retryable
+        else ledger ok
+            Ledger-->>Orch: entries committed
+        end
+
+        Note over Orch,Ledger: STEP 4 — Capture
+        Orch->>PSP: capture
+        alt capture fails
+            PSP--xOrch: error
+            Orch->>Ledger: reverse entries (compensation)
+            Ledger-->>Orch: reversed
+            Orch-->>API: failed
+            API-->>C: 500
+        else capture ok
+            PSP-->>Orch: captured
+            Orch->>Ledger: append capture transfer entries
+            Ledger-->>Orch: ok
+        end
+
+        Orch-->>API: succeeded
+        API->>Idem: store final response
+        API-->>C: 200 {charge_id, succeeded}
+    end
+
+    Note over PSP,Ledger: ASYNC — daily reconciliation diffs ledger vs PSP settlement

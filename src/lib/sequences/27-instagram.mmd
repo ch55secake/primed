@@ -1,0 +1,50 @@
+sequenceDiagram
+    participant C as Client
+    participant API as Post API
+    participant OS as Object Store
+    participant Proc as Image Processor
+    participant CDN as CDN
+    participant DB as Metadata Store
+    participant FO as Fan-out Service
+
+    Note over C,FO: UPLOAD PATH (pre-signed URL + async processing)
+    C->>API: request upload (caption, location, tags)
+    API->>OS: mint pre-signed PUT URL
+    OS-->>API: pre-signed URL
+    API-->>C: upload URL + post_id (pending)
+    C->>OS: PUT raw image bytes (direct, bypassing API)
+    OS-->>C: 200 stored
+    OS-)Proc: object-created event
+
+    Note over Proc,CDN: VARIANT GENERATION (async, off critical path)
+    Proc->>Proc: hash check (CSAM / known-bad)
+    alt fingerprint match
+        Proc-XAPI: block + flag
+    else clean
+        par generate variants in parallel
+            Proc->>OS: write thumbnail (100px)
+        and
+            Proc->>OS: write small (480px)
+        and
+            Proc->>OS: write medium (1080px)
+        and
+            Proc->>OS: write full (original, transcoded)
+        end
+        OS-->>Proc: variants stored
+        Proc-)CDN: prewarm edges
+    end
+
+    Note over Proc,FO: PUBLISH (metadata + fan-out)
+    Proc->>API: notify ready (variant URLs)
+    API->>DB: persist post metadata + media_urls
+    DB-->>API: ok
+    API-)FO: hybrid push/pull fan-out to followers
+    API-->>C: post visible (state = published)
+
+    Note over C,CDN: READ PATH (feed picks resolution)
+    C->>API: GET /feed?cursor
+    API->>DB: load post metadata batch
+    DB-->>API: posts + variant URL set
+    API-->>C: feed payload (CDN URLs per resolution)
+    C->>CDN: GET variant matching viewport + bandwidth
+    CDN-->>C: image bytes

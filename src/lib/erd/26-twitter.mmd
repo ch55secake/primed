@@ -1,0 +1,57 @@
+erDiagram
+    USER {
+        bigint user_id PK
+        string handle
+        string display_name
+        bool is_celebrity
+        bigint follower_count
+    }
+    TWEET {
+        bigint tweet_id PK
+        bigint author_id FK
+        string text
+        json media_ids
+        bigint parent_id FK
+        bigint quoted_tweet_id FK
+        timestamp created_at
+    }
+    FOLLOW {
+        bigint follower_id PK,FK
+        bigint followee_id PK,FK
+        timestamp followed_at
+    }
+    HOME_TIMELINE_ENTRY {
+        bigint user_id PK,FK
+        bigint tweet_id PK,FK
+        bigint score
+        timestamp inserted_at
+    }
+    LIKE {
+        bigint tweet_id PK,FK
+        bigint user_id PK,FK
+        timestamp ts
+    }
+    SEARCH_DOC {
+        bigint tweet_id PK,FK
+        string analyzed_text
+        json hashtags
+        json mentions
+        date partition_date
+    }
+    TRENDING_TOPIC {
+        string region PK
+        string topic PK
+        bigint count
+        float diversity_score
+        timestamp window_end
+    }
+
+    USER ||--o{ TWEET : "authors"
+    USER ||--o{ FOLLOW : "follows"
+    USER ||--o{ FOLLOW : "followed by"
+    TWEET ||--o{ TWEET : "replies to"
+    TWEET ||--o{ HOME_TIMELINE_ENTRY : "appears in"
+    USER ||--o{ HOME_TIMELINE_ENTRY : "owns"
+    TWEET ||--o{ LIKE : "receives"
+    USER ||--o{ LIKE : "gives"
+    TWEET ||--|| SEARCH_DOC : "indexed as"

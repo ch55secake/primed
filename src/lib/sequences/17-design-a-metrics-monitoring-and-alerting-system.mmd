@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant Target as Service / Host
+    participant Agent as Collector Agent
+    participant Stream as Event Stream Buffer
+    participant TSDB as TSDB (Hot/Warm/Cold)
+    participant Eval as Alert Evaluator
+    participant Router as Alert Router
+
+    Note over Target,Agent: Scrape (pull) collection
+    loop Every 10s
+        Agent->>Target: GET /metrics
+        Target-->>Agent: name + tags + value samples
+        Agent->>Stream: Forward batch
+    end
+
+    Note over Stream,TSDB: Ingest path
+    Stream->>TSDB: Write workers batch + Gorilla-compress
+    alt Cardinality over budget
+        TSDB-->>Stream: Reject series, page owning team
+    else Within budget
+        TSDB->>TSDB: Append to hot tier (SSD, 10s res)
+    end
+
+    Note over Eval,Router: Alert evaluation
+    loop Every 30s
+        Eval->>TSDB: Run rule query (PromQL)
+        TSDB-->>Eval: Time series result
+        alt Threshold breached for "for: 5m"
+            Eval->>Router: Fire alert
+            Router->>Router: Group, dedupe, apply silences, inhibit
+            Router-)Target: Notify on-call (paging channel)
+        end
+    end
+
+    Note over TSDB: Background downsample 10s -> 1min -> 1hr across tiers

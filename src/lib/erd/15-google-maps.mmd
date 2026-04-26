@@ -1,0 +1,53 @@
+erDiagram
+    TILE {
+        int zoom PK
+        int x PK
+        int y PK
+        enum format "raster|vector"
+        bytes payload
+        timestamp updated_at
+    }
+    ROAD_NODE {
+        bigint node_id PK
+        float lat
+        float lng
+        string region
+    }
+    ROAD_EDGE {
+        bigint edge_id PK
+        bigint from_node FK
+        bigint to_node FK
+        float travel_time
+        enum road_class
+        float length_m
+    }
+    EDGE_OVERRIDE {
+        bigint edge_id PK,FK
+        float weight_multiplier
+        timestamp expires_at
+        string reason
+    }
+    TRAFFIC_SAMPLE {
+        bigint edge_id FK
+        timestamp window_start PK
+        float avg_speed
+        int sample_count
+    }
+    LANDMARK_DISTANCE {
+        bigint node_id PK,FK
+        bigint landmark_id PK
+        float distance
+    }
+    POI {
+        bigint poi_id PK
+        string name
+        float lat
+        float lng
+        json attributes
+    }
+
+    ROAD_NODE ||--o{ ROAD_EDGE : "starts"
+    ROAD_NODE ||--o{ ROAD_EDGE : "ends"
+    ROAD_EDGE ||--o| EDGE_OVERRIDE : "overridden by"
+    ROAD_EDGE ||--o{ TRAFFIC_SAMPLE : "measured by"
+    ROAD_NODE ||--o{ LANDMARK_DISTANCE : "precomputed for"

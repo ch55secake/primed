@@ -1,0 +1,54 @@
+erDiagram
+    ARTIST ||--o{ ALBUM : releases
+    ALBUM ||--o{ TRACK : contains
+    ARTIST ||--o{ TRACK : performs
+    USER ||--o{ PLAYLIST : owns
+    PLAYLIST ||--o{ TRACK : includes
+    USER ||--o{ PLAY_EVENT : generates
+    TRACK ||--o{ PLAY_EVENT : streamed_in
+    USER ||--|| USER_EMBEDDING : described_by
+
+    ARTIST {
+        bigint artist_id PK
+        string name
+        json genres
+    }
+    ALBUM {
+        bigint album_id PK
+        bigint artist_id FK
+        string title
+        timestamp released_at
+    }
+    TRACK {
+        bigint track_id PK
+        bigint album_id FK
+        string title
+        int duration_sec
+        string isrc
+        json audio_urls
+    }
+    USER {
+        bigint user_id PK
+        string email
+        enum tier
+        string country
+    }
+    PLAYLIST {
+        bigint playlist_id PK
+        bigint owner_id FK
+        json tracks
+        json collaborators
+        enum visibility
+    }
+    PLAY_EVENT {
+        bigint user_id FK
+        bigint track_id FK
+        timestamp ts
+        int duration_played_sec
+        string country
+    }
+    USER_EMBEDDING {
+        bigint user_id FK
+        bytes vector
+        timestamp updated_at
+    }

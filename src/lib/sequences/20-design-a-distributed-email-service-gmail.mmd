@@ -1,0 +1,38 @@
+sequenceDiagram
+    participant Sender as External SMTP Sender
+    participant MX as MX Server
+    participant Spam as Spam Filter
+    participant Meta as Mailbox Metadata Store
+    participant Blob as Content-Addressed Object Store
+    participant Index as Per-User Search Index
+
+    Note over Sender,MX: Inbound delivery
+    Sender->>MX: SMTP DATA (message + attachments)
+    MX->>MX: TLS, basic protocol checks
+
+    Note over MX,Spam: Authentication + classification
+    MX->>Spam: Verify SPF / DKIM / DMARC
+    alt Auth fails / forged
+        Spam-->>MX: Reject (5xx)
+        MX-->>Sender: Bounce
+    else Auth passes
+        Spam->>Spam: ML classifier (headers, body, links)
+        alt Classified spam
+            Spam->>Meta: Deliver to Spam folder (user shard)
+        else Clean
+            Spam->>Meta: Deliver to Inbox (user shard)
+        end
+    end
+
+    Note over Meta,Blob: Storage with dedup
+    Meta->>Blob: PUT body by SHA256(content)
+    alt Hash already exists
+        Blob-->>Meta: Existing key (dedup ref-count++)
+    else New blob
+        Blob-->>Meta: Stored
+    end
+    Meta->>Meta: Append (user_id, msg_id) -> headers + body_hash + attachment_hashes
+
+    Note over Meta,Index: Search index update
+    Meta-)Index: Tokenize subject + body, update inverted index for user
+    Meta-)Sender: Push notification to user device

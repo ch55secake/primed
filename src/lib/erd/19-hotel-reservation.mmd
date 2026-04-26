@@ -1,0 +1,60 @@
+erDiagram
+    HOTEL {
+        bigint hotel_id PK
+        string name
+        string address
+        float lat
+        float lng
+        json amenities
+    }
+    ROOM_TYPE {
+        bigint hotel_id PK,FK
+        string room_type PK
+        int capacity
+        float base_price
+        string description
+    }
+    INVENTORY {
+        bigint hotel_id PK,FK
+        string room_type PK,FK
+        date date PK
+        int available_count
+        int total_count
+    }
+    BOOKING {
+        string booking_id PK
+        bigint user_id FK
+        bigint hotel_id FK
+        string room_type FK
+        date checkin
+        date checkout
+        enum status "pending|confirmed|cancelled"
+        string idempotency_key
+        timestamp created_at
+    }
+    PAYMENT {
+        string payment_id PK
+        string booking_id FK
+        float amount
+        string currency
+        enum status
+        string psp_charge_id
+    }
+    USER {
+        bigint user_id PK
+        string email
+        string name
+    }
+    SEARCH_INDEX {
+        bigint hotel_id PK,FK
+        json denorm_doc
+        float min_price
+        timestamp updated_at
+    }
+
+    HOTEL ||--o{ ROOM_TYPE : "offers"
+    ROOM_TYPE ||--o{ INVENTORY : "stocked as"
+    USER ||--o{ BOOKING : "places"
+    HOTEL ||--o{ BOOKING : "receives"
+    BOOKING ||--|| PAYMENT : "settled by"
+    HOTEL ||--|| SEARCH_INDEX : "indexed as"

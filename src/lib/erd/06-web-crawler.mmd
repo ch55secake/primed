@@ -1,0 +1,43 @@
+erDiagram
+    DOMAIN ||--o{ FRONTIER_URL : "queues"
+    DOMAIN ||--|| ROBOTS_RULES : "governed_by"
+    FRONTIER_URL ||--o| PAGE : "fetches_to"
+    PAGE ||--o| CONTENT_FINGERPRINT : "fingerprinted_by"
+    URL_SEEN ||--|| FRONTIER_URL : "dedupes"
+
+    DOMAIN {
+        string domain PK
+        int crawl_delay_sec
+        timestamp last_fetched_at
+        float politeness_tokens
+    }
+    FRONTIER_URL {
+        string url_hash PK
+        string url
+        string domain FK
+        int priority
+        int depth
+        timestamp next_fetch_time
+    }
+    URL_SEEN {
+        string url_hash PK
+        timestamp first_seen_ts
+    }
+    PAGE {
+        string url_hash PK
+        bytes html
+        json headers
+        timestamp fetched_at
+        int status_code
+    }
+    CONTENT_FINGERPRINT {
+        bigint simhash PK
+        string url_hash FK
+        string md5
+    }
+    ROBOTS_RULES {
+        string domain PK
+        json rules
+        int crawl_delay_sec
+        timestamp fetched_at
+    }

@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant G as Guest
+    participant B as Booking Orchestrator
+    participant Cal as Calendar Svc
+    participant Pay as Payment (Stripe)
+    participant N as Notify Svc
+    participant H as Host
+
+    Note over G,H: Booking Saga: lock -> charge -> confirm -> notify
+    G->>B: POST /book {listing, checkin, checkout}
+    B->>B: validate dates, listing exists
+    B->>Cal: lock dates (SQL txn)
+    loop each night in range
+        Cal->>Cal: SELECT FOR UPDATE row
+        alt status = available
+            Cal->>Cal: UPDATE status=booked
+        else conflict
+            Cal-X B: AVAILABILITY_LOST
+        end
+    end
+    Cal-->>B: dates locked
+    B->>Pay: authorize hold (escrow)
+    alt payment OK
+        Pay-->>B: auth_id
+        B->>B: persist booking (CONFIRMED)
+        B-->>G: 200 {booking_id}
+        B-)N: send confirmations
+        N-)H: new booking
+        N-)G: receipt + check-in info
+        Note over Pay: funds escrowed until 24h post check-in
+    else payment fail
+        Pay-X B: declined
+        B->>Cal: compensate (release dates)
+        B-->>G: 402 payment failed
+    end

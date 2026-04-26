@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant Client as Client
+    participant Bucket as Bucket Service
+    participant Meta as Object Metadata Service
+    participant Storage as Storage Nodes (K+M)
+    participant CDN as CDN / Edge Cache
+
+    Note over Client,Storage: Multipart PUT (large object)
+    Client->>Bucket: InitiateMultipartUpload(bucket, key)
+    Bucket->>Bucket: Authorize (ACL, policy)
+    Bucket-->>Client: upload_id
+
+    loop Each part (5MB - 5GB)
+        Client->>Storage: UploadPart(upload_id, part_num, bytes)
+        Storage->>Storage: Erasure code 6 data + 3 parity, place across AZs
+        Storage-->>Client: ETag(part)
+    end
+
+    Client->>Bucket: CompleteMultipartUpload([part_num, etag])
+    Bucket->>Meta: Atomic commit: (bucket,key) -> piece locations + version_id
+    Meta-->>Bucket: Committed (Raft quorum)
+    Bucket-->>Client: 200 OK (etag, version_id)
+
+    Note over Client,CDN: GET with cache
+    Client->>CDN: GET /{bucket}/{key}
+    alt Cache hit
+        CDN-->>Client: Bytes
+    else Cache miss
+        CDN->>Meta: Lookup (bucket, key)
+        Meta-->>CDN: Piece locations + storage_class
+        CDN->>Storage: Fetch any K of (K+M) pieces in parallel
+        Storage-->>CDN: K pieces
+        CDN->>CDN: Reconstruct object via Reed-Solomon
+        CDN-->>Client: Bytes (cache populated)
+    end
+
+    Note over Storage: Background: scrub checksums, repair under-replicated, GC tombstones

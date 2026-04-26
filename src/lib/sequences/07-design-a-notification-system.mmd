@@ -1,0 +1,42 @@
+sequenceDiagram
+    participant C as Caller Service
+    participant Ing as Ingestion Service
+    participant Dedup as Idempotency Cache
+    participant Pref as Preferences Store
+    participant Q as Channel Queue<br/>(push/email/sms)
+    participant Wk as Channel Worker
+    participant Prov as Provider<br/>(APNs/FCM/SES/Twilio)
+    participant St as Status Store
+
+    C->>Ing: POST /notify {user, template, channels, idempotency_key}
+    Ing->>Dedup: GET (user_id, key)
+    alt duplicate
+        Dedup-->>Ing: existing notif_id
+        Ing-->>C: 200 {notif_id, status: queued}
+    else new
+        Dedup-->>Ing: miss
+        Ing->>Pref: check user prefs (cached)
+        Pref-->>Ing: enabled channels, quiet hours
+        Ing->>Dedup: SET (user_id, key) TTL 24h
+        Ing->>St: persist {notif_id, state: queued}
+        loop each enabled channel
+            Ing-)Q: enqueue {notif_id, payload}
+        end
+        Ing-->>C: 202 {notif_id, status: queued}
+    end
+
+    Note over Q,St: async delivery
+    Wk->>Q: dequeue
+    Q-->>Wk: notif_id, payload
+    Wk->>Pref: re-check prefs (opt-out window)
+    Wk->>Prov: send (rate-limited)
+    alt accepted
+        Prov-->>Wk: 200 ok
+        Wk->>St: state = sent, attempts++
+    else transient failure
+        Prov-->>Wk: 5xx / throttled
+        Wk->>Q: requeue with backoff (30s, 5m, 1h)
+    else permanent failure
+        Prov-->>Wk: 4xx
+        Wk->>St: state = dlq
+    end

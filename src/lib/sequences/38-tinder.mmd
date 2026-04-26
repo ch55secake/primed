@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant U as UserA
+    participant API as SwipeService
+    participant SW as SwipesStore
+    participant M as MatchService
+    participant N as NotificationSystem
+    participant UB as UserB
+
+    U->>API: POST /swipe {target=B, dir=right}
+    API->>SW: write (A, B, right, ts)
+    API->>SW: lookup reverse (B, A, ?)
+    alt B previously swiped right on A
+        SW-->>API: (B, A, right) found
+        API->>M: createMatch(canonical_pair=min(A,B),max(A,B))
+        Note over M: idempotent on canonical pair
+        M-->>API: match_id
+        API-->>U: {matched: true, match_id}
+        M-)N: notify A {new match}
+        M-)N: notify B {new match}
+        N-)UB: push "It's a match!"
+    else no reciprocal
+        SW-->>API: not found
+        API-->>U: {matched: false}
+    end

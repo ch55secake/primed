@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant APP as ClientApp
+    participant AUTH as AuthService
+    participant CAT as CatalogService
+    participant CDN as CDN
+    participant EVT as PlayEventStream
+    participant ROY as RoyaltyPipeline
+
+    APP->>AUTH: validate session / subscription tier
+    AUTH-->>APP: token + tier (free/premium/HiFi)
+    APP->>CAT: GET /track/{id}
+    CAT-->>APP: manifest {bitrate variants, license, urls}
+    Note over APP: pick bitrate from tier + connection
+    loop chunked playback
+        APP->>CDN: GET audio chunk (selected bitrate)
+        CDN-->>APP: chunk bytes
+    end
+    Note over APP: ≥30s contiguous play threshold reached
+    APP-)EVT: play_event {user, track, ts, duration_played}
+    EVT-)ROY: stream to royalty aggregator
+    ROY->>ROY: dedupe on stream_id, attribute to rights holders
+    Note over ROY: monthly aggregation -> payout

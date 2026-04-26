@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant C as Client
+    participant CDN as Edge CDN
+    participant App as App Server
+    participant ID as ID Service<br/>(Snowflake)
+    participant Cache as KV Cache
+    participant DB as Alias Store
+    participant ES as Event Stream<br/>(analytics)
+
+    Note over C,ES: Write flow (shorten)
+    C->>App: POST /shorten {long_url}
+    App->>ID: next_id()
+    ID-->>App: snowflake_id
+    App->>App: base62(snowflake_id) = alias
+    App->>DB: INSERT (alias, long_url)
+    DB-->>App: ok
+    App->>Cache: SET alias -> long_url (TTL 1h)
+    App-->>C: 201 {short_url}
+
+    Note over C,ES: Read flow (redirect)
+    C->>CDN: GET /{alias}
+    alt CDN cache hit
+        CDN-->>C: 301 Location: long_url
+    else CDN miss
+        CDN->>App: forward
+        App->>Cache: GET alias
+        alt cache hit
+            Cache-->>App: long_url
+        else cache miss
+            App->>DB: SELECT long_url WHERE alias
+            DB-->>App: long_url
+            App->>Cache: backfill
+        end
+        App-)ES: click event (fire-and-forget)
+        App-->>CDN: 301 + Cache-Control
+        CDN-->>C: 301 Location: long_url
+    end

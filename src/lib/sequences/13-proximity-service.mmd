@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant C as Client
+    participant API as Search API
+    participant RC as Result Cache
+    participant Geo as Geo Index
+    participant Biz as Business Store
+    participant CDC as CDC / Update Bus
+
+    Note over C,Biz: SEARCH (read path)
+    C->>API: GET /search?lat,lng,radius,category
+    API->>API: compute geohash prefix at radius precision
+    API->>RC: lookup (geohash_prefix, category)
+    alt cache hit
+        RC-->>API: cached page
+        API-->>C: results
+    else miss
+        API->>Geo: fetch candidates in cell + 8 neighbors
+        Geo-->>API: candidate biz_ids
+        API->>Biz: hydrate metadata
+        Biz-->>API: business records
+        API->>API: haversine filter by radius
+        API->>API: apply category filter
+        API->>API: sort by distance/rating, paginate
+        API->>RC: store page (TTL 60s)
+        API-->>C: results
+    end
+
+    Note over Biz,Geo: WRITE PATH (CRUD sync)
+    Biz-)CDC: business updated event
+    CDC-)Geo: update spatial index entry

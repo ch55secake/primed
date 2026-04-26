@@ -1,0 +1,45 @@
+erDiagram
+    USER ||--o{ FILE : "owns"
+    FILE ||--o{ VERSION : "has"
+    VERSION ||--o{ CHUNK_REF : "composed_of"
+    CHUNK ||--o{ CHUNK_REF : "referenced_by"
+    FILE ||--o{ ACL_ENTRY : "shared_via"
+    USER ||--o{ ACL_ENTRY : "principal_of"
+
+    USER {
+        bigint user_id PK
+        string email
+        bigint quota_bytes
+    }
+    FILE {
+        bigint file_id PK
+        bigint owner_id FK
+        string name
+        bigint parent_folder
+        bigint current_version FK
+        bool deleted
+        timestamp created_at
+    }
+    VERSION {
+        bigint version_id PK
+        bigint file_id FK
+        bigint size_bytes
+        timestamp ts
+    }
+    CHUNK {
+        string chunk_hash PK
+        int size_bytes
+        int ref_count
+        string blob_location
+    }
+    CHUNK_REF {
+        bigint version_id FK
+        string chunk_hash FK
+        int seq_no
+    }
+    ACL_ENTRY {
+        bigint file_id FK
+        bigint principal_id FK
+        enum role
+        timestamp granted_at
+    }

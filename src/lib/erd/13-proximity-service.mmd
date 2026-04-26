@@ -1,0 +1,29 @@
+erDiagram
+    BUSINESS ||--o{ GEO_INDEX_ENTRY : "indexed_by"
+    BUSINESS ||--o{ CATEGORY_TAG : "tagged_with"
+    CATEGORY ||--o{ CATEGORY_TAG : "applied_via"
+
+    BUSINESS {
+        bigint biz_id PK
+        string name
+        float lat
+        float lng
+        string geohash
+        float rating
+        timestamp created_at
+    }
+    GEO_INDEX_ENTRY {
+        string geohash_prefix PK
+        bigint biz_id FK
+        float lat
+        float lng
+        int precision_level
+    }
+    CATEGORY {
+        string category_id PK
+        string name
+    }
+    CATEGORY_TAG {
+        bigint biz_id FK
+        string category_id FK
+    }

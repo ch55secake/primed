@@ -1,0 +1,43 @@
+erDiagram
+    JOB ||--o{ SCHEDULE : configured_by
+    JOB ||--o{ JOB_RUN : produces
+    JOB_RUN ||--o| LEASE : claimed_via
+    JOB ||--o{ DAG_EDGE : parent_in
+    JOB ||--o{ DAG_EDGE : child_in
+
+    JOB {
+        bigint job_id PK
+        string name
+        string payload
+        int max_retries
+        enum state
+        timestamp next_run_at
+    }
+    SCHEDULE {
+        bigint job_id FK
+        string cron_expr
+        timestamp run_at
+        string timezone
+        bool allow_overlap
+    }
+    JOB_RUN {
+        bigint job_id FK
+        bigint run_id PK
+        timestamp scheduled_at
+        timestamp started_at
+        timestamp finished_at
+        enum status
+        int attempt
+        string error
+    }
+    LEASE {
+        bigint run_id FK
+        string worker_id
+        timestamp expires_at
+        timestamp last_heartbeat
+    }
+    DAG_EDGE {
+        bigint parent_job_id FK
+        bigint child_job_id FK
+        enum trigger_rule
+    }

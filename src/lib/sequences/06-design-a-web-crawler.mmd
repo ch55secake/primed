@@ -1,0 +1,41 @@
+sequenceDiagram
+    participant F as URL Frontier<br/>(per-domain queues)
+    participant W as Fetcher Worker
+    participant DNS as DNS Cache
+    participant Site as Target Site
+    participant P as HTML Parser
+    participant Seen as URL Seen<br/>(Bloom + KV)
+    participant CSeen as Content Seen<br/>(SimHash)
+    participant Arc as Page Archive<br/>(object store)
+
+    W->>F: dequeue (domain whose<br/>next_fetch_time elapsed)
+    F-->>W: url, depth
+    W->>DNS: resolve(domain)
+    DNS-->>W: ip (cached)
+    W->>Site: GET url (robots.txt respected)
+    alt fetch ok
+        Site-->>W: html, headers
+        W->>P: parse(html)
+        P-->>W: links[], content
+        W->>CSeen: simhash(content) seen?
+        alt near-duplicate
+            Note over W,CSeen: drop page<br/>(boilerplate/mirror)
+        else novel content
+            W->>Arc: PUT hash(url) -> page
+            loop each extracted link
+                W->>Seen: bloom check
+                alt probably seen
+                    Note over W,Seen: skip
+                else maybe new
+                    Seen->>Seen: KV confirm
+                    alt confirmed new
+                        W->>F: enqueue(link, depth+1)
+                        W->>Seen: mark seen
+                    end
+                end
+            end
+        end
+        W->>F: update next_fetch_time<br/>(per crawl_delay)
+    else timeout / 5xx
+        W->>F: requeue with backoff
+    end

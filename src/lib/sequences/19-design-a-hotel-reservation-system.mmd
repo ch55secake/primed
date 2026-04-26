@@ -1,0 +1,38 @@
+sequenceDiagram
+    participant User as User
+    participant Booking as Booking Saga
+    participant Inventory as Inventory Service
+    participant Payment as Payment Service
+    participant Notify as Notification Service
+    participant Search as Search Index
+
+    User->>Booking: POST /booking (idempotency_key)
+    Booking->>Booking: Dedupe via idempotency key
+
+    Note over Booking,Inventory: Step 1 - Reserve inventory (pessimistic lock)
+    Booking->>Inventory: BEGIN; SELECT FOR UPDATE date rows
+    alt Capacity available for all dates
+        Inventory->>Inventory: UPDATE available_count -= 1
+        Inventory-->>Booking: Reserved (commit)
+    else Sold out
+        Inventory-->>Booking: 409 Conflict
+        Booking-->>User: No availability
+    end
+
+    Note over Booking,Payment: Step 2 - Charge payment
+    Booking->>Payment: Charge(amount, idempotency_key)
+    alt Payment succeeds
+        Payment-->>Booking: payment_id
+    else Payment fails
+        Payment-->>Booking: Declined
+        Booking->>Inventory: COMPENSATE: release inventory
+        Booking-->>User: Booking failed
+    end
+
+    Note over Booking,Notify: Step 3 - Confirm
+    Booking->>Booking: Persist booking record
+    Booking-->>User: { booking_id, confirmed }
+    Booking-)Notify: Send confirmation email (retry queue)
+
+    Note over Inventory,Search: Async search sync
+    Inventory-)Search: CDC -> reindex hotel doc (eventual)

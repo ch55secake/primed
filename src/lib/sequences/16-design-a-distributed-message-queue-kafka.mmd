@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant Producer as Producer
+    participant Leader as Kafka Leader Broker
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+    participant Consumer as Consumer (Group)
+    participant Offsets as __consumer_offsets
+
+    Note over Producer,R2: Produce with acks=all
+    Producer->>Leader: send(topic, key, value)
+    Leader->>Leader: Append to partition log (sequential disk write)
+    par Replicate to ISR
+        Leader->>R1: Fetch / replicate record
+        R1-->>Leader: Ack (in-sync)
+    and
+        Leader->>R2: Fetch / replicate record
+        R2-->>Leader: Ack (in-sync)
+    end
+    Leader-->>Producer: Ack (offset N)
+
+    Note over Consumer,Leader: Pull-based consume
+    loop Poll loop
+        Consumer->>Leader: fetch(topic, partition, offset)
+        Leader-->>Consumer: Batch [records] via sendfile() zero-copy
+        Consumer->>Consumer: Process batch
+        Consumer->>Offsets: commit(offset)
+    end
+
+    Note over Leader,R1: Leader failure
+    alt Leader crashes
+        R1->>R1: Promoted to leader (KRaft election)
+        Producer->>R1: Retry send (idempotent PID + seq dedupes)
+    end

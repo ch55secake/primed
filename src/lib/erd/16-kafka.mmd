@@ -1,0 +1,53 @@
+erDiagram
+    TOPIC {
+        string topic_name PK
+        int partition_count
+        int replication_factor
+        int retention_ms
+    }
+    PARTITION {
+        string topic_name PK,FK
+        int partition_id PK
+        int leader_broker_id FK
+        json isr_replicas
+    }
+    SEGMENT {
+        string topic_name PK,FK
+        int partition_id PK,FK
+        bigint base_offset PK
+        bigint byte_size
+        timestamp created_at
+    }
+    MESSAGE {
+        string topic_name FK
+        int partition_id FK
+        bigint offset PK
+        bytes key
+        bytes value
+        timestamp ts
+        int crc
+    }
+    CONSUMER_GROUP {
+        string group_id PK
+        enum state
+    }
+    CONSUMER_OFFSET {
+        string group_id PK,FK
+        string topic_name PK,FK
+        int partition_id PK,FK
+        bigint committed_offset
+        timestamp committed_at
+    }
+    BROKER {
+        int broker_id PK
+        string host
+        int port
+        enum role
+    }
+
+    TOPIC ||--o{ PARTITION : "split into"
+    PARTITION ||--o{ SEGMENT : "log files"
+    PARTITION ||--o{ MESSAGE : "appends"
+    BROKER ||--o{ PARTITION : "leads"
+    CONSUMER_GROUP ||--o{ CONSUMER_OFFSET : "tracks"
+    PARTITION ||--o{ CONSUMER_OFFSET : "consumed by"

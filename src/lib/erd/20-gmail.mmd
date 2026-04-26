@@ -1,0 +1,60 @@
+erDiagram
+    USER {
+        bigint user_id PK
+        string email
+        int shard_id
+    }
+    MAILBOX_META {
+        bigint user_id PK,FK
+        bigint msg_id PK
+        string subject
+        string from_addr
+        json to_addrs
+        timestamp ts
+        json labels
+        string body_hash FK
+        json attachment_hashes
+        string message_id_header
+        string in_reply_to
+    }
+    BODY {
+        string body_hash PK
+        bytes content
+        int ref_count
+        enum tier "hot|warm|cold"
+    }
+    ATTACHMENT {
+        string attachment_hash PK
+        bytes content
+        bigint size_bytes
+        string content_type
+        int ref_count
+    }
+    SEARCH_INDEX_SHARD {
+        bigint user_id PK,FK
+        bigint msg_id PK,FK
+        json analyzed_terms
+        timestamp indexed_at
+    }
+    OUTBOUND_QUEUE {
+        string queue_id PK
+        bigint user_id FK
+        bigint msg_id FK
+        enum status "pending|sent|bounced|dlq"
+        int retry_count
+        timestamp next_attempt
+    }
+    SPAM_VERDICT {
+        bigint user_id FK
+        bigint msg_id FK
+        float score
+        enum verdict "ham|spam|phish"
+        json signals
+    }
+
+    USER ||--o{ MAILBOX_META : "owns"
+    MAILBOX_META }o--|| BODY : "references"
+    MAILBOX_META }o--o{ ATTACHMENT : "includes"
+    MAILBOX_META ||--|| SEARCH_INDEX_SHARD : "indexed as"
+    MAILBOX_META ||--o| OUTBOUND_QUEUE : "queued in"
+    MAILBOX_META ||--o| SPAM_VERDICT : "scored by"

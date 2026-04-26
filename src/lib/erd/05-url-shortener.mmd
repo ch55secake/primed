@@ -1,0 +1,31 @@
+erDiagram
+    USER ||--o{ URL : "creates"
+    URL ||--o{ CLICK : "receives"
+    URL ||--|| ALIAS_CACHE : "cached_as"
+
+    USER {
+        bigint user_id PK
+        string email
+        timestamp created_at
+    }
+    URL {
+        string alias PK
+        string long_url
+        bigint created_by FK
+        timestamp created_at
+        timestamp expires_at
+    }
+    CLICK {
+        bigint click_id PK
+        string alias FK
+        timestamp ts
+        string ip
+        string country
+        string referrer
+        string user_agent
+    }
+    ALIAS_CACHE {
+        string alias PK
+        string long_url
+        int ttl_sec
+    }
