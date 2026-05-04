@@ -1,59 +1,144 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { parsePatterns, sortSections } from "./lib/parser";
-import type { Pattern } from "./lib/parser";
+import { parseContent, sortSections, SOURCES } from "./lib/parser";
+import type { Pattern, SourceId } from "./lib/parser";
 import { Sidebar } from "./components/Sidebar";
 import { PatternView } from "./components/PatternView";
-
-const STORAGE_KEY = "sdf:revealed:v1";
-const SELECTED_KEY = "sdf:selected:v1";
+import { SourceTabs } from "./components/SourceTabs";
 
 type RevealedMap = Record<number, string[]>;
 
-function loadRevealed(): RevealedMap {
+interface SourceState {
+  patterns: Pattern[];
+  loading: boolean;
+  error: string | null;
+}
+
+const LEGACY_REVEALED_KEY = "sdf:revealed:v1";
+const LEGACY_SELECTED_KEY = "sdf:selected:v1";
+
+function revealedKey(source: SourceId) {
+  return `${SOURCES[source].storagePrefix}:revealed:v1`;
+}
+
+function selectedKey(source: SourceId) {
+  return `${SOURCES[source].storagePrefix}:selected:v1`;
+}
+
+function migrateLegacyKeys() {
+  const legacyRevealed = localStorage.getItem(LEGACY_REVEALED_KEY);
+  if (legacyRevealed && !localStorage.getItem(revealedKey("patterns"))) {
+    localStorage.setItem(revealedKey("patterns"), legacyRevealed);
+  }
+  const legacySelected = localStorage.getItem(LEGACY_SELECTED_KEY);
+  if (legacySelected && !localStorage.getItem(selectedKey("patterns"))) {
+    localStorage.setItem(selectedKey("patterns"), legacySelected);
+  }
+}
+
+function loadRevealed(source: SourceId): RevealedMap {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(revealedKey(source));
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-function saveRevealed(map: RevealedMap) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+function saveRevealed(source: SourceId, map: RevealedMap) {
+  localStorage.setItem(revealedKey(source), JSON.stringify(map));
 }
 
-function loadSelected(): number {
-  const raw = localStorage.getItem(SELECTED_KEY);
+function loadSelected(source: SourceId): number {
+  const raw = localStorage.getItem(selectedKey(source));
   const n = raw ? parseInt(raw, 10) : 1;
   return Number.isFinite(n) ? n : 1;
 }
 
+function readSourceFromHash(): SourceId {
+  const h = window.location.hash.replace(/^#\/?/, "").toLowerCase();
+  return h === "neetcode" ? "neetcode" : "patterns";
+}
+
+function writeSourceToHash(source: SourceId) {
+  const target = `#/${source}`;
+  if (window.location.hash !== target) {
+    window.location.hash = target;
+  }
+}
+
 export default function App() {
-  const [patterns, setPatterns] = useState<Pattern[]>([]);
-  const [selectedId, setSelectedId] = useState<number>(loadSelected());
-  const [revealedMap, setRevealedMap] = useState<RevealedMap>(loadRevealed());
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeSource, setActiveSource] = useState<SourceId>(() => {
+    migrateLegacyKeys();
+    return readSourceFromHash();
+  });
+
+  const [sources, setSources] = useState<Record<SourceId, SourceState>>({
+    patterns: { patterns: [], loading: true, error: null },
+    neetcode: { patterns: [], loading: true, error: null },
+  });
+
+  const [selectedIds, setSelectedIds] = useState<Record<SourceId, number>>({
+    patterns: loadSelected("patterns"),
+    neetcode: loadSelected("neetcode"),
+  });
+
+  const [revealedMaps, setRevealedMaps] = useState<Record<SourceId, RevealedMap>>({
+    patterns: loadRevealed("patterns"),
+    neetcode: loadRevealed("neetcode"),
+  });
 
   useEffect(() => {
-    fetch("/patterns.md")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then((md) => {
-        setPatterns(parsePatterns(md));
-        setLoading(false);
-      })
-      .catch((e) => {
-        setLoadError(String(e));
-        setLoading(false);
-      });
+    const onHash = () => setActiveSource(readSourceFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SELECTED_KEY, String(selectedId));
-  }, [selectedId]);
+    let cancelled = false;
+    (Object.keys(SOURCES) as SourceId[]).forEach((id) => {
+      fetch(SOURCES[id].file)
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.text();
+        })
+        .then((md) => {
+          if (cancelled) return;
+          setSources((prev) => ({
+            ...prev,
+            [id]: { patterns: parseContent(md), loading: false, error: null },
+          }));
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setSources((prev) => ({
+            ...prev,
+            [id]: { patterns: [], loading: false, error: String(e) },
+          }));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sourceConfig = SOURCES[activeSource];
+  const sourceState = sources[activeSource];
+  const patterns = sourceState.patterns;
+  const selectedId = selectedIds[activeSource];
+  const revealedMap = revealedMaps[activeSource];
+
+  const onSelectSource = useCallback((id: SourceId) => {
+    writeSourceToHash(id);
+    setActiveSource(id);
+  }, []);
+
+  const setSelectedId = useCallback(
+    (id: number) => {
+      setSelectedIds((prev) => ({ ...prev, [activeSource]: id }));
+      localStorage.setItem(selectedKey(activeSource), String(id));
+    },
+    [activeSource],
+  );
 
   const selected = useMemo(
     () => patterns.find((p) => p.id === selectedId) ?? patterns[0] ?? null,
@@ -61,27 +146,28 @@ export default function App() {
   );
 
   const sortedSelectedSections = useMemo(
-    () => (selected ? sortSections(selected.sections) : []),
-    [selected],
+    () => (selected ? sortSections(selected.sections, sourceConfig.sectionOrder) : []),
+    [selected, sourceConfig],
   );
 
   const revealed = useMemo(() => {
     if (!selected) return new Set<string>();
-    const arr = revealedMap[selected.id] ?? ["Problem"];
+    const arr = revealedMap[selected.id] ?? sourceConfig.defaultRevealedSections;
     return new Set(arr);
-  }, [revealedMap, selected]);
+  }, [revealedMap, selected, sourceConfig]);
 
   const updateRevealed = useCallback(
     (patternId: number, updater: (prev: Set<string>) => Set<string>) => {
-      setRevealedMap((prev) => {
-        const cur = new Set(prev[patternId] ?? ["Problem"]);
+      setRevealedMaps((prev) => {
+        const sourceMap = prev[activeSource];
+        const cur = new Set(sourceMap[patternId] ?? sourceConfig.defaultRevealedSections);
         const next = updater(cur);
-        const out = { ...prev, [patternId]: [...next] };
-        saveRevealed(out);
-        return out;
+        const out = { ...sourceMap, [patternId]: [...next] };
+        saveRevealed(activeSource, out);
+        return { ...prev, [activeSource]: out };
       });
     },
-    [],
+    [activeSource, sourceConfig],
   );
 
   const onToggle = useCallback(
@@ -107,8 +193,8 @@ export default function App() {
 
   const onHideAll = useCallback(() => {
     if (!selected) return;
-    updateRevealed(selected.id, () => new Set(["Problem"]));
-  }, [selected, updateRevealed]);
+    updateRevealed(selected.id, () => new Set(sourceConfig.defaultRevealedSections));
+  }, [selected, sourceConfig, updateRevealed]);
 
   const onRevealNext = useCallback(() => {
     if (!selected) return;
@@ -138,58 +224,55 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [patterns, selectedId]);
+  }, [patterns, selectedId, setSelectedId]);
 
   const progress = useMemo(() => {
     const out: Record<number, { revealed: number; total: number }> = {};
     for (const p of patterns) {
-      const r = revealedMap[p.id] ?? ["Problem"];
+      const r = revealedMap[p.id] ?? sourceConfig.defaultRevealedSections;
       out[p.id] = { revealed: r.length, total: p.sections.length };
     }
     return out;
-  }, [patterns, revealedMap]);
-
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
-        Loading patterns…
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="h-full flex items-center justify-center text-[var(--color-warn)] p-8">
-        Failed to load patterns.md: {loadError}
-      </div>
-    );
-  }
-
-  if (!selected) {
-    return (
-      <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
-        No patterns parsed.
-      </div>
-    );
-  }
+  }, [patterns, revealedMap, sourceConfig]);
 
   return (
-    <div className="h-full flex">
-      <Sidebar
-        patterns={patterns}
-        selectedId={selected.id}
-        progress={progress}
-        onSelect={setSelectedId}
-      />
-      <PatternView
-        key={selected.id}
-        pattern={selected}
-        revealed={revealed}
-        onToggle={onToggle}
-        onShowAll={onShowAll}
-        onHideAll={onHideAll}
-        onRevealNext={onRevealNext}
-      />
+    <div className="h-full flex flex-col">
+      <SourceTabs active={activeSource} onSelect={onSelectSource} />
+      <div className="flex-1 min-h-0">
+        {sourceState.loading ? (
+          <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
+            Loading {sourceConfig.title}…
+          </div>
+        ) : sourceState.error ? (
+          <div className="h-full flex items-center justify-center text-[var(--color-warn)] p-8">
+            Failed to load {sourceConfig.file}: {sourceState.error}
+          </div>
+        ) : !selected ? (
+          <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
+            No content parsed.
+          </div>
+        ) : (
+          <div className="h-full flex">
+            <Sidebar
+              source={sourceConfig}
+              patterns={patterns}
+              selectedId={selected.id}
+              progress={progress}
+              onSelect={setSelectedId}
+            />
+            <PatternView
+              key={`${activeSource}-${selected.id}`}
+              source={sourceConfig}
+              pattern={selected}
+              revealed={revealed}
+              onToggle={onToggle}
+              onShowAll={onShowAll}
+              onHideAll={onHideAll}
+              onRevealNext={onRevealNext}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

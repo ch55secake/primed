@@ -1,9 +1,10 @@
 import { useEffect, useMemo } from "react";
-import type { Pattern } from "../lib/parser";
+import type { Pattern, SourceConfig } from "../lib/parser";
 import { sortSections } from "../lib/parser";
 import { Section } from "./Section";
 
 interface Props {
+  source: SourceConfig;
   pattern: Pattern;
   revealed: Set<string>;
   onToggle: (sectionName: string) => void;
@@ -23,6 +24,7 @@ const scrollToSection = (name: string) => {
 };
 
 export function PatternView({
+  source,
   pattern,
   revealed,
   onToggle,
@@ -31,8 +33,8 @@ export function PatternView({
   onRevealNext,
 }: Props) {
   const sortedSections = useMemo(
-    () => sortSections(pattern.sections),
-    [pattern],
+    () => sortSections(pattern.sections, source.sectionOrder),
+    [pattern, source],
   );
 
   useEffect(() => {
@@ -81,7 +83,7 @@ export function PatternView({
         <header className="mb-6 flex items-start justify-between gap-6">
           <div>
             <div className="text-xs text-[var(--color-text-dim)] tracking-widest uppercase mb-1">
-              Pattern {pattern.id}
+              {source.itemLabel} {pattern.id}
             </div>
             <h2 className="m-0 text-3xl font-bold text-[var(--color-text-strong)] tracking-tight">
               {pattern.title}

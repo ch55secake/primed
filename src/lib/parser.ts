@@ -10,6 +10,60 @@ export interface Pattern {
   sections: Section[];
 }
 
+export type SourceId = "patterns" | "neetcode";
+
+export interface SourceConfig {
+  id: SourceId;
+  file: string;
+  title: string;
+  itemLabel: string;
+  itemsPlural: string;
+  sectionOrder: string[];
+  defaultRevealedSections: string[];
+  storagePrefix: string;
+}
+
+export const SOURCES: Record<SourceId, SourceConfig> = {
+  patterns: {
+    id: "patterns",
+    file: "/patterns.md",
+    title: "System Design Flash",
+    itemLabel: "Pattern",
+    itemsPlural: "interview patterns",
+    storagePrefix: "sdf:patterns",
+    defaultRevealedSections: ["Problem"],
+    sectionOrder: [
+      "Problem",
+      "Summary",
+      "Clarifying Questions",
+      "Requirements",
+      "Scale Estimate",
+      "API Contract",
+      "High-Level Design",
+      "Data Model",
+      "Algorithm Comparison",
+      "Detailed Design",
+      "Potential Follow-Up Questions",
+      "Bottlenecks & Mitigations",
+      "Failure Modes",
+      "Observability — Key Metrics & SLOs",
+      "Multi-Region & DR",
+      "Common Mistakes / Anti-patterns",
+      "Talking Points for the Interview",
+    ],
+  },
+  neetcode: {
+    id: "neetcode",
+    file: "/neetcode-150.md",
+    title: "NeetCode 150",
+    itemLabel: "Problem",
+    itemsPlural: "interview problems",
+    storagePrefix: "sdf:neetcode",
+    defaultRevealedSections: ["Problem"],
+    sectionOrder: ["Problem", "Pattern", "Explanation", "Solution"],
+  },
+};
+
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n+/;
 const PATTERN_HEADER_RE = /^### (\d+)\.\s+(.+)$/;
 const SECTION_HEADER_RE = /^#### (.+)$/;
@@ -21,7 +75,7 @@ function slugify(title: string): string {
     .replace(/^-|-$/g, "");
 }
 
-export function parsePatterns(markdown: string): Pattern[] {
+export function parseContent(markdown: string): Pattern[] {
   const stripped = markdown.replace(FRONTMATTER_RE, "");
   const lines = stripped.split("\n");
 
@@ -66,24 +120,11 @@ export function parsePatterns(markdown: string): Pattern[] {
   return patterns;
 }
 
-export const CANONICAL_SECTION_ORDER = [
-  "Problem",
-  "Summary",
-  "Clarifying Questions",
-  "Requirements",
-  "Scale Estimate",
-  "API Contract",
-  "High-Level Design",
-  "Data Model",
-  "Algorithm Comparison",
-  "Detailed Design",
-  "Potential Follow-Up Questions",
-  "Bottlenecks & Mitigations",
-  "Talking Points for the Interview",
-];
-
-export function sortSections(sections: Section[]): Section[] {
-  const order = new Map(CANONICAL_SECTION_ORDER.map((n, i) => [n, i]));
+export function sortSections(
+  sections: Section[],
+  sectionOrder: string[],
+): Section[] {
+  const order = new Map(sectionOrder.map((n, i) => [n, i]));
   return [...sections].sort((a, b) => {
     const ai = order.get(a.name) ?? 999;
     const bi = order.get(b.name) ?? 999;

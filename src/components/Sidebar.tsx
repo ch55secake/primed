@@ -1,7 +1,8 @@
-import type { Pattern } from "../lib/parser";
+import type { Pattern, SourceConfig } from "../lib/parser";
 import { useTheme } from "../theme/ThemeContext";
 
 interface Props {
+  source: SourceConfig;
   patterns: Pattern[];
   selectedId: number;
   progress: Record<number, { revealed: number; total: number }>;
@@ -24,17 +25,17 @@ function progressDot(state?: { revealed: number; total: number }) {
   );
 }
 
-export function Sidebar({ patterns, selectedId, progress, onSelect }: Props) {
+export function Sidebar({ source, patterns, selectedId, progress, onSelect }: Props) {
   const { theme, toggle } = useTheme();
   return (
     <aside className="w-72 flex-shrink-0 border-r border-[var(--color-border)] bg-[var(--color-panel)] flex flex-col">
       <div className="px-4 py-4 border-b border-[var(--color-border)] flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h1 className="m-0 text-lg font-bold text-[var(--color-text-strong)] tracking-tight">
-            System Design Flash
+            {source.title}
           </h1>
           <p className="m-0 mt-1 text-xs text-[var(--color-text-dim)]">
-            {patterns.length} interview patterns
+            {patterns.length} {source.itemsPlural}
           </p>
         </div>
         <button

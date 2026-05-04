@@ -4,6 +4,8 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { HLDDiagram } from "./HLDDiagram";
 import { AuxDiagram } from "./AuxDiagram";
+import { InlineMermaid } from "./InlineMermaid";
+import { CodeTabs, extractCodeBlocks } from "./CodeTabs";
 import { splitFollowUps, splitDetailedDesign } from "../lib/contentSplit";
 import type { Section as SectionType } from "../lib/parser";
 
@@ -33,8 +35,40 @@ function splitHldContent(content: string): HldParts {
   return { ascii: asciiBlocks.join("\n\n"), prose: prose.trim() };
 }
 
+const MERMAID_LANGS = new Set([
+  "mermaid",
+  "flowchart",
+  "sequencediagram",
+  "erdiagram",
+  "statediagram",
+  "statediagram-v2",
+  "graph",
+  "classDiagram",
+  "gantt",
+  "pie",
+  "journey",
+]);
+
 const Markdown = ({ children }: { children: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    rehypePlugins={[rehypeHighlight]}
+    components={{
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      code: (props: any) => {
+        const { inline, className, children: codeChildren, ...rest } = props;
+        const lang = (className || "").replace("language-", "").toLowerCase();
+        if (!inline && MERMAID_LANGS.has(lang)) {
+          return <InlineMermaid source={String(codeChildren).trim()} />;
+        }
+        return (
+          <code className={className} {...rest}>
+            {codeChildren}
+          </code>
+        );
+      },
+    }}
+  >
     {children}
   </ReactMarkdown>
 );
@@ -150,8 +184,10 @@ export function Section({
   const isDataModel = section.name === "Data Model";
   const isDetailedDesign = section.name === "Detailed Design";
   const isFollowUps = section.name === "Potential Follow-Up Questions";
+  const isSolution = section.name === "Solution";
 
   const hldParts = isHld ? splitHldContent(section.content) : null;
+  const codeBlocks = isSolution ? extractCodeBlocks(section.content) : [];
 
   const sectionId = `section-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
@@ -210,6 +246,8 @@ export function Section({
                 label="Schema overview"
               />
             </>
+          ) : isSolution && codeBlocks.length > 0 ? (
+            <CodeTabs blocks={codeBlocks} />
           ) : (
             <Markdown>{section.content}</Markdown>
           )}
