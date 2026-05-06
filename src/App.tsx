@@ -54,9 +54,11 @@ function loadSelected(source: SourceId): number {
   return Number.isFinite(n) ? n : 1;
 }
 
+const VALID_SOURCES: SourceId[] = ["patterns", "neetcode", "java"];
+
 function readSourceFromHash(): SourceId {
   const h = window.location.hash.replace(/^#\/?/, "").toLowerCase();
-  return h === "neetcode" ? "neetcode" : "patterns";
+  return (VALID_SOURCES as string[]).includes(h) ? (h as SourceId) : "patterns";
 }
 
 function writeSourceToHash(source: SourceId) {
@@ -75,16 +77,19 @@ export default function App() {
   const [sources, setSources] = useState<Record<SourceId, SourceState>>({
     patterns: { patterns: [], loading: true, error: null },
     neetcode: { patterns: [], loading: true, error: null },
+    java: { patterns: [], loading: true, error: null },
   });
 
   const [selectedIds, setSelectedIds] = useState<Record<SourceId, number>>({
     patterns: loadSelected("patterns"),
     neetcode: loadSelected("neetcode"),
+    java: loadSelected("java"),
   });
 
   const [revealedMaps, setRevealedMaps] = useState<Record<SourceId, RevealedMap>>({
     patterns: loadRevealed("patterns"),
     neetcode: loadRevealed("neetcode"),
+    java: loadRevealed("java"),
   });
 
   useEffect(() => {
@@ -105,7 +110,7 @@ export default function App() {
           if (cancelled) return;
           setSources((prev) => ({
             ...prev,
-            [id]: { patterns: parseContent(md), loading: false, error: null },
+            [id]: { patterns: parseContent(md, SOURCES[id]), loading: false, error: null },
           }));
         })
         .catch((e) => {

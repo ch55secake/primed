@@ -1,5 +1,5 @@
 {
-  "name": "system-design-flash",
+  "name": "interview-prep",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync-content": "bash scripts/sync-content.sh"
   },
   "dependencies": {
     "highlight.js": "^11.11.1",

@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode";
+export type SourceId = "patterns" | "neetcode" | "java";
 
 export interface SourceConfig {
   id: SourceId;
@@ -21,13 +21,19 @@ export interface SourceConfig {
   sectionOrder: string[];
   defaultRevealedSections: string[];
   storagePrefix: string;
+  /** Markdown heading level for items. Default 3 (### N. Title). */
+  itemHeadingLevel?: number;
+  /** Markdown heading level for sections. Default 4 (#### Section). */
+  sectionHeadingLevel?: number;
+  /** When true, items don't need explicit "N." numbering — IDs assigned by encounter order. */
+  autoNumberItems?: boolean;
 }
 
 export const SOURCES: Record<SourceId, SourceConfig> = {
   patterns: {
     id: "patterns",
     file: "/patterns.md",
-    title: "System Design Flash",
+    title: "System Design",
     itemLabel: "Pattern",
     itemsPlural: "interview patterns",
     storagePrefix: "sdf:patterns",
@@ -62,11 +68,22 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     defaultRevealedSections: ["Problem"],
     sectionOrder: ["Problem", "Pattern", "Explanation", "Solution"],
   },
+  java: {
+    id: "java",
+    file: "/java-interview-primer.md",
+    title: "Java",
+    itemLabel: "Topic",
+    itemsPlural: "Java topics",
+    storagePrefix: "ip:java",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
 };
 
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n+/;
-const PATTERN_HEADER_RE = /^### (\d+)\.\s+(.+)$/;
-const SECTION_HEADER_RE = /^#### (.+)$/;
 
 function slugify(title: string): string {
   return title
@@ -75,7 +92,18 @@ function slugify(title: string): string {
     .replace(/^-|-$/g, "");
 }
 
-export function parseContent(markdown: string): Pattern[] {
+export function parseContent(markdown: string, cfg?: SourceConfig): Pattern[] {
+  const itemLevel = cfg?.itemHeadingLevel ?? 3;
+  const sectionLevel = cfg?.sectionHeadingLevel ?? 4;
+  const autoNumber = cfg?.autoNumberItems ?? false;
+
+  const itemHashes = "#".repeat(itemLevel);
+  const sectionHashes = "#".repeat(sectionLevel);
+
+  const numberedItemRe = new RegExp(`^${itemHashes} (\\d+)\\.\\s+(.+)$`);
+  const plainItemRe = new RegExp(`^${itemHashes} (.+)$`);
+  const sectionRe = new RegExp(`^${sectionHashes} (.+)$`);
+
   const stripped = markdown.replace(FRONTMATTER_RE, "");
   const lines = stripped.split("\n");
 
@@ -83,6 +111,7 @@ export function parseContent(markdown: string): Pattern[] {
   let current: Pattern | null = null;
   let currentSection: Section | null = null;
   let buffer: string[] = [];
+  let nextAutoId = 1;
 
   const flushSection = () => {
     if (current && currentSection) {
@@ -94,17 +123,31 @@ export function parseContent(markdown: string): Pattern[] {
   };
 
   for (const line of lines) {
-    const patternMatch = line.match(PATTERN_HEADER_RE);
-    if (patternMatch) {
+    let id: number | null = null;
+    let title: string | null = null;
+
+    if (autoNumber) {
+      const m = line.match(plainItemRe);
+      if (m) {
+        id = nextAutoId++;
+        title = m[1].trim();
+      }
+    } else {
+      const m = line.match(numberedItemRe);
+      if (m) {
+        id = parseInt(m[1], 10);
+        title = m[2].trim();
+      }
+    }
+
+    if (id !== null && title !== null) {
       flushSection();
       if (current) patterns.push(current);
-      const id = parseInt(patternMatch[1], 10);
-      const title = patternMatch[2].trim();
       current = { id, slug: slugify(title), title, sections: [] };
       continue;
     }
 
-    const sectionMatch = line.match(SECTION_HEADER_RE);
+    const sectionMatch = line.match(sectionRe);
     if (sectionMatch && current) {
       flushSection();
       currentSection = { name: sectionMatch[1].trim(), content: "" };
@@ -117,13 +160,15 @@ export function parseContent(markdown: string): Pattern[] {
   flushSection();
   if (current) patterns.push(current);
 
-  return patterns;
+  // Drop items with no content sections — usually trailing "Related Notes" / appendix headings
+  return patterns.filter((p) => p.sections.length > 0);
 }
 
 export function sortSections(
   sections: Section[],
   sectionOrder: string[],
 ): Section[] {
+  if (sectionOrder.length === 0) return sections;
   const order = new Map(sectionOrder.map((n, i) => [n, i]));
   return [...sections].sort((a, b) => {
     const ai = order.get(a.name) ?? 999;
