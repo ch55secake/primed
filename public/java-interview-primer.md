@@ -4179,6 +4179,125 @@ exec.scheduleWithFixedDelay(() -> {
 }, 0, 1, SECONDS);
 ```
 
+### Q241. How do you make atomic check-and-act with `ConcurrentHashMap.compute()`?
+
+The classic concurrent bug — `if (!map.containsKey(k)) map.put(k, v)` — is two operations with a race in between. Two threads both see `containsKey == false`, both put, second clobbers first.
+
+`ConcurrentHashMap.compute(key, BiFunction)` runs the lambda **atomically** while holding the bin's lock — no other thread can interleave on that key:
+
+```java
+Map<Integer, List<Booking>> store = new ConcurrentHashMap<>();
+
+// Atomic check-then-add per table
+store.compute(tableId, (k, existing) -> {
+    var current = existing == null ? List.<Booking>of() : existing;
+    if (current.stream().anyMatch(b -> b.slot().overlaps(slot))) {
+        return current;        // overlap detected, no insert, return unchanged
+    }
+    return append(current, newBooking);
+});
+```
+
+**Pros vs `ReentrantLock`:**
+- Atomic by construction — no `try/finally` discipline needed
+- No explicit lock objects to manage
+- Per-key granularity built in
+
+**Cons:**
+- **Signalling success/failure out** of the lambda is awkward — needs a side channel like `AtomicReference<Optional<Booking>>` outside the call:
+  ```java
+  AtomicReference<Optional<Booking>> result = new AtomicReference<>(Optional.empty());
+  store.compute(tableId, (k, existing) -> { ... result.set(Optional.of(b)); ... });
+  return result.get();
+  ```
+- Holds the bin lock for the entire BiFunction — long-running logic blocks readers of that key
+- Function must be **deterministic** in `equals` sense — re-running it must produce the same result if the JVM retries
+
+**Variants:**
+- `computeIfAbsent` — only runs lambda if key missing; perfect for memoisation caches
+- `computeIfPresent` — only runs if key present; in-place mutation
+- `merge(k, v, BiFunction)` — combine new value with existing (e.g. `merge(k, 1, Integer::sum)` for atomic counters)
+
+### Q242. Locking primitive cheat sheet — when NOT to use each.
+
+Choosing the right primitive matters more than knowing all of them. Common picks ranked from "default" to "specialist":
+
+| Primitive | Use it when | **Don't** use it when |
+|---|---|---|
+| **`synchronized`** | Quick mutex, no extras needed | Need `tryLock` / fairness / timeout / multiple condition vars |
+| **`ReentrantLock`** | Per-resource fine-grained mutex; want flexibility | A shorter `synchronized` would do — pay-for-what-you-use |
+| **`ReadWriteLock`** | Reads vastly outnumber writes (~10:1+) and write must be exclusive | Check + insert is one atomic unit — readers can't see in-flight write |
+| **`StampedLock`** | Read-heavy with optimistic fast path on hot fields | Need reentrancy (it's not reentrant — easy deadlock); business code (3 modes are too many) |
+| **`Semaphore(1)`** | "Limit N concurrent users" semantics | Mutex — semaphore has no owner, no reentrancy. Different thread can release. Footgun. |
+| **`AtomicReference` + CAS** | Lock-free, predictable low contention | Bursty contention — retry storms allocate per attempt and waste CPU |
+| **`ConcurrentHashMap.compute()`** | Atomic per-key mutation (Q241) | Need to signal a value out — awkward without `AtomicReference` side channel |
+
+**Default trio:** start with `synchronized` (or `ReentrantLock` if you need fairness/timeout), reach for `ConcurrentHashMap.compute()` for per-key atomicity, escalate to `ReadWriteLock` only if profiling shows reader contention.
+
+### Q243. Concrete example — reactive vs virtual threads for aggregation.
+
+**Scenario:** API gateway endpoint that aggregates 5 downstream calls per request to build a user dashboard.
+
+**Reactive (Project Reactor):**
+```java
+public Mono<UserDashboard> dashboard(UUID userId) {
+    return Mono.zip(
+        userClient.getUser(userId),
+        ordersClient.getOrders(userId),
+        notificationsClient.getUnread(userId),
+        billingClient.getBalance(userId),
+        recommendationsClient.getRecommended(userId)
+    ).map(t -> new UserDashboard(
+        t.getT1(), t.getT2(), t.getT3(), t.getT4(), t.getT5()
+    ));
+}
+```
+5 parallel HTTP calls, **no thread blocked**, results assembled when all complete. A handful of Netty event-loop threads handle thousands of concurrent dashboards.
+
+**Virtual threads (Java 21+):**
+```java
+public UserDashboard dashboard(UUID userId) throws Exception {
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        var user    = executor.submit(() -> userClient.getUser(userId));
+        var orders  = executor.submit(() -> ordersClient.getOrders(userId));
+        var notifs  = executor.submit(() -> notificationsClient.getUnread(userId));
+        var balance = executor.submit(() -> billingClient.getBalance(userId));
+        var recs    = executor.submit(() -> recommendationsClient.getRecommended(userId));
+
+        return new UserDashboard(
+            user.get(), orders.get(), notifs.get(), balance.get(), recs.get()
+        );
+    }
+}
+```
+Same parallelism. Virtual threads unmount from carriers during blocking I/O; carriers serve other virtual threads. Synchronous-looking code, debuggable stack traces.
+
+**Better with `StructuredTaskScope` (Java 21+ preview):**
+```java
+try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+    var user    = scope.fork(() -> userClient.getUser(userId));
+    var orders  = scope.fork(() -> ordersClient.getOrders(userId));
+    // ...
+    scope.join();
+    scope.throwIfFailed();
+    return new UserDashboard(user.get(), orders.get(), ...);
+}
+```
+First failure cancels siblings — equivalent to `Mono.zip`'s "fail fast" behaviour, with cleaner exception propagation.
+
+**Comparison summary:**
+
+| | Reactive | Virtual threads |
+|---|---|---|
+| Code shape | Functional, operator chaining | Imperative, sync-style |
+| Stack traces | Reactor's machinery in every frame | Your code only |
+| Backpressure | First-class (`request(n)`, operators) | Manual (semaphores, bounded queues) |
+| Composition | Rich (`zip`, `merge`, `switchMap`, `retryWhen`) | Plain Java |
+| Streaming | Native `Flux<T>` | Awkward — no first-class push stream |
+| Existing blocking SDKs | Must wrap (`Mono.fromCallable` + `subscribeOn(boundedElastic)`) | Just call them |
+
+**Senior take:** for request/response aggregation, virtual threads now usually win — same scalability, simpler code. Reactive remains the right pick for streaming pipelines (SSE, Kafka, websocket fan-out) where `Flux` operators earn their cost.
+
 ---
 
 ## JVM Internals
@@ -4355,6 +4474,41 @@ During young-gen GC, the collector:
 Cost: every reference write executes a few extra instructions for the barrier. Saves enormous time on minor GCs by not scanning all of old gen.
 
 G1 uses a more sophisticated scheme — **Remembered Set** per region, tracking which other regions reference into this one. ZGC uses **load barriers** (read-side, not write-side) for its colored pointers approach.
+
+### Q244. Walk me through what happens at the byte-level when you do `new MyClass()`.
+
+Five phases. Worth knowing for senior interviews because it ties together class loading, memory, GC, and constructors.
+
+**Phase 1 — Class loading (if not already loaded):**
+- ClassLoader finds `MyClass.class` (filesystem, JAR, network, generated)
+- Bytecode verifier checks the class is well-formed and safe
+- Class linked: prepare static fields with default values (0/null), resolve symbolic references
+- **Static initialisation:** static fields assigned, static blocks run — **once per class loader**
+
+**Phase 2 — Memory allocation:**
+- JVM computes object size: object header + instance fields + padding (8-byte alignment)
+- **Object header** ~12-16 bytes: mark word (hashCode, GC age, lock state) + class pointer (compressed if `-XX:+UseCompressedOops`)
+- Allocation: bump-pointer in the current thread's **TLAB** (Thread-Local Allocation Buffer) in Eden — typically a single increment of a pointer
+- If TLAB exhausted, allocate a new TLAB or fall back to slow-path allocation in shared Eden
+
+**Phase 3 — Field defaults:**
+- All instance fields zeroed: numeric → 0, boolean → false, references → null
+- This guarantees no leaked memory from previous occupants
+
+**Phase 4 — Constructor chain:**
+- `super()` resolves and runs first (recursing up to `Object` constructor)
+- Then this class's instance initialiser blocks (in source order, interleaved with field initialisers)
+- Then this class's constructor body
+- If the constructor throws, the partially-constructed object is unreachable → garbage collected on next GC
+
+**Phase 5 — Reference returned:**
+- The reference (an indirect pointer in compressed-OOPs mode) is returned to the caller
+- Object lives in Eden until the next minor GC; if still reachable, copied to a survivor space; eventually promoted to old gen after surviving N collections (default `MaxTenuringThreshold=15`)
+
+**Why this matters in interviews:**
+- TLAB allocation explains why allocation is ~5-10ns in Java — competitive with C `malloc`
+- Object header explains why every Java object has a memory floor of 16+ bytes
+- The constructor chain explains why `final` fields can't be reassigned and why escaped `this` references can break thread-safety
 
 ---
 
@@ -4694,6 +4848,29 @@ class AuditTest {
 **Key difference vs `@Mock` + `@InjectMocks`:** `@MockBean`/`@SpyBean` work inside the Spring container — your controller's `@Autowired` dependencies become the mocks. `@Mock` + `@InjectMocks` is reflection-based and bypasses Spring entirely.
 
 **Drawback of `@MockBean`:** slow because it dirties the application context — Spring evicts and rebuilds the cached context. Heavy use of `@MockBean` slows test suites measurably.
+
+### Q240. How does Spring resolve circular dependencies?
+
+Two beans depending on each other (`A` needs `B`, `B` needs `A`) sound impossible — but Spring's singleton container resolves it via a **three-level cache**:
+
+- **Level 1 — Singleton cache** — fully initialised, ready-to-use beans
+- **Level 2 — Early singleton cache** — partially constructed beans (instance exists, dependencies not yet injected)
+- **Level 3 — Singleton factories** — `ObjectFactory<?>` callbacks that produce early references on demand (used to create proxies lazily)
+
+**Resolution flow** when creating `A` which depends on `B` which depends on `A`:
+
+1. Start creating `A` — register a singleton factory in level 3
+2. Spring sees `A` needs `B` — start creating `B`
+3. `B` needs `A` — Spring asks the level-1 cache (miss), then level-2 (miss), then level-3 — finds the factory, gets an early reference to half-built `A`
+4. `B` finishes, gets injected into `A`
+5. `A` finishes — moves from level-3 to level-1
+
+**Critical limitation:** **constructor injection cycles can't be resolved this way.** Constructor needs a fully-built dependency, but the dependency can't be built without the dependent. Spring throws `BeanCurrentlyInCreationException` at startup. Workaround: switch one side to setter or field injection (or refactor — circular deps usually indicate a design problem).
+
+**Other circular-dep escape hatches:**
+- `@Lazy` on the dependency — injects a proxy, deferring resolution
+- `ObjectProvider<T>` / `Provider<T>` — explicitly lazy lookup
+- Refactor — split shared logic into a third bean both depend on (preferred)
 
 ---
 
@@ -5401,6 +5578,54 @@ try (MockedStatic<Files> mocked = Mockito.mockStatic(Files.class)) {
 **Branch coverage** is more valuable than line coverage for `if`/`switch`-heavy code. Configure JaCoCo to require branch coverage too.
 
 **Mutation testing (PIT)** complements coverage by measuring whether tests would catch mutations — far more meaningful than coverage alone.
+
+### Q245. `MockitoExtension` vs `SpringExtension` — when each?
+
+Both are JUnit 5 extensions (`@ExtendWith(...)` or via the `*Test` slice annotations).
+
+**`MockitoExtension`** — wires up Mockito, no Spring context.
+- Initialises `@Mock`, `@Spy`, `@Captor` annotated fields
+- Enables strict stubbing (warns about unused stubs)
+- Validates framework usage (catches misuse like missing `Mockito.verify` calls)
+- **Fast** — no Spring context, no application boot
+- Use for **pure unit tests** of services / domain classes
+
+```java
+@ExtendWith(MockitoExtension.class)
+class BookingServiceTest {
+    @Mock BookingRepository repo;
+    @InjectMocks BookingService service;
+
+    @Test
+    void rejects_when_no_table() {
+        when(repo.findAvailable(any())).thenReturn(List.of());
+        assertThrows(NoTableException.class, () -> service.book(...));
+    }
+}
+```
+
+**`SpringExtension`** — boots a Spring `TestContext`. Brings real bean wiring, profiles, properties.
+- Used **indirectly** via `@SpringBootTest`, `@WebMvcTest`, `@DataJpaTest`, etc.
+- Slower — application context startup typically 2-5s, cached across tests in the same suite
+- Use for integration tests where you genuinely need Spring
+
+```java
+@SpringBootTest
+class BookingApiIntegrationTest {
+    @Autowired BookingService service;       // real bean
+    @MockBean PaymentClient payments;        // replaced in context
+}
+```
+
+**Combine when needed:**
+```java
+@ExtendWith({SpringExtension.class, MockitoExtension.class})
+```
+
+**Rule of thumb:**
+- Plain class with constructor-injectable deps → `MockitoExtension`
+- Spring features (validation, AOP, transactions, autowiring) being tested → `SpringExtension` via a slice
+- Avoid `@SpringBootTest` for unit tests — it's expensive and dirties the cached context if you use `@MockBean`
 
 ---
 
