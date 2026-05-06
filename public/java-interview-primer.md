@@ -13,7 +13,7 @@ Comprehensive Q+A primer covering any Java backend interview. Sister note to [[J
 
 Each answer is interview-shaped: 2–6 sentences, code where useful, no textbook padding. Skim by section, deep-dive on anything unfamiliar.
 
-**Sections:**
+**Sections (Tier 1 — interview baseline, Q1-135):**
 1. [[#Core Java Fundamentals]] (15)
 2. [[#Java 8+ Features]] (10)
 3. [[#Collections Framework]] (10)
@@ -29,6 +29,21 @@ Each answer is interview-shaped: 2–6 sentences, code where useful, no textbook
 13. [[#JPA & Spring Data Extras]] (6)
 14. [[#Testing Deep Dive]] (6)
 15. [[#Common Java Pitfalls]] (6)
+
+**Sections (Tier 2 — senior depth, Q136-237):**
+16. [[#Core Java — Senior Depth]] (7)
+17. [[#Modern Java — Deep Dive]] (10)
+18. [[#Collections — Senior Depth]] (12)
+19. [[#Concurrency — Senior Depth]] (10)
+20. [[#JVM Internals]] (8)
+21. [[#Spring — Advanced]] (8)
+22. [[#Database — Deep Dive]] (8)
+23. [[#Architecture — Advanced]] (8)
+24. [[#Testing — Advanced]] (5)
+25. [[#Build Tools]] (8)
+26. [[#Cloud-Native Java]] (8)
+27. [[#Networking & Protocols]] (6)
+28. [[#Resilience Patterns]] (6)
 
 ---
 
@@ -3124,6 +3139,3214 @@ Same for:
 **Java 18+ change:** the platform default charset is now UTF-8 by default (JEP 400) — long overdue. But code that runs on older JDKs or with `-Dfile.encoding=...` overrides still bites. Be explicit anyway.
 
 **Rule:** if your code does any I/O with text, always pass `StandardCharsets.UTF_8` (or whatever you actually need). Never rely on platform default.
+
+---
+
+---
+
+## Core Java — Senior Depth
+
+### Q136. What is reflection and when should you use it?
+
+Reflection is the API for inspecting and manipulating classes/methods/fields at runtime — `Class.forName`, `getDeclaredMethods`, `Method.invoke`, `Field.set`. Frameworks use it pervasively: Spring DI, JPA, Jackson, JUnit. They have to — they don't know your classes at compile time.
+
+Application code: avoid except for narrow cases (dynamic plugin loading, generic frameworks, working around library limits). Costs:
+- 10-100x slower than direct calls
+- Compile-time type safety lost
+- Refactor-hostile (renamed field → runtime crash, no compiler warning)
+- Module system blocks reflection without explicit `opens`
+
+Modern alternatives: `MethodHandle` (faster, type-safe via signatures), `LambdaMetafactory` (used internally by lambdas), compile-time annotation processors (Lombok, MapStruct, Immutables, Dagger) — generate plain Java rather than reflect at runtime.
+
+### Q137. Explain Java annotations and retention policies.
+
+Annotations attach metadata to code elements. Three retention policies (`@Retention`):
+
+- **`SOURCE`** — discarded after compile (`@Override`, `@SuppressWarnings`)
+- **`CLASS`** — in `.class` file, not loaded at runtime (default)
+- **`RUNTIME`** — available via reflection (`@Component`, `@Test`, `@JsonProperty`)
+
+`@Target` restricts where they apply (`METHOD`, `TYPE`, `FIELD`, `PARAMETER`, `ANNOTATION_TYPE`, etc.). `@Repeatable` allows multiple of the same annotation on one element.
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+public @interface Audited {
+    String value() default "";
+}
+```
+
+**Annotation processors** run at compile time (`javax.annotation.processing.Processor`). Lombok, MapStruct, Immutables, Dagger generate code rather than reflect at runtime — much faster, fully type-checked.
+
+### Q138. Why is Java's serialization considered dangerous?
+
+`Serializable` lets the JVM convert object graphs to bytes via `ObjectOutputStream`. Sounds great. Real-world problems:
+
+- **Security** — deserialisation invokes constructors of arbitrary classes on the classpath. Attacker-controlled bytes → remote code execution. The Apache Commons Collections RCE was this. Don't deserialise untrusted input.
+- **Coupling** — wire format is tied to class shape. Rename a field → deserialisation fails. `serialVersionUID` only partially helps.
+- **Bypasses constructors** — invariants checked in your constructor are skipped. Need defensive `readObject` to compensate.
+- **Surprises** — `transient` fields not serialised; statics not serialised; non-`Serializable` fields cause runtime errors; `enum` and `record` deserialisation has special rules.
+
+**Alternatives:** Jackson/Gson (JSON), Protobuf/Avro (schema-evolved binary), Kryo (fast Java-only). Java now ships serialisation filters (`-Djdk.serialFilter`) — serious shops disable native serialisation entirely.
+
+### Q139. Why is `clone()` and `Cloneable` considered broken?
+
+`Cloneable` is a marker interface that doesn't define `clone()`; `clone()` lives on `Object` as `protected` and `native`. To use it: implement `Cloneable`, override `clone()` as public, call `super.clone()`, suffer.
+
+Problems (Effective Java item 13 — "the clone method is generally considered broken"):
+- Bypasses constructors → invariants skipped
+- Default is shallow → references shared with original; deep copies need manual override (easy to forget)
+- Throws checked `CloneNotSupportedException`
+- Inheritance + `clone` is a minefield — subclass may not implement `Cloneable`
+- Conflicts with `final` fields (can't reassign in `clone()`)
+
+**Alternatives:** copy constructors (`new Person(other)`), copy factory methods (`Person.copyOf(other)`), immutability + `with*` methods, serialisation roundtrip for deep copies. Records get a free shallow copy via the canonical constructor; for variations, write a `with*` style factory.
+
+### Q140. What are the methods on `java.lang.Object` and when should you override them?
+
+Eleven public methods. Three you should consider overriding:
+- **`equals(Object)`** — value equality
+- **`hashCode()`** — must be consistent with equals
+- **`toString()`** — debug aid, log/exception messages improve
+
+Three you can't:
+- `getClass()` — final
+- `wait`/`notify`/`notifyAll` — final, concurrency primitives
+
+Two you shouldn't:
+- `clone()` — broken (Q139)
+- `finalize()` — deprecated since Java 9, removed for `Object` in Java 18; use `Cleaner` or try-with-resources
+
+Records auto-generate `equals`, `hashCode`, and `toString` correctly. Use them for value types instead of writing these by hand.
+
+### Q141. Explain bounded wildcards and the PECS rule.
+
+Bounded wildcards constrain generic type parameters:
+- `<? extends T>` — upper bound; T or any subtype
+- `<? super T>` — lower bound; T or any supertype
+
+**PECS** (Producer Extends, Consumer Super) — Joshua Bloch's mnemonic:
+- If the structure **produces** T's (you read them out), use `<? extends T>`
+- If the structure **consumes** T's (you write them in), use `<? super T>`
+
+```java
+// Producer — reads Numbers out
+public static double sum(List<? extends Number> nums) {
+    double s = 0;
+    for (Number n : nums) s += n.doubleValue();
+    return s;
+}
+
+// Consumer — writes Integers in
+public static void addInts(List<? super Integer> dst) {
+    dst.add(42);
+}
+
+// Both — Collections.copy
+public static <T> void copy(List<? super T> dst, List<? extends T> src) { ... }
+```
+
+Without bounded wildcards, `List<Integer>` isn't a `List<Number>` (generics are invariant). PECS gives flexibility without sacrificing type safety. Trade-off: a `<? extends T>` list can't have anything added (the compiler doesn't know which subtype it actually holds).
+
+### Q142. What's the static initialisation order in Java?
+
+For a class hierarchy `Parent` → `Child`, when something first triggers `Child` to load:
+
+1. Parent class loaded first
+2. Parent's `static` fields initialised in declaration order
+3. Parent's `static` initialiser blocks run in source order (interleaved with field initialisers)
+4. Child class loaded
+5. Child's `static` fields initialised
+6. Child's `static` initialiser blocks run
+
+When an instance is then created (`new Child()`):
+
+7. Parent's instance fields initialised
+8. Parent's instance initialiser blocks run
+9. Parent's constructor body runs
+10. Child's instance fields initialised
+11. Child's instance initialiser blocks run
+12. Child's constructor body runs
+
+**Key gotcha:** a `static final` field initialised by a constant expression is **inlined into callers at compile time**. References from other classes don't trigger class loading — useful for interface constants (no init), surprising when you change a constant's value and a stale class isn't recompiled.
+
+```java
+class A {
+    static final int X = 5;          // inlined into other classes
+    static final int Y = compute();  // forces class init when accessed
+}
+```
+
+---
+
+## Modern Java — Deep Dive
+
+### Q143. How do records use compact constructors for validation?
+
+A **compact constructor** is special syntax for a record's canonical constructor — no parameter list, the parameters are implicit, field assignments happen automatically at the end.
+
+```java
+public record Money(BigDecimal amount, Currency currency) {
+    public Money {
+        if (amount == null) throw new IllegalArgumentException("amount required");
+        if (currency == null) throw new IllegalArgumentException("currency required");
+        amount = amount.setScale(currency.getDefaultFractionDigits(), HALF_UP);
+        // No explicit `this.amount = amount` — it's implicit at end
+    }
+}
+```
+
+Inside the compact body you can:
+- Validate inputs (`throw`)
+- Normalise inputs (reassign the *parameter* — not the field — and the implicit assignment captures the normalised value)
+
+You can also write a **full canonical constructor** (matching component types) when you need to do something the compact form can't — but the compact form is preferred. Records can additionally have static factory methods, instance methods, custom accessors that override the default.
+
+### Q144. Show a worked example of sealed types for state machines.
+
+```java
+public sealed interface PaymentResult
+    permits Approved, Declined, Pending, Failed {}
+
+public record Approved(String authCode, Instant authorisedAt) implements PaymentResult {}
+public record Declined(String reason) implements PaymentResult {}
+public record Pending(String trackingId) implements PaymentResult {}
+public record Failed(Throwable cause) implements PaymentResult {}
+
+// Exhaustive matching — compiler enforces every variant handled
+String summary = switch (result) {
+    case Approved(var code, var at) -> "auth %s at %s".formatted(code, at);
+    case Declined(var reason)       -> "declined: " + reason;
+    case Pending(var id)            -> "pending: " + id;
+    case Failed(var cause)          -> "failed: " + cause.getMessage();
+    // No default needed — compiler sees the closed set via `permits`
+};
+```
+
+`permits` can be omitted if all subtypes are in the same compilation unit. Sealed + records + pattern matching = **algebraic data types in Java**. The single best modern way to model finite domain states (booking outcomes, order events, payment results, parser tokens).
+
+### Q145. Pattern matching for switch + record patterns — what changed?
+
+Java 21 finalised both. Switch dispatches on type with binding; records can be deconstructed inside patterns:
+
+```java
+sealed interface Shape permits Circle, Square, Triangle {}
+record Circle(double radius) implements Shape {}
+record Square(double side) implements Shape {}
+record Triangle(double base, double height) implements Shape {}
+
+double area = switch (shape) {
+    case Circle(double r)              -> Math.PI * r * r;
+    case Square(double s)              -> s * s;
+    case Triangle(double b, double h)  -> 0.5 * b * h;
+    case null                          -> 0;
+};
+```
+
+**`when` clauses** add boolean guards:
+```java
+String desc = switch (n) {
+    case Integer i when i < 0  -> "negative";
+    case Integer i when i == 0 -> "zero";
+    case Integer i             -> "positive: " + i;
+    case null                  -> "no value";
+};
+```
+
+**Nested record patterns:**
+```java
+case Box(Point(var x, var y), var width, var height) -> ...;
+```
+
+Replaces visitor pattern. Combined with sealed types, gives exhaustive checking. Replaces N hand-rolled `instanceof` chains.
+
+### Q146. Switch expressions vs switch statements — what's the difference?
+
+Switch expressions (Java 14+) **return values** and force exhaustiveness; statements don't.
+
+```java
+// Statement (legacy) — fall-through, breaks, side effects
+int days;
+switch (month) {
+    case JAN: case MAR: case MAY: days = 31; break;
+    case APR: case JUN: ... days = 30; break;
+    default: throw new IllegalStateException();
+}
+
+// Expression (modern) — exhaustive, no fall-through, returns
+int days = switch (month) {
+    case JAN, MAR, MAY, JUL, AUG, OCT, DEC -> 31;
+    case APR, JUN, SEP, NOV                -> 30;
+    case FEB                                -> isLeap ? 29 : 28;
+};
+```
+
+**Arrow form** (`->`) means no fall-through, scoped to a single branch. **Yield** lets a multi-statement block return a value:
+
+```java
+int x = switch (s) {
+    case "a" -> 1;
+    case "b" -> {
+        int n = compute();
+        yield n * 2;     // yield, not return
+    }
+};
+```
+
+Switch expressions on enum or sealed types must be exhaustive — compiler enforces. For `int`/`String`, you still need `default`.
+
+### Q147. How do text blocks handle escaping and indentation?
+
+Java 15. Triple-double-quote multi-line strings:
+
+```java
+String json = """
+    {
+        "name": "Alice",
+        "active": true
+    }
+    """;
+```
+
+**Indentation handling:** the compiler finds the minimum leading whitespace across all non-empty lines (including the line with the closing `"""`) and strips that much from every line. So the JSON above has zero leading whitespace per line — 4 spaces stripped. Move the closing `"""` left to keep more leading whitespace; right to strip more.
+
+**Escape rules:**
+- `\n`, `\t`, `\\`, `\"` — same as regular strings
+- Triple-quote inside a text block: `\"""`
+- `\` at end of line: line continuation (no newline added)
+- `\s` — escape a single space (defends against trailing-whitespace stripping)
+
+**`String.formatted()`** (Java 15+) replaces `String.format(template, args)` boilerplate:
+
+```java
+String greeting = """
+    Hello, %s.
+    You have %d messages.
+    """.formatted(name, count);
+```
+
+### Q148. `var`, diamond operator, and target typing — how does Java infer types?
+
+**`var`** (Java 10) — local-variable type inference. Compiler infers the static type from the initialiser expression:
+
+```java
+var list = new ArrayList<String>();   // ArrayList<String>
+var map  = Map.of("k", 1);             // Map<String, Integer>
+for (var entry : map.entrySet()) ...   // Map.Entry<String, Integer>
+```
+
+Restrictions: locals only (not fields, parameters, return types — except lambda params since 11), must have initialiser, can't be null without explicit type, can't be array initialiser shorthand.
+
+**Diamond operator** (Java 7) — infers generic type args from context:
+
+```java
+List<String> list = new ArrayList<>();         // <> infers <String>
+Map<String, List<Integer>> m = new HashMap<>(); // works for nested too
+```
+
+**Target typing** — the expected type on the left drives inference on the right:
+
+```java
+Predicate<String> p = s -> s.isEmpty();   // s inferred as String from Predicate<String>
+List<String> sorted = stream
+    .sorted()
+    .collect(Collectors.toList());        // toList<>() inferred from List<String>
+```
+
+`var` + target typing collide — without a target type, the compiler can't infer a lambda's interface:
+
+```java
+var p = s -> s.isEmpty();                       // ✗ no target type
+var p = (Predicate<String>) s -> s.isEmpty();   // ✓ explicit cast restores it
+```
+
+### Q149. What's the virtual thread pinning gotcha?
+
+Virtual threads (Java 21) usually **unmount** from their carrier OS thread on blocking I/O — that's the whole point. The carrier runs other virtual threads while the original waits for I/O.
+
+**`synchronized` blocks pin** the virtual thread to its carrier. The carrier can't run other virtual threads during the synchronized region. Defeats the optimisation.
+
+```java
+// BAD — pins virtual thread to carrier across blocking I/O
+synchronized (lock) {
+    blockingIoCall();
+}
+
+// GOOD — ReentrantLock doesn't pin
+lock.lock();
+try { blockingIoCall(); }
+finally { lock.unlock(); }
+```
+
+Other pinning sources in Java 21:
+- Native frames (`native` methods, JNI calls)
+- Class initialisers running on this thread
+- File I/O before NIO.2 / `Files.newInputStream`
+
+**Detect** with `-Djdk.tracePinnedThreads=full` — JVM logs every pin event with stack trace.
+
+**Java 24 (JEP 491)** removes the `synchronized` pinning hazard — most code becomes safe automatically. Until then, audit `synchronized` blocks that wrap I/O and migrate hot paths to `ReentrantLock`.
+
+### Q150. Explain `StructuredTaskScope`.
+
+Structured concurrency for Java — mirror of Kotlin's `coroutineScope`. Concurrent tasks share a parent scope; either all complete or all cancel.
+
+```java
+// Java 21+ preview API
+try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+    Subtask<User>    userTask    = scope.fork(() -> userService.fetch(id));
+    Subtask<Profile> profileTask = scope.fork(() -> profileService.fetch(id));
+
+    scope.join();              // wait for all
+    scope.throwIfFailed();     // propagate first failure
+
+    return new UserView(userTask.get(), profileTask.get());
+}
+```
+
+Scope flavours:
+- **`ShutdownOnFailure`** — first failure cancels siblings (like `coroutineScope`)
+- **`ShutdownOnSuccess`** — first success cancels siblings (like `Promise.race`)
+
+Compared to `CompletableFuture.allOf`:
+- Cleaner cancellation semantics
+- Structured lifetime — scope can't outlive the try block
+- Exceptions propagate naturally rather than being wrapped in `CompletionException`
+- Works beautifully with virtual threads
+
+Going final (with API tweaks) in a future LTS.
+
+### Q151. Sequenced collections (Java 21) — what problem do they solve?
+
+Pre-21, "first" and "last" were inconsistent across collections. `LinkedList.getFirst()`, `Deque.peekFirst()`, `LinkedHashMap` had no clean first/last API. Java 21 added a unified hierarchy:
+
+- **`SequencedCollection<T>`** extends `Collection<T>` — `getFirst`, `getLast`, `addFirst`, `addLast`, `removeFirst`, `removeLast`, `reversed()`
+- **`SequencedSet<T>`** extends `Set<T>`
+- **`SequencedMap<K,V>`** extends `Map<K,V>` — `firstEntry`, `lastEntry`, `putFirst`, `putLast`, `reversed()`
+
+Backfilled into `List`, `Deque`, `LinkedHashSet`, `LinkedHashMap`, `TreeSet`, `TreeMap`, `SortedSet`. `HashSet` / `HashMap` deliberately don't get these — they have no defined order.
+
+```java
+List<Integer> xs = List.of(1, 2, 3);
+xs.getFirst();        // 1
+xs.getLast();         // 3
+xs.reversed();        // [3, 2, 1] — reversed view, not a copy
+
+LinkedHashMap<String, Integer> m = new LinkedHashMap<>();
+m.put("a", 1); m.put("b", 2);
+m.firstEntry();       // a=1
+m.reversed();         // SequencedMap with reversed iteration
+```
+
+Replaces decade-old workarounds (`list.get(list.size() - 1)`, `iterator().next()`, etc.).
+
+### Q152. Java's `HttpClient` — sync vs async usage?
+
+Java 11 final API. Replaces `URLConnection` and the historic Apache HttpClient dependency for most cases. HTTP/2 by default; HTTP/3 in newer versions (preview).
+
+**Sync (blocking):**
+```java
+HttpClient client = HttpClient.newHttpClient();
+HttpRequest req = HttpRequest.newBuilder(URI.create("https://api.example.com/users/42"))
+    .header("Accept", "application/json")
+    .timeout(Duration.ofSeconds(5))
+    .GET()
+    .build();
+HttpResponse<String> resp = client.send(req, BodyHandlers.ofString());
+String body = resp.body();
+int status = resp.statusCode();
+```
+
+**Async (non-blocking):**
+```java
+client.sendAsync(req, BodyHandlers.ofString())
+    .thenApply(HttpResponse::body)
+    .thenApply(this::parseJson)
+    .exceptionally(ex -> fallback())
+    .orTimeout(2, TimeUnit.SECONDS);
+```
+
+**Body handlers:** `ofString`, `ofByteArray`, `ofInputStream`, `ofFile(path)`, `ofPublisher` (reactive), `discarding`. Custom via `BodyHandlers.fromSubscriber`.
+
+Java 21+: prefer **virtual threads** + sync calls over async chains for concurrent I/O. Avoids callback complexity while keeping scalability.
+
+---
+
+## Collections — Senior Depth
+
+### Q153. Big-O reference for Java collections.
+
+Memorise this — interviewers ask "which collection?" expecting you to reason from Big-O.
+
+| Collection | Add | Get/Contains | Remove | Notes |
+|---|---|---|---|---|
+| `ArrayList` | O(1) amortised end / O(n) middle | O(1) get index, O(n) contains | O(n) | Random access, cache-friendly |
+| `LinkedList` | O(1) ends | O(n) | O(1) given iterator | Rarely the right answer |
+| `ArrayDeque` | O(1) ends | O(1) ends | O(1) ends | Best deque/stack default |
+| `HashMap` | O(1) avg | O(1) avg | O(1) avg | Unordered |
+| `LinkedHashMap` | O(1) | O(1) | O(1) | Insertion or access order |
+| `TreeMap` | O(log n) | O(log n) | O(log n) | Sorted by key |
+| `HashSet` | O(1) avg | O(1) avg | O(1) avg | Wraps HashMap |
+| `LinkedHashSet` | O(1) | O(1) | O(1) | Insertion ordered |
+| `TreeSet` | O(log n) | O(log n) | O(log n) | Sorted |
+| `PriorityQueue` | O(log n) | O(1) peek, O(n) contains | O(log n) min, O(n) arbitrary | Binary heap |
+| `ConcurrentHashMap` | O(1) avg | O(1) avg | O(1) avg | Per-bin synchronisation |
+| `CopyOnWriteArrayList` | O(n) | O(1) | O(n) | Read-heavy only |
+
+`HashMap` worst case is O(log n) since Java 8 (treeified buckets), not O(n).
+
+### Q154. When to use `WeakHashMap`, `IdentityHashMap`, `EnumMap`, `EnumSet`?
+
+**`WeakHashMap`** — keys held by weak references; entries auto-evicted when key is garbage-collected. Use for memoisation/canonical-instance maps where you don't want the cache to prevent GC. Common in framework code (e.g. `ClassValue`).
+
+```java
+WeakHashMap<Class<?>, Metadata> cache = new WeakHashMap<>();
+// Class unloaded → entry vanishes automatically
+```
+
+**`IdentityHashMap`** — uses `==` for key comparison instead of `equals`. Use when objects with equal content must be treated as distinct (graph traversal where you track visited *instances*, deep-copy frameworks, JVM-internal stuff).
+
+**`EnumMap`** — `Map` keyed by an enum. Backed by an array indexed by `ordinal()`. Faster + smaller than `HashMap<Enum, V>`. Always prefer when keys are enum.
+
+```java
+EnumMap<DayOfWeek, Integer> hours = new EnumMap<>(DayOfWeek.class);
+hours.put(DayOfWeek.MONDAY, 9);
+```
+
+**`EnumSet`** — `Set` of enum values. Backed by a `long` bitmap (single `long` for ≤64 enum values, otherwise `long[]`). Massively faster than `HashSet<Enum>`. Always prefer for enum sets.
+
+```java
+EnumSet<DayOfWeek> weekdays = EnumSet.range(DayOfWeek.MONDAY, DayOfWeek.FRIDAY);
+```
+
+### Q155. How does `PriorityQueue` work internally?
+
+Backed by a **binary heap** stored in an array. `add` and `poll` are O(log n); `peek` is O(1). `contains` and arbitrary `remove` are O(n) — heap structure doesn't help for those.
+
+By default it's a **min-heap** ordered by natural order or supplied `Comparator`:
+
+```java
+PriorityQueue<Integer> minHeap = new PriorityQueue<>();   // smallest first
+PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Comparator.reverseOrder());
+
+PriorityQueue<Job> byPriority = new PriorityQueue<>(Comparator.comparingInt(Job::priority));
+```
+
+Iteration order is **not sorted** — it's heap order. To consume sorted, drain via `poll`:
+
+```java
+while (!pq.isEmpty()) System.out.println(pq.poll());
+```
+
+**Not thread-safe.** Concurrent equivalent: `PriorityBlockingQueue`.
+
+**Common use cases:** Dijkstra/A* (priority by distance), top-K problems (bounded-size max-heap), event simulation, scheduling.
+
+### Q156. `ArrayDeque` vs `Stack` vs `LinkedList` — which to use?
+
+**Use `ArrayDeque`** for stacks and queues. It's faster, has lower memory overhead, and doesn't have the design flaws of `Stack` / `LinkedList`.
+
+| | ArrayDeque | Stack | LinkedList |
+|---|---|---|---|
+| Backing | Resizable circular array | Array (extends `Vector`) | Doubly-linked nodes |
+| Thread-safe | No | Yes (synchronized) — slow | No |
+| Stack ops | `push`/`pop`/`peek` | Same names | `addFirst`/`removeFirst` |
+| Memory | Compact array | Compact | Heavy (prev + next per node) |
+| Cache locality | Good | Good | Poor |
+
+`Stack` extends `Vector` — a known design mistake that exposes random-access methods (`set(int, E)`, `add(int, E)`) that violate stack semantics. Avoid.
+
+`LinkedList` implements `Deque` but has poor cache locality and per-node memory overhead. `ArrayDeque` beats it on every realistic stack/queue benchmark.
+
+```java
+Deque<Integer> stack = new ArrayDeque<>();
+stack.push(1); stack.push(2);
+stack.pop();       // 2 — LIFO
+
+Deque<Integer> queue = new ArrayDeque<>();
+queue.offer(1); queue.offer(2);
+queue.poll();      // 1 — FIFO
+```
+
+### Q157. Iterator vs ListIterator vs Spliterator — when each?
+
+**`Iterator<T>`** — basic forward-only traversal. `hasNext`, `next`, `remove` (optional). All `Collection`s give one via `iterator()`.
+
+**`ListIterator<T>`** — extends `Iterator`; bi-directional + indexed. `hasPrevious`, `previous`, `add`, `set`, `nextIndex`. Only `List`s provide it.
+
+```java
+ListIterator<String> it = list.listIterator();
+while (it.hasNext()) {
+    String s = it.next();
+    if (s.equals("REMOVE")) it.remove();          // safe in-place removal
+    if (s.equals("UPDATE")) it.set("REPLACED");   // safe replace
+}
+```
+
+**`Spliterator<T>`** — Java 8, designed for parallel splitting. `tryAdvance` (single element), `trySplit` (split into two). Drives `Stream`/`parallelStream` decomposition. Has characteristics: `ORDERED`, `DISTINCT`, `SORTED`, `SIZED`, `NONNULL`, `IMMUTABLE`, `CONCURRENT`, `SUBSIZED`.
+
+For application code: rarely use `Spliterator` directly — use streams. Implement one only when authoring a custom collection that wants to participate in parallel streams effectively.
+
+### Q158. Three flavours of immutable collection — `Collections.unmodifiableXxx`, `List.of`, `Collectors.toUnmodifiableList`?
+
+| | `unmodifiableList(orig)` | `List.of(...)` | `toUnmodifiableList()` |
+|---|---|---|---|
+| Java | 1.2 | 9 | 10 |
+| Backed by original | Yes — view | No — own storage | No |
+| Mutation visible if original mutates | Yes | N/A | N/A |
+| Allows null | Yes | **No** — throws NPE | No |
+| Allows duplicate (Set) | N/A | **No** — throws IAE | N/A |
+| Memory overhead | Lower (view) | Specialised compact for ≤2 | Compact |
+
+`List.of(a, b, c)` and friends (`Set.of`, `Map.of`) are the modern default for compile-time-known immutable collections. They reject nulls — sometimes a feature, sometimes a footgun if you might have nullable values.
+
+`Collectors.toUnmodifiableList()` is the streams equivalent for collected results (Java 10). Java 16+ also has `Stream.toList()` which is faster and also immutable — prefer it.
+
+**`Collections.unmodifiableList(orig)`** is a wrapper, not a copy. The original is still mutable — caller can still change it through the original reference. Not great for true immutability, but cheap.
+
+### Q159. Stream collectors deep — `groupingBy`, `partitioningBy`, `toMap`.
+
+**`groupingBy`** — group elements by a key:
+
+```java
+Map<Department, List<Employee>> byDept = staff.stream()
+    .collect(Collectors.groupingBy(Employee::department));
+
+// With downstream collector — count per department
+Map<Department, Long> countByDept = staff.stream()
+    .collect(Collectors.groupingBy(Employee::department, Collectors.counting()));
+
+// Multi-level — by department, then by role
+Map<Department, Map<Role, List<Employee>>> nested = staff.stream()
+    .collect(Collectors.groupingBy(Employee::department,
+             Collectors.groupingBy(Employee::role)));
+
+// Custom Map type (TreeMap for sorted keys)
+Map<Department, List<Employee>> sorted = staff.stream()
+    .collect(Collectors.groupingBy(Employee::department, TreeMap::new, Collectors.toList()));
+```
+
+**`partitioningBy`** — special case of grouping by a boolean. Returns `Map<Boolean, List<T>>`:
+
+```java
+Map<Boolean, List<Employee>> seniorVsJunior = staff.stream()
+    .collect(Collectors.partitioningBy(e -> e.years() >= 10));
+
+seniorVsJunior.get(true);   // seniors
+seniorVsJunior.get(false);  // juniors
+```
+
+**`toMap`** — to a flat key→value map. Always pass a merge function for safety (default behaviour throws on duplicate keys):
+
+```java
+Map<String, Employee> byEmail = staff.stream()
+    .collect(Collectors.toMap(Employee::email, e -> e, (a, b) -> a));   // keep first
+
+// Sum salaries per name
+Map<String, BigDecimal> salaryByName = staff.stream()
+    .collect(Collectors.toMap(Employee::name, Employee::salary, BigDecimal::add));
+```
+
+### Q160. Stream `reduce` — explain the three forms.
+
+**Form 1 — identity + accumulator:** returns `T`, never empty.
+```java
+int sum = ints.stream().reduce(0, Integer::sum);
+String concat = strs.stream().reduce("", String::concat);
+```
+
+**Form 2 — accumulator only:** returns `Optional<T>` (empty stream → empty Optional).
+```java
+Optional<Integer> max = ints.stream().reduce(Integer::max);
+max.orElse(0);
+```
+
+**Form 3 — identity + accumulator + combiner:** for parallel streams. Accumulator merges T+U→U, combiner merges U+U→U.
+```java
+int totalLength = strs.parallelStream().reduce(
+    0,
+    (acc, s) -> acc + s.length(),   // accumulator
+    Integer::sum                     // combiner
+);
+```
+
+The combiner is the parallel reduce step — it merges partial results from worker threads. Required for `parallelStream` correctness.
+
+**Don't use reduce when a built-in collector exists:** `count`, `min`, `max`, `sum`, `average`, `joining` are all clearer than the equivalent reduce.
+
+### Q161. How do you write a good `hashCode`?
+
+Effective Java item 11. The contract: equal objects (`equals == true`) must have equal hash codes. Reverse not required (collisions allowed).
+
+**Modern approach — `Objects.hash`:**
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(firstName, lastName, dob);
+}
+```
+
+Internally calls `Arrays.hashCode(varargs)`, which iterates with the prime-31 multiplier. Slight allocation overhead from varargs array — fine for most code.
+
+**Performance-sensitive — manual prime-multiplier:**
+```java
+@Override
+public int hashCode() {
+    int result = firstName.hashCode();
+    result = 31 * result + lastName.hashCode();
+    result = 31 * result + dob.hashCode();
+    return result;
+}
+```
+
+Why prime 31? Cheap multiply (`x << 5 - x`), avoids hash collisions for common inputs better than 2 or 32.
+
+**Rules:**
+- Include only fields used by `equals` (consistency)
+- Include only **immutable** fields (mutating a hash-relevant field corrupts `HashMap` entries)
+- Don't use `==` on object fields — use `.hashCode()`
+- For `null` fields, treat as 0 (`Objects.hash` does this)
+
+**For records:** auto-generated correctly. Don't write your own.
+
+### Q162. Why must `compareTo` be consistent with `equals`?
+
+`compareTo == 0` should imply `equals == true`, otherwise sorted collections (`TreeMap`, `TreeSet`) misbehave.
+
+```java
+record Money(BigDecimal amount, Currency currency) implements Comparable<Money> {
+    public int compareTo(Money other) {
+        return amount.compareTo(other.amount);   // ✗ inconsistent with equals
+    }
+}
+
+new BigDecimal("1.0").equals(new BigDecimal("1.00"));        // false (different scale)
+new BigDecimal("1.0").compareTo(new BigDecimal("1.00"));     // 0 (equal numerically)
+
+TreeSet<Money> set = new TreeSet<>();
+set.add(new Money(new BigDecimal("1.0"), USD));
+set.contains(new Money(new BigDecimal("1.00"), USD));   // ??? depends on TreeSet's
+                                                         // use of compareTo not equals
+```
+
+`TreeSet` and `TreeMap` use `compareTo` (or the supplied `Comparator`) for everything — `contains`, `equals`, ordering. So inconsistency means equal-by-equals objects can't be deduplicated, or deduplicated objects aren't equal-by-equals.
+
+**Fix:** make `compareTo` agree with `equals`, or document the inconsistency clearly (Joshua Bloch flagged that `BigDecimal` itself violates this and warns about it).
+
+### Q163. When does specifying initial capacity for `HashMap` actually matter?
+
+`new HashMap<>(expectedSize)` matters when:
+- You're inserting many entries and want to skip resize() copies (each resize is O(n))
+- You know the size in advance — avoid pointless `2 → 4 → 8 → 16 → 32 → 64...` doublings
+
+**Sizing formula:** to hold `N` entries without resize, set capacity to `N / loadFactor`. Default load factor is 0.75. So:
+
+```java
+// To safely hold 100 entries:
+new HashMap<>(100 / 0.75 + 1);   // ~134
+// Or, idiomatic:
+new HashMap<>((int) Math.ceil(100 / 0.75));
+```
+
+JDK provides `Map.Entry[] table = new Node[tableSize]` only as a power of 2; the constructor rounds up. If you pass `134`, you get `256` internally.
+
+**Doesn't matter** for tiny maps (<10 entries) or maps assembled lazily. The default 16 is fine.
+
+### Q164. `Collections.synchronizedXxx` vs `ConcurrentHashMap`?
+
+**`Collections.synchronizedMap(map)`** — wraps any `Map` with a single lock (`synchronized` on `mutex`). Every operation acquires the lock. **Iteration is NOT safe** — you must hold the lock manually:
+
+```java
+Map<K, V> sync = Collections.synchronizedMap(new HashMap<>());
+synchronized (sync) {
+    for (var e : sync.entrySet()) ...   // safe only inside synchronized block
+}
+```
+
+Single global lock = poor concurrency, single point of contention. Legacy.
+
+**`ConcurrentHashMap`** — purpose-built for concurrency:
+- Java 8+: per-bin locking + CAS for empty bins
+- Reads never block
+- `compute`, `computeIfAbsent`, `merge` are atomic
+- Iteration is weakly consistent — safe but you may not see concurrent updates
+
+**Use `ConcurrentHashMap` for new code.** `synchronizedMap` is for retrofitting an existing non-concurrent class without changing its identity. Forgetting to manually synchronise around iteration is the classic concurrent-collections bug — `ConcurrentHashMap` removes that footgun.
+
+---
+
+## Concurrency — Senior Depth
+
+### Q165. Walk through `Thread.State` and the transitions.
+
+```
+       Thread.start()
+NEW ────────────────► RUNNABLE  ◄────────►  BLOCKED      (waiting for monitor lock)
+                          │   ▲
+                          │   │
+                          │   │
+                          ▼   │
+                       WAITING            (Object.wait, Thread.join, LockSupport.park — no timeout)
+                          │   ▲
+                          ▼   │
+                    TIMED_WAITING         (sleep, wait(t), join(t), parkNanos)
+                          │
+                          ▼
+                      TERMINATED          (run completes or throws)
+```
+
+- **`NEW`** — created, not yet started
+- **`RUNNABLE`** — running OR ready-to-run (Java doesn't distinguish; OS scheduler decides)
+- **`BLOCKED`** — waiting to acquire a monitor lock (entering a `synchronized` block)
+- **`WAITING`** — `wait()`, `join()`, `LockSupport.park()` — no timeout
+- **`TIMED_WAITING`** — same with a timeout
+- **`TERMINATED`** — done
+
+A thread's life is many cycles between `RUNNABLE` and other states; only `NEW` → `RUNNABLE` and `* → TERMINATED` are one-way. Inspect with `Thread.currentThread().getState()` or thread dumps (`jstack`).
+
+### Q166. `ReadWriteLock` and `StampedLock` — when each?
+
+**`ReentrantReadWriteLock`** — multiple concurrent readers, exclusive writer. Use when reads dominate writes (typical 10:1 or higher). API mirrors `ReentrantLock` but with `readLock()` / `writeLock()`:
+
+```java
+ReadWriteLock rw = new ReentrantReadWriteLock();
+Lock r = rw.readLock();
+Lock w = rw.writeLock();
+
+r.lock();
+try { return cache.get(key); }
+finally { r.unlock(); }
+
+w.lock();
+try { cache.put(key, value); }
+finally { w.unlock(); }
+```
+
+**`StampedLock`** (Java 8) — adds **optimistic read** mode. No lock taken; you validate a stamp before consuming the read:
+
+```java
+StampedLock sl = new StampedLock();
+long stamp = sl.tryOptimisticRead();
+double currentX = x;                // read without locking
+if (!sl.validate(stamp)) {          // was there a write since we got the stamp?
+    stamp = sl.readLock();
+    try { currentX = x; }
+    finally { sl.unlockRead(stamp); }
+}
+```
+
+Faster on read-heavy workloads (no atomic write to the lock state). **Not reentrant** — a thread that already holds the lock and tries again deadlocks. Easy to misuse for lock upgrades.
+
+**Default:** `synchronized` or `ReentrantLock`. Reach for `ReadWriteLock` only when you have a measured read-heavy bottleneck. `StampedLock` only for high-frequency reads where atomic-write contention is the bottleneck.
+
+### Q167. What does `LockSupport.park` / `unpark` do?
+
+`LockSupport` is the low-level building block under `ReentrantLock`, `Condition`, and other concurrency primitives. Direct access to thread parking.
+
+- **`park()`** — block the current thread until `unpark` is called or the thread is interrupted
+- **`unpark(thread)`** — wake `thread` if parked, OR record a permit so the next `park()` returns immediately
+
+Each thread has a **permit** that's at most 1. `unpark` sets it; `park` consumes it (or blocks). **Order doesn't matter** — `unpark` followed by `park` returns immediately.
+
+```java
+Thread worker = Thread.currentThread();
+
+// In another thread when work arrives
+LockSupport.unpark(worker);
+
+// Worker thread
+while (running) {
+    LockSupport.park();
+    processWork();
+}
+```
+
+Use directly only when building lock primitives. For app code, `BlockingQueue`, `Phaser`, `CountDownLatch`, `Condition` give better abstractions.
+
+### Q168. `CompletableFuture` exception handling — `handle` vs `exceptionally` vs `whenComplete`.
+
+Three exception-aware terminal-ish methods. Different signatures, different intent:
+
+| | Sees value? | Sees throwable? | Returns |
+|---|---|---|---|
+| `exceptionally` | No | Yes | Recovery value, same type |
+| `handle` | Yes (or null on failure) | Yes (or null on success) | Transformed value, possibly different type |
+| `whenComplete` | Yes (or null) | Yes (or null) | Original value (side-effect only) |
+
+```java
+// exceptionally — recover from failure
+CompletableFuture<Integer> recovered = future
+    .exceptionally(ex -> 0);   // returns 0 on failure, original value on success
+
+// handle — transform success or failure
+CompletableFuture<String> handled = future
+    .handle((value, ex) -> {
+        if (ex != null) return "error: " + ex.getMessage();
+        return "ok: " + value;
+    });
+
+// whenComplete — observe without changing
+CompletableFuture<Integer> observed = future
+    .whenComplete((value, ex) -> {
+        if (ex != null) log.error("failed", ex);
+        else log.info("ok: {}", value);
+    });
+```
+
+Pitfalls:
+- `whenComplete` returns the original future's value, but if the consumer throws, that exception replaces the original
+- `exceptionally` only fires for failure; `handle` and `whenComplete` always fire
+- All three return new stages — chain them, don't expect mutation
+
+### Q169. What's the ABA problem and how do you avoid it?
+
+In CAS-based lock-free code, a value goes A → B → A while you weren't looking. Your CAS sees A, succeeds, but the *meaning* changed.
+
+Classic example — lock-free stack with `head`:
+```
+T1 reads head = NodeA
+T1 prepares to CAS(head, NodeA, NodeA.next)
+T2 pops NodeA, pops NodeB, pushes NodeA again — head is back to NodeA
+T1's CAS succeeds (head still == NodeA reference) — but NodeA.next now points to garbage
+```
+
+**Fix — `AtomicStampedReference`:** pair the reference with a counter. CAS on both. The counter increments on every write, so even if the reference returns to A, the stamp differs:
+
+```java
+AtomicStampedReference<Node> head = new AtomicStampedReference<>(initial, 0);
+
+int[] stampHolder = new int[1];
+Node oldHead = head.get(stampHolder);
+Node newHead = oldHead.next;
+head.compareAndSet(oldHead, newHead, stampHolder[0], stampHolder[0] + 1);
+```
+
+Most app code never hits this — the JDK's lock-free collections (`ConcurrentLinkedQueue`, `ConcurrentSkipListMap`) handle it internally. Encounter it only when writing custom lock-free data structures or working with hand-rolled atomic state machines.
+
+### Q170. What is false sharing?
+
+CPU caches operate on **cache lines** (typically 64 bytes). When two threads write to *different* variables that happen to live on the same cache line, the cache line bounces between cores — every write invalidates the other core's copy. The threads aren't logically sharing data, but the cache thinks they are. Performance dies.
+
+```java
+class Counters {
+    long a;   // mutated by thread 1
+    long b;   // mutated by thread 2
+    // both a and b sit in the same cache line — false sharing
+}
+```
+
+**Fix:** pad the fields, or use `@Contended`:
+
+```java
+@jdk.internal.vm.annotation.Contended
+class Counters {
+    long a;
+    @jdk.internal.vm.annotation.Contended
+    long b;
+    // JVM pads each marked field to its own cache line
+}
+```
+
+Requires `-XX:-RestrictContended` to use `@Contended` outside `java.base`. Modern alternative: `LongAdder` uses internal padding for high-contention counters and beats `AtomicLong` because of false-sharing avoidance.
+
+Detect with `perf c2c` (Linux) or async-profiler's lock + cache-miss profiling.
+
+### Q171. What's lock striping?
+
+Splitting a single lock into N independent locks, each guarding a partition of the data. Threads accessing different partitions don't contend.
+
+```java
+class StripedCounter {
+    private final long[] counts;
+    private final ReentrantLock[] locks;
+
+    StripedCounter(int stripes) {
+        counts = new long[stripes];
+        locks = new ReentrantLock[stripes];
+        for (int i = 0; i < stripes; i++) locks[i] = new ReentrantLock();
+    }
+
+    void increment(int key) {
+        int stripe = Math.floorMod(key, locks.length);
+        locks[stripe].lock();
+        try { counts[stripe]++; }
+        finally { locks[stripe].unlock(); }
+    }
+}
+```
+
+`ConcurrentHashMap` does this implicitly — bin-level synchronisation. The restaurant booking concurrency extension uses it too: per-table `ReentrantLock`s mean bookings on different tables don't contend. **Pattern:** when you have N independent objects (tables, accounts, devices) and need fine-grained synchronisation, stripe by id hash.
+
+Trade-off: more memory (N locks), and operations across stripes need careful ordering to avoid deadlock — acquire locks in consistent order (e.g. ascending stripe index).
+
+### Q172. Virtual threads vs reactive — which wins for I/O concurrency?
+
+**Both solve the same problem:** running many concurrent I/O operations without spinning up many OS threads. They take opposite approaches.
+
+**Reactive (Project Reactor, RxJava):**
+- Build callback-style pipelines: `mono.flatMap(this::loadUser).flatMap(this::loadOrders)...`
+- Tiny event-loop pool (cores-sized, e.g. 8 threads)
+- Blocking calls poison the loop — every operator must be non-blocking
+- Backpressure built-in (`request(n)`)
+- Steep learning curve, hard debugging (stack traces shredded by async hops)
+
+**Virtual threads (Java 21):**
+- Imperative code: blocking calls are fine
+- Millions of virtual threads on a small carrier-thread pool
+- Standard `try`/`catch`, standard stack traces
+- Backpressure must be added explicitly (semaphores, bounded queues)
+- Pinning hazard with `synchronized` (Java 21; fixed in 24)
+
+**Which wins:**
+- New code with mostly blocking I/O → virtual threads
+- Existing reactive code → keep it
+- Streaming / SSE / fan-out aggregation → reactive's operators still excel
+- Heavy backpressure requirements → reactive natively supports it
+
+**Migration trend:** post-Java 21, many shops are deprecating new reactive adoption for plain virtual threads. WebFlux remains for streaming use cases.
+
+### Q173. `Phaser` vs `CyclicBarrier` vs `CountDownLatch`?
+
+Three coordination primitives, increasing flexibility:
+
+**`CountDownLatch(n)`** — one-shot. Wait for N events. Cannot be reset.
+```java
+CountDownLatch ready = new CountDownLatch(3);
+// 3 worker threads call ready.countDown() when initialised
+ready.await();   // main thread unblocks when all 3 done
+```
+
+**`CyclicBarrier(n)`** — reusable. Wait for N parties to all call `await`, then release them all. Can run an action when the barrier trips. Reusable.
+```java
+CyclicBarrier barrier = new CyclicBarrier(4, () -> log.info("phase done"));
+// each of 4 threads: barrier.await() at end of phase
+// all 4 unblock together, then can do next phase
+```
+
+**`Phaser`** — like `CyclicBarrier` but parties can be **dynamic** (register/deregister at runtime), unlimited phases, and you can `arriveAndDeregister` when done. More flexible but heavier API.
+
+```java
+Phaser phaser = new Phaser(1);   // main is registered
+
+for (int i = 0; i < workerCount; i++) {
+    phaser.register();
+    new Thread(() -> {
+        doWork();
+        phaser.arriveAndAwaitAdvance();   // join the phase
+        moreWork();
+        phaser.arriveAndDeregister();
+    }).start();
+}
+
+phaser.arriveAndAwaitAdvance();   // main waits with workers
+```
+
+**Choose:**
+- One-time fan-in → `CountDownLatch`
+- Reusable parallel phases, fixed party count → `CyclicBarrier`
+- Dynamic parties or many phases → `Phaser`
+- Modern fan-in alternative → `CompletableFuture.allOf` (cleaner if results are needed)
+
+### Q174. `ScheduledExecutorService` — schedule vs scheduleAtFixedRate vs scheduleWithFixedDelay?
+
+Three scheduling modes; pick based on what "every N seconds" means to you:
+
+```java
+ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
+
+// One-shot delay
+exec.schedule(this::work, 5, SECONDS);
+
+// Fixed RATE — runs every N seconds REGARDLESS of how long the task takes
+// If task takes 2s and rate is 1s, it'll run back-to-back with no gap
+exec.scheduleAtFixedRate(this::work, 0, 1, SECONDS);
+
+// Fixed DELAY — waits N seconds AFTER each task completes
+// If task takes 2s and delay is 1s, total cycle is 3s
+exec.scheduleWithFixedDelay(this::work, 0, 1, SECONDS);
+```
+
+Critical distinction: `fixedRate` can pile up if the task runs longer than the period — multiple invocations queue, then storm when the slow one finishes. `fixedDelay` is self-throttling.
+
+**Default for periodic work:** `scheduleWithFixedDelay`. Use `fixedRate` only when you genuinely want clock-accurate firing (e.g. metrics emission every minute, regardless of duration).
+
+**Exception handling gotcha:** if a scheduled task throws, scheduling **stops silently**. Always wrap in try/catch:
+
+```java
+exec.scheduleWithFixedDelay(() -> {
+    try { doWork(); }
+    catch (Throwable t) { log.error("scheduled task failed", t); }
+}, 0, 1, SECONDS);
+```
+
+---
+
+## JVM Internals
+
+### Q175. Walk through Java's ClassLoader hierarchy and parent delegation.
+
+Three built-in loaders form a chain:
+
+1. **Bootstrap class loader** — written in C/C++, loads `java.base` modules (`java.lang`, `java.util`, etc.). Returned as `null` from `getClassLoader()`.
+2. **Platform class loader** (formerly Extension, since Java 9) — loads platform classes (`java.sql`, `java.xml`, etc.) outside `java.base`.
+3. **System / Application class loader** — loads classpath / module path. Default for application code.
+
+**Parent delegation:** when a class loader is asked to load a class, it first asks its parent. Only if the parent fails does it try itself. Walks up to bootstrap, then comes back down.
+
+```
+load("com.example.Foo") on AppClassLoader
+  → delegates to PlatformClassLoader
+      → delegates to BootstrapClassLoader
+          → "no, not me"
+      → "no, not me"
+  → AppClassLoader tries: finds com.example.Foo on classpath, loads it
+```
+
+**Why parent delegation matters:**
+- Prevents user code from shadowing JDK classes — you can't define a `java.lang.String` and have it loaded
+- Each class is uniquely identified by `(class loader, fully qualified name)` — same class loaded by two loaders is treated as different types
+
+**Custom class loaders** are used by app servers (Tomcat, JBoss) for hot-deploy/redeploy of webapps, and by frameworks like OSGi for module isolation. Each webapp has its own loader, so two webapps can use different versions of the same library without conflict.
+
+### Q176. What causes class loader leaks?
+
+Class loaders themselves are objects. They're reachable via:
+- Their loaded classes' `Class<?>` objects
+- Instances of those classes (each instance keeps its class alive)
+- Any thread's `contextClassLoader`
+- `ThreadLocal`s holding instances
+
+**Leak scenario** (classic in app servers):
+1. Webapp A is deployed → app server creates `WebappClassLoaderA`
+2. Webapp A code stores something in a `ThreadLocal` on a thread-pool thread (e.g. JDBC connection wrapper, MDC value)
+3. Webapp A is undeployed → app server abandons `WebappClassLoaderA` and recreates it
+4. The thread-pool thread still has the `ThreadLocal` → still references the old class via the wrapper class → old `WebappClassLoaderA` can't be GC'd
+5. Every redeploy leaks a full class loader → eventually `OutOfMemoryError: Metaspace`
+
+**Causes:**
+- `ThreadLocal`s on pool threads not removed
+- JDBC drivers registered in `DriverManager` (static field outside the webapp)
+- Static fields holding webapp objects
+- Timers / scheduled threads created inside the webapp that aren't shut down
+- Custom logging configurations
+- JNDI / RMI registrations
+
+**Detection:** heap dump, look at retained-size of class loaders. Eclipse MAT has a "leak suspect" report that flags classloader chains.
+
+**Mitigation:** always `remove()` `ThreadLocal`s, deregister JDBC drivers in `contextDestroyed`, prefer dependency injection over global registries.
+
+### Q177. JIT compilation — what are C1, C2, and tiered compilation?
+
+HotSpot ships two JIT compilers:
+- **C1 (client compiler)** — fast compile, basic optimisations. Inlining, simple devirtualisation, on-stack replacement.
+- **C2 (server compiler)** — slower compile, aggressive optimisations. Inlining heuristics, escape analysis, lock elision, dead-code elimination, loop unrolling, intrinsics for known math/collection methods.
+
+**Tiered compilation** (default since Java 8) — start interpreted, ramp through C1 → C2 as methods get hot:
+
+```
+LEVEL 0: Interpreted (no JIT)
+LEVEL 1: C1, no profiling     (very fast compile, used when not enough info)
+LEVEL 2: C1, simple profiling
+LEVEL 3: C1, full profiling   (gather data for C2)
+LEVEL 4: C2 with profile data (most aggressive)
+```
+
+Methods rise through tiers based on invocation counters and back-edge counters (loops). Hot loops can be replaced mid-execution via **OSR (on-stack replacement)** — the interpreter frame is swapped with a compiled frame at a safepoint.
+
+**Deoptimization** — if C2's speculative optimisation turns out wrong (e.g. assumed call site is monomorphic but a new subclass shows up), the method is decompiled and falls back to C1 or interpreter.
+
+Java 11+ optionally uses **Graal** as an alternative JIT (`-XX:+UseJVMCICompiler`, experimental) and as the AOT compiler in GraalVM native image.
+
+### Q178. What's escape analysis and scalar replacement?
+
+Two C2 optimisations that eliminate allocation overhead.
+
+**Escape analysis:** the compiler proves that an object never escapes the method that created it. "Escape" means:
+- Stored in a static field, instance field of another object, or array
+- Passed to a method that might store it
+- Returned from the method
+- Thrown as exception
+
+If proven non-escaping, two big optimisations open up:
+
+**Scalar replacement:** decompose the object into its fields, store them in registers (or stack), don't allocate a heap object at all.
+
+```java
+public int distanceSq(int x, int y) {
+    Point p = new Point(x, y);   // C2 may eliminate this allocation
+    return p.x * p.x + p.y * p.y;
+}
+```
+
+If `p` doesn't escape, C2 stores `x` and `y` in registers. No heap allocation, no GC pressure.
+
+**Lock elision:** if an object is provably non-escaping, no other thread can see it, so synchronisation is pointless. C2 removes the lock acquire/release.
+
+```java
+public String build() {
+    StringBuilder sb = new StringBuilder();   // synchronized? StringBuffer was
+    sb.append("hello");                        // locks elided if proven non-escaping
+    return sb.toString();
+}
+```
+
+`StringBuilder` itself is unsynchronised, but the same logic applied to `StringBuffer` decades ago. Modern code uses `StringBuilder` and never sees the lock cost anyway.
+
+### Q179. What was biased locking and why was it removed?
+
+**Biased locking** (deprecated in Java 15, removed/disabled by default in Java 18) was an optimisation for `synchronized` where the JVM tracked the *last thread* to acquire a monitor and made re-acquisition by that same thread nearly free. Common case: locks acquired only by one thread (legacy code adding superfluous synchronisation).
+
+Removed because:
+- Cost of bias revocation was high when contention happened
+- Modern code uses fine-grained `ReentrantLock` and concurrent collections — biased locking helped less and less
+- The complexity slowed down JVM development
+
+`-XX:+UseBiasedLocking` still exists as an emergency flag in 18+ for legacy workloads, but expect it to disappear.
+
+Modern uncontended `synchronized` is still cheap — CAS on the object header, no kernel calls. Just no longer free.
+
+### Q180. What are compressed OOPs?
+
+On 64-bit JVMs, object references would be 8 bytes each. **Compressed OOPs** (`-XX:+UseCompressedOops`, default) store them as 32-bit values, doubling the effective heap range to 32 GB.
+
+**How it works:** all Java heap allocations are 8-byte aligned. So the bottom 3 bits of any heap address are zero. Shift right by 3, store the upper 32 bits. When dereferencing, shift left 3 and add a base. JVM does this transparently.
+
+**Implications:**
+- Heap < 32 GB: refs are 4 bytes, lower memory usage, better cache locality
+- Heap > 32 GB: must use full 64-bit refs, higher memory usage and worse cache locality
+- Common surprise: heap of 31 GB uses ~30% less memory than heap of 32 GB
+
+**Scaling alternative — Compressed Class Pointers + Compressed OOPs + Class Data Sharing** all reduce overhead. ZGC supports compressed OOPs since Java 15.
+
+When heap size matters, sizing just under the 32GB threshold can be more efficient than a slightly larger heap.
+
+### Q181. What's a TLAB (Thread-Local Allocation Buffer)?
+
+Each thread gets its own slab of Eden memory called a TLAB. Allocations are **bump-pointer** within the TLAB — a single increment of the local pointer, no synchronisation. When the TLAB fills, the thread gets a new one (synchronised allocation from Eden).
+
+Why it matters:
+- Allocation cost in Java is ~5-10 ns — competitive with C/C++ stack allocation, faster than `malloc` for small objects
+- No contention on Eden's bump-pointer for small allocations
+- Default behaviour; usually invisible
+
+Tuning flags (rarely needed):
+- `-XX:+UseTLAB` (default on)
+- `-XX:TLABSize=...`
+- `-XX:+PrintTLAB` (debug)
+
+When threads have wildly different allocation patterns, TLAB sizing can matter. JVM auto-tunes TLAB sizes based on thread allocation rate. Almost always a non-issue.
+
+### Q182. What's the card table and write barrier in generational GC?
+
+Problem: the young gen GC only scans the young gen. If an old-gen object holds a reference to a young-gen object, scanning only young would miss the old reference and incorrectly free the young object.
+
+Solution: track every old → young reference. The **card table** is a byte array with one byte per ~512-byte region of old gen. When a write happens that creates a cross-gen reference, the **write barrier** (compiler-inserted code on every reference store) marks the corresponding card as "dirty".
+
+```
+Old gen:    [block1][block2][block3][block4]...
+Card table: [  0  ][  1  ][  0  ][  0  ]    (1 = dirty)
+```
+
+During young-gen GC, the collector:
+1. Scans GC roots (stacks, statics)
+2. **Scans all dirty cards** in old gen, treating their references as additional roots
+3. Skips clean cards entirely
+
+Cost: every reference write executes a few extra instructions for the barrier. Saves enormous time on minor GCs by not scanning all of old gen.
+
+G1 uses a more sophisticated scheme — **Remembered Set** per region, tracking which other regions reference into this one. ZGC uses **load barriers** (read-side, not write-side) for its colored pointers approach.
+
+---
+
+## Spring — Advanced
+
+### Q183. How do Spring profiles work?
+
+Profiles let you activate different beans / config in different environments.
+
+**Define profiled beans:**
+```java
+@Configuration
+@Profile("prod")
+class ProdDataSourceConfig { ... }
+
+@Component
+@Profile({"dev", "test"})
+class StubEmailService implements EmailService { ... }
+```
+
+**Activate profiles** (one or more):
+- `spring.profiles.active=prod,monitoring` in `application.properties`
+- `-Dspring.profiles.active=prod` JVM arg
+- `SPRING_PROFILES_ACTIVE=prod` env var
+- Programmatically: `app.setAdditionalProfiles("prod")`
+
+**Profile-specific config:**
+```
+application.properties           # base
+application-dev.properties       # only when 'dev' active
+application-prod.properties      # only when 'prod' active
+```
+
+**Default profiles:** `spring.profiles.default=dev` runs `dev` profile if no explicit profile is set.
+
+**Profile expressions** (Spring 5.1+): `@Profile("prod & monitoring")`, `@Profile("!dev")`.
+
+Common pattern: `dev` for local with H2 + mock services, `test` for CI with Testcontainers, `prod` for production with real DB + real services.
+
+### Q184. `@ConfigurationProperties` vs `@Value` — when each?
+
+**`@Value`** — single property injection. Good for one-off lookups:
+
+```java
+@Value("${app.timeout:5}") private int timeout;
+@Value("${SECRET_KEY}") private String secret;   // env var or config
+```
+
+Pros: simple. Cons: stringly-typed, no validation, no IDE refactor support, nested config awkward.
+
+**`@ConfigurationProperties`** — typed binding for groups of properties. Strongly preferred for non-trivial config:
+
+```java
+@ConfigurationProperties(prefix = "booking")
+@Validated
+public record BookingProperties(
+    @NotNull Duration defaultDuration,
+    @Min(1) int maxPartySize,
+    @Valid Notifications notifications
+) {
+    public record Notifications(boolean email, boolean sms) {}
+}
+
+// application.yml
+booking:
+  default-duration: PT2H
+  max-party-size: 10
+  notifications:
+    email: true
+    sms: false
+```
+
+Enable with `@EnableConfigurationProperties(BookingProperties.class)` on a `@Configuration` class, or use `@ConfigurationPropertiesScan`. Inject like any bean.
+
+**Why prefer `@ConfigurationProperties`:**
+- Type-safe (records, enums, `Duration`, etc.)
+- Bean Validation hooks (`@Validated`, `@NotNull`, `@Min`)
+- IDE autocomplete via `spring-boot-configuration-processor`
+- Refactor-safe — rename a property in code, the binding still finds it via the prefix
+- Nested config naturally
+
+### Q185. What does Spring Boot Actuator give you?
+
+Production-ready endpoints exposed over HTTP and JMX. Add `spring-boot-starter-actuator` and you get:
+
+- **`/actuator/health`** — liveness + readiness, custom contributors
+- **`/actuator/info`** — git commit, build version, custom static info
+- **`/actuator/metrics`** — Micrometer metrics (JVM, HTTP, datasource)
+- **`/actuator/prometheus`** — Prometheus scrape endpoint (with `micrometer-registry-prometheus`)
+- **`/actuator/loggers`** — runtime log level changes (massive for prod debugging)
+- **`/actuator/threaddump`** — thread dump
+- **`/actuator/heapdump`** — heap dump file
+- **`/actuator/env`** — config values (sanitised)
+- **`/actuator/configprops`** — bound `@ConfigurationProperties`
+
+Most are disabled by default in 3.x — enable selectively:
+```yaml
+management:
+  endpoints.web.exposure.include: health, info, metrics, prometheus
+  endpoint.health.show-details: when-authorized
+```
+
+**Health checks** for K8s:
+```yaml
+management.endpoint.health.probes.enabled: true
+# /actuator/health/liveness  — restart pod if fails
+# /actuator/health/readiness — remove from load balancer if fails
+```
+
+**Custom metrics** via Micrometer:
+```java
+@Component
+class BookingMetrics {
+    Counter bookings = Counter.builder("bookings.created").register(registry);
+    void recorded() { bookings.increment(); }
+}
+```
+
+### Q186. How does Spring's Bean Validation work?
+
+JSR-380 / Bean Validation 2.0 (Hibernate Validator implementation). Add `spring-boot-starter-validation` and use annotations on fields, parameters, return values:
+
+```java
+public record CreateBookingRequest(
+    @NotBlank @Size(max = 100) String customer,
+    @NotNull @Future LocalDateTime startsAt,
+    @Min(1) @Max(20) int partySize
+) {}
+
+@RestController
+class BookingController {
+    @PostMapping("/bookings")
+    public Booking create(@Valid @RequestBody CreateBookingRequest req) {
+        return service.book(req);
+    }
+}
+```
+
+`@Valid` on the parameter triggers validation. Failures throw `MethodArgumentNotValidException` (Spring MVC) or `ConstraintViolationException` (programmatic). Wire a `@RestControllerAdvice` to translate to nice 400 responses.
+
+**Common annotations:** `@NotNull`, `@NotBlank`, `@NotEmpty`, `@Size`, `@Min`, `@Max`, `@Email`, `@Pattern`, `@Past`, `@Future`, `@Positive`, `@Negative`, `@Digits`.
+
+**Custom validators:**
+```java
+@Constraint(validatedBy = SkuValidator.class)
+@Target({ElementType.FIELD, ElementType.PARAMETER})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ValidSku {
+    String message() default "invalid SKU";
+    Class<?>[] groups() default {};
+    Class<? extends Payload>[] payload() default {};
+}
+
+class SkuValidator implements ConstraintValidator<ValidSku, String> {
+    public boolean isValid(String value, ConstraintValidatorContext ctx) {
+        return value != null && value.matches("[A-Z]{3}-\\d{4}");
+    }
+}
+```
+
+**Validation groups** for context-specific rules:
+```java
+@NotNull(groups = OnUpdate.class) UUID id;
+controller.method(@Validated(OnCreate.class) Request r)
+```
+
+### Q187. How does `@Async` work in Spring?
+
+Mark a method `@Async` and Spring runs it on a separate thread. Implementation: an AOP proxy intercepts the call and submits the work to a `TaskExecutor`.
+
+```java
+@Configuration
+@EnableAsync
+class AsyncConfig {
+    @Bean(name = "taskExecutor")
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
+        exec.setCorePoolSize(8);
+        exec.setMaxPoolSize(16);
+        exec.setQueueCapacity(100);
+        exec.setThreadNamePrefix("async-");
+        exec.initialize();
+        return exec;
+    }
+}
+
+@Service
+class NotificationService {
+    @Async
+    public CompletableFuture<Void> notify(String email) {
+        sendEmail(email);
+        return CompletableFuture.completedFuture(null);
+    }
+}
+```
+
+**Critical gotchas:**
+- **Self-invocation bypass** — `this.async()` skips the proxy. Same as `@Transactional`. Call via injected dependency.
+- **Default executor** is `SimpleAsyncTaskExecutor` (creates a new thread per call!). Always provide a configured `ThreadPoolTaskExecutor`.
+- **Return types** must be `void`, `Future<T>`, `CompletableFuture<T>`, or `ListenableFuture<T>`. `void` swallows exceptions — register an `AsyncUncaughtExceptionHandler`.
+- Doesn't work on `private` or `final` methods (proxy can't intercept).
+
+**Java 21 alternative:** virtual threads via `Executors.newVirtualThreadPerTaskExecutor()` configured as the `taskExecutor` bean. Or just use them directly without `@Async`.
+
+### Q188. How does Spring's event publishing work?
+
+In-process pub-sub via `ApplicationEventPublisher` and `@EventListener`. Decouples emitter from receivers without a message broker.
+
+```java
+// Define event
+public record BookingConfirmed(UUID id, String customer) {}
+
+// Publish
+@Service
+class BookingService {
+    private final ApplicationEventPublisher events;
+    BookingService(ApplicationEventPublisher events) { this.events = events; }
+
+    public Booking book(...) {
+        Booking b = ...;
+        events.publishEvent(new BookingConfirmed(b.id(), b.customer()));
+        return b;
+    }
+}
+
+// Listen
+@Component
+class BookingListeners {
+    @EventListener
+    public void onConfirmed(BookingConfirmed event) {
+        emailService.send(event.customer(), ...);
+    }
+
+    @Async                                   // run on async executor
+    @EventListener(condition = "#event.partySize() > 10")  // SpEL filter
+    public void onLargeBooking(BookingConfirmed event) { ... }
+}
+
+// Transactional listeners — fire only after the surrounding transaction commits
+@TransactionalEventListener(phase = AFTER_COMMIT)
+public void onCommitted(BookingConfirmed event) { ... }
+```
+
+**Sync by default** — listener runs on the publisher's thread inside the publisher's transaction. Add `@Async` for off-thread.
+
+**Use cases:**
+- Triggering side effects (notifications, audit logs) without coupling
+- Decomposing a transactional service into smaller listeners
+- `@TransactionalEventListener(AFTER_COMMIT)` is the cleanest way to "do this after the DB commits"
+
+**Don't use** as a substitute for a real message broker — events are in-process only and lost on JVM restart.
+
+### Q189. Spring Test types — `@SpringBootTest` vs `@WebMvcTest` vs `@DataJpaTest` vs `@JsonTest`?
+
+Each loads a **slice** of the app context — faster than booting everything.
+
+**`@SpringBootTest`** — full context. Used for integration tests touching multiple layers.
+```java
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class BookingApiIntegrationTest { ... }
+```
+
+**`@WebMvcTest(BookingController.class)`** — MVC layer only. Loads the controller, `MockMvc`, validation, `@ControllerAdvice`. Mocks dependencies (services, repos must be `@MockBean`). Fast.
+```java
+@WebMvcTest(BookingController.class)
+class BookingControllerTest {
+    @Autowired MockMvc mvc;
+    @MockBean BookingService service;
+    @Test void creates() throws Exception {
+        when(service.book(any())).thenReturn(booking);
+        mvc.perform(post("/bookings").contentType(JSON).content(payload))
+           .andExpect(status().isCreated());
+    }
+}
+```
+
+**`@DataJpaTest`** — JPA slice. Configures in-memory DB, `EntityManager`, `TestEntityManager`, transaction rollback per test. No services, no controllers.
+```java
+@DataJpaTest
+class BookingRepoTest {
+    @Autowired TestEntityManager em;
+    @Autowired BookingRepo repo;
+}
+```
+
+**`@JsonTest`** — Jackson slice. Tests serialisation/deserialisation of DTOs.
+
+**Other slices:** `@WebFluxTest`, `@DataMongoTest`, `@RestClientTest`, `@JdbcTest`.
+
+**TestContainers integration** — combine with `@DynamicPropertySource` for real DB:
+```java
+@SpringBootTest @Testcontainers
+class IntegrationTest {
+    @Container static PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:16");
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry r) {
+        r.add("spring.datasource.url", pg::getJdbcUrl);
+        r.add("spring.datasource.username", pg::getUsername);
+        r.add("spring.datasource.password", pg::getPassword);
+    }
+}
+```
+
+### Q190. What's `@MockBean` vs `@SpyBean` vs `@Mock`?
+
+All replace beans with test doubles, but with different scopes and behaviours.
+
+**`@Mock`** (Mockito) — standalone mock, no Spring context needed:
+```java
+@ExtendWith(MockitoExtension.class)
+class ServiceTest {
+    @Mock Repo repo;
+    @InjectMocks Service service;
+}
+```
+
+**`@MockBean`** (Spring Boot Test) — replaces a bean in the Spring context with a Mockito mock. Used inside `@SpringBootTest` / `@WebMvcTest`:
+```java
+@WebMvcTest(BookingController.class)
+class ControllerTest {
+    @MockBean BookingService service;   // fake bean wired into the controller
+}
+```
+
+**`@SpyBean`** (Spring Boot Test) — wraps the real bean in a Mockito spy. Real method calls go through unless stubbed:
+```java
+@SpringBootTest
+class AuditTest {
+    @SpyBean AuditService audit;   // real audit, but you can verify calls
+    @Test void records() {
+        service.book(...);
+        verify(audit).log(any(BookingEvent.class));
+    }
+}
+```
+
+**Key difference vs `@Mock` + `@InjectMocks`:** `@MockBean`/`@SpyBean` work inside the Spring container — your controller's `@Autowired` dependencies become the mocks. `@Mock` + `@InjectMocks` is reflection-based and bypasses Spring entirely.
+
+**Drawback of `@MockBean`:** slow because it dirties the application context — Spring evicts and rebuilds the cached context. Heavy use of `@MockBean` slows test suites measurably.
+
+---
+
+## Database — Deep Dive
+
+### Q191. How does HikariCP work and how should you size it?
+
+**HikariCP** is the de facto standard JDBC connection pool. Default in Spring Boot 2+. Wins on speed, low overhead, and correctness around edge cases (connection leaks, validation, fast failover).
+
+**How it works:**
+- Maintains a pool of physical DB connections
+- `getConnection()` borrows one (instant if idle, otherwise blocks up to `connectionTimeout`)
+- `close()` returns it to the pool (`Connection.close()` is intercepted by the proxy)
+- Background eviction of idle and stale connections (`idleTimeout`, `maxLifetime`)
+- Validation via lightweight `connectionTestQuery` or driver-native `Connection.isValid()`
+
+**Key config:**
+```yaml
+spring.datasource.hikari:
+  maximum-pool-size: 20         # cap
+  minimum-idle: 5               # keep at least N alive
+  connection-timeout: 30000     # ms to wait for a connection
+  idle-timeout: 600000          # 10 min before evicting idle
+  max-lifetime: 1800000         # 30 min max age — recycle to dodge stale connections / DB restarts
+  validation-timeout: 5000
+```
+
+**Sizing formula** (Brett Wooldridge, HikariCP author):
+```
+connections = ((cores * 2) + effective_spindles)
+```
+
+For most modern systems: `cores * 2`. **Smaller pools usually outperform larger ones** — counter-intuitive but well-evidenced. Larger pools hit DB contention and OS context-switch cost; smaller pools keep the DB happy and queue at the application instead.
+
+**Pool exhaustion symptoms:** threads stuck in `getConnection()`, `connectionTimeout` errors, slow API responses despite healthy DB. Almost always a leaking connection (forgot try-with-resources) or a long-running transaction.
+
+### Q192. Transaction propagation deep — all 7 modes.
+
+Spring's `@Transactional(propagation = ...)` controls how a transactional method behaves when called within an existing transaction.
+
+| Propagation | If existing tx | If no existing tx |
+|---|---|---|
+| **`REQUIRED`** (default) | Join | Start new |
+| **`REQUIRES_NEW`** | **Suspend** outer, start inner | Start new |
+| **`NESTED`** | Savepoint within outer | Start new |
+| **`MANDATORY`** | Join | Throw `IllegalTransactionStateException` |
+| **`SUPPORTS`** | Join | Run without tx |
+| **`NOT_SUPPORTED`** | **Suspend** outer, run without tx | Run without tx |
+| **`NEVER`** | Throw | Run without tx |
+
+**`REQUIRES_NEW`** use cases: audit logs that must commit even if outer rolls back; isolating a slow operation from the outer tx's lock scope. Cost: the outer connection is suspended (held but not used) — risks pool exhaustion with deep nesting.
+
+**`NESTED`** uses JDBC savepoints. Inner can roll back to a savepoint without affecting outer. Useful for "best-effort" sub-operations. Not supported by all DBs; Postgres yes, Oracle yes, some older MySQL configurations no.
+
+**`SUPPORTS`** is the read-only default for query repositories that should join an existing tx but not start one for standalone reads.
+
+**`MANDATORY`** is a documentation/safety mechanism — "this method MUST be called from within a transaction."
+
+### Q193. Isolation levels deep — what does each prevent?
+
+Four ANSI isolation levels, each preventing a specific set of read anomalies:
+
+| Level | Dirty read | Non-repeatable read | Phantom read |
+|---|---|---|---|
+| `READ_UNCOMMITTED` | Allows | Allows | Allows |
+| `READ_COMMITTED` (Postgres default) | Prevents | Allows | Allows |
+| `REPEATABLE_READ` (MySQL default) | Prevents | Prevents | Prevents in MySQL InnoDB; allows in standard SQL |
+| `SERIALIZABLE` | Prevents | Prevents | Prevents |
+
+**Anomalies explained:**
+
+- **Dirty read** — reading data another tx wrote but hasn't committed. The other tx might roll back; you saw a value that never existed.
+- **Non-repeatable read** — reading the same row twice in one tx and getting different values (another tx committed an update in between).
+- **Phantom read** — a query returning different rows in the same tx because another tx inserted/deleted matching rows.
+
+**Lost update** — two txs read a value, both update based on it, second commit overwrites first. Prevented by SERIALIZABLE or by optimistic locking with `@Version` (Q78).
+
+**Defaults vary by DB:**
+- Postgres: `READ_COMMITTED`
+- MySQL/InnoDB: `REPEATABLE_READ`
+- Oracle: `READ_COMMITTED`
+- SQL Server: `READ_COMMITTED`
+
+**`SERIALIZABLE`** is correct but expensive — implementations either acquire range locks (lock contention) or use serializable snapshot isolation (retry on conflict, Postgres). Pay the cost only when you genuinely need it (financial ledgers, certain inventory operations).
+
+### Q194. MVCC vs locking — how do databases handle concurrent reads?
+
+Two strategies for concurrent reads of data being modified:
+
+**Locking-based (older systems, MS SQL default before snapshot isolation):**
+- Reader acquires a shared lock; writer needs exclusive
+- Writers block readers, readers block writers
+- Simple but contention-prone
+
+**MVCC (Multi-Version Concurrency Control)** — Postgres, Oracle, MySQL InnoDB, SQL Server (with snapshot iso enabled):
+- Each row has versions tagged with the transaction ID that created it
+- Readers see a consistent snapshot from when their tx started
+- Writers create a new version; old version still visible to other txs
+- Garbage collection ("VACUUM" in Postgres) removes versions no other tx can see
+
+**Implications:**
+- Readers don't block writers, writers don't block readers — much better concurrency
+- "Snapshot" means your tx can't see another tx's changes mid-flight, even if you re-read
+- Long-running tx prevents VACUUM → table bloat in Postgres
+- Dead tuple cleanup is async; very write-heavy tables need autovacuum tuning
+
+**Postgres** uses MVCC for everything; the lock-based isolation is layered on top. **MySQL InnoDB** uses MVCC for SELECT but uses row-level locks for UPDATE/DELETE.
+
+### Q195. DB index types — when to use which.
+
+**B-tree** (default everywhere) — sorted tree, supports `=`, `<`, `>`, `BETWEEN`, `IN`, `ORDER BY`, `LIKE 'prefix%'`. Default for almost all queries.
+
+**Hash index** (Postgres, occasionally MySQL Memory engine) — only `=`. Faster than B-tree for pure equality but no range support. Rarely worth the extra structure unless you've measured.
+
+**GIN (Generalized Inverted Index)** (Postgres) — for arrays, JSONB, full-text search. Each value indexed against the rows containing it.
+```sql
+CREATE INDEX idx_tags ON articles USING GIN (tags);
+SELECT * FROM articles WHERE tags @> ARRAY['java'];   -- fast
+```
+
+**GiST (Generalized Search Tree)** (Postgres) — geometric, range, custom types. Foundation for PostGIS spatial indexes.
+
+**Partial index** — index only rows matching a predicate. Saves space when you frequently query a subset:
+```sql
+CREATE INDEX idx_active_users ON users (email) WHERE status = 'ACTIVE';
+```
+
+**Covering index** — includes extra columns so the query can answer from the index alone, skipping a heap lookup:
+```sql
+CREATE INDEX idx_orders ON orders (customer_id) INCLUDE (status, total);
+```
+
+**Composite index column ordering matters:**
+```sql
+CREATE INDEX idx_user_status ON orders (customer_id, status, created_at);
+-- Helps:    WHERE customer_id = ? AND status = ?
+-- Helps:    WHERE customer_id = ?
+-- Helps:    WHERE customer_id = ? AND status = ? AND created_at > ?
+-- Doesn't:  WHERE status = ? (skips first column)
+```
+
+Rule: most-selective column first (or the one that's always in WHERE).
+
+### Q196. How do you read a query plan?
+
+Running `EXPLAIN SELECT ...` in Postgres shows the executor's plan. `EXPLAIN ANALYZE` actually runs and reports timings.
+
+```
+EXPLAIN ANALYZE
+SELECT * FROM orders WHERE customer_id = 42 AND status = 'ACTIVE';
+
+Index Scan using idx_orders_customer_status on orders  (cost=0.43..8.45 rows=1 width=128)
+  Index Cond: ((customer_id = 42) AND (status = 'ACTIVE'::order_status))
+Planning Time: 0.123 ms
+Execution Time: 0.034 ms
+```
+
+**Key things to look for:**
+- **`Seq Scan`** on a big table → missing index. Add one.
+- **`Index Scan` / `Bitmap Heap Scan`** → using an index. Good.
+- **`Filter:`** vs **`Index Cond:`** — `Filter` means rows fetched then filtered (slow); `Index Cond` means filtered at the index (fast).
+- **`rows=N actual rows=M`** — large discrepancy means the planner has bad statistics. Run `ANALYZE`.
+- **`Hash Join` vs `Merge Join` vs `Nested Loop`** — pick depends on table sizes and indexes.
+- **`Sort` for ORDER BY without an index** that matches.
+
+**MySQL** equivalent: `EXPLAIN`. Different output but same concepts (key, rows, type, Extra).
+
+**Slow query log** + tools like pgBadger, pt-query-digest, or PMM aggregate slow queries — fix the top offenders.
+
+### Q197. Schema migrations — Flyway vs Liquibase?
+
+Both manage versioned schema changes in a repo, run on app startup or via CLI.
+
+**Flyway** — SQL-first. Migrations are plain SQL files named `V{version}__{description}.sql`:
+
+```
+db/migration/
+  V1__init_schema.sql
+  V2__add_users_table.sql
+  V3__index_users_email.sql
+```
+
+Flyway tracks applied migrations in `flyway_schema_history` table. On startup it runs anything new in version order.
+
+Pros: simple, SQL-native, easy to read, easy to debug. Cons: SQL is per-DB (Postgres ≠ MySQL); Java-based migrations possible but less idiomatic.
+
+**Liquibase** — DSL-first. Migrations are XML/YAML/JSON/SQL changelogs:
+
+```yaml
+databaseChangeLog:
+  - changeSet:
+      id: 1
+      author: alice
+      changes:
+        - createTable:
+            tableName: users
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true } }
+              - column: { name: email, type: varchar(255) }
+```
+
+Pros: DB-agnostic DSL (it generates the right SQL per dialect); built-in rollback support; preconditions for conditional migrations. Cons: more complex; learning curve; debugging the abstraction.
+
+**Default for Spring Boot:** Flyway (auto-configures with `spring-boot-starter-data-jpa` + `flyway-core` on classpath). Use Liquibase if you genuinely need rollbacks or multi-DB support.
+
+**Both:** never edit a committed migration. Add a new one to fix problems.
+
+### Q198. JPA flush modes and the bulk-update gotcha.
+
+JPA's persistence context (the `EntityManager`'s session-level cache) holds managed entities. Changes are tracked but not always flushed (sent as SQL) immediately.
+
+**Flush modes:**
+- **`AUTO`** (default) — flush before queries that might see uncommitted changes, and on commit
+- **`COMMIT`** — flush only on transaction commit
+- **`MANUAL`** — never auto; you call `em.flush()`
+
+```java
+em.setFlushMode(FlushModeType.COMMIT);   // batch all writes until commit
+```
+
+**Bulk update gotcha:**
+```java
+// JPQL bulk update — bypasses persistence context!
+em.createQuery("UPDATE Booking b SET b.status = 'CANCELLED' WHERE b.date < :d")
+  .setParameter("d", yesterday)
+  .executeUpdate();
+
+// Persistence context still holds OLD versions of these entities
+Booking b = em.find(Booking.class, id);
+b.getStatus();   // might still be 'CONFIRMED' — stale!
+```
+
+**Fix:** call `em.clear()` after bulk updates, or use a dedicated repository method that doesn't share the persistence context. Spring Data's `@Modifying(clearAutomatically = true)` does this for you:
+
+```java
+@Modifying(clearAutomatically = true, flushAutomatically = true)
+@Query("UPDATE Booking b SET b.status = 'CANCELLED' WHERE b.date < :d")
+int cancelOldBookings(@Param("d") LocalDate d);
+```
+
+---
+
+## Architecture — Advanced
+
+### Q199. More GoF patterns — Decorator, Adapter, Proxy, Chain of Responsibility.
+
+**Decorator** — wrap an object to add behaviour without subclassing. Java I/O streams are the canonical example: `BufferedInputStream(FileInputStream(...))`.
+
+```java
+interface Coffee { int cost(); }
+class Espresso implements Coffee { public int cost() { return 200; } }
+class WithMilk implements Coffee {
+    private final Coffee wrapped;
+    WithMilk(Coffee c) { this.wrapped = c; }
+    public int cost() { return wrapped.cost() + 30; }
+}
+new WithMilk(new Espresso()).cost();   // 230
+```
+
+Stack arbitrarily deep. Each decorator focuses on one orthogonal concern.
+
+**Adapter** — translate between two incompatible interfaces. Common when integrating third-party libraries with your domain interface:
+
+```java
+class StripePaymentAdapter implements PaymentGateway {
+    private final StripeClient stripe;
+    public ChargeResult charge(Money amount) {
+        StripeCharge c = stripe.charges().create(toStripeRequest(amount));
+        return mapToDomain(c);
+    }
+}
+```
+
+**Proxy** — same interface as the wrapped object, intercepts calls. Spring uses dynamic proxies for `@Transactional`, `@Async`, `@Cacheable`. Lazy-loading proxies in Hibernate. JDK `Proxy` class for runtime interface implementations.
+
+**Chain of Responsibility** — chain of handlers, each decides to handle or pass on. HTTP filters/middleware are exactly this:
+
+```java
+interface Handler {
+    void handle(Request req, HandlerChain chain);
+}
+class AuthHandler implements Handler {
+    public void handle(Request req, HandlerChain chain) {
+        if (req.token() == null) throw new Unauthorized();
+        chain.next(req);
+    }
+}
+```
+
+### Q200. Hexagonal Architecture / Ports & Adapters.
+
+Alistair Cockburn's pattern. Core idea: the **domain** lives at the centre, isolated from infrastructure (DB, HTTP, message brokers) by **ports** (interfaces) and **adapters** (implementations).
+
+```
+            [HTTP Adapter]   [CLI Adapter]
+                 │                │
+                 └──── port ──────┘
+                         │
+                  ┌──────┴──────┐
+                  │   Domain    │  (no Spring, no JPA, no HTTP)
+                  │   (core)    │
+                  └──────┬──────┘
+                         │
+                 ┌─── port ──────┐
+                 │               │
+          [DB Adapter]    [Kafka Adapter]
+```
+
+**Ports** are interfaces defined by the domain: `BookingRepository`, `EmailNotifier`, `PaymentGateway`. **Adapters** implement them: `JpaBookingRepository`, `SmtpEmailNotifier`.
+
+**Benefits:**
+- Domain depends on nothing infrastructural — testable without Spring/DB/HTTP
+- Swap infrastructure (Postgres → DynamoDB) without touching domain logic
+- Forces explicit dependencies — no service reaching into Spring magic
+- Multiple drivers possible (HTTP + CLI + scheduled job all hit the same domain)
+
+**In Java/Spring:** keep domain in a `domain` package with no Spring imports. Adapters in `adapters/inbound/...` (controllers, listeners) and `adapters/outbound/...` (repositories, clients). Spring wires them together at the application boundary.
+
+**Trade-off:** more interfaces, more files, more ceremony. Pays off in long-lived domains that outlive specific tech choices.
+
+### Q201. Clean Architecture / Onion Architecture — same thing?
+
+Both are Cockburn-descended patterns with concentric layers; differences are mostly emphasis.
+
+**Onion Architecture** (Jeffrey Palermo): inner = domain entities, surrounded by domain services, then application services, then infrastructure. Dependencies point inward only.
+
+**Clean Architecture** (Robert C. Martin): four layers — Entities, Use Cases, Interface Adapters, Frameworks & Drivers. Dependency rule: source code dependencies point inward only.
+
+```
+┌─────────────────────────────────────┐
+│  Frameworks & Drivers (Spring,       │
+│      Postgres, Kafka)                │
+│  ┌─────────────────────────────────┐ │
+│  │  Interface Adapters             │ │
+│  │  (controllers, gateways, DTOs)  │ │
+│  │  ┌───────────────────────────┐  │ │
+│  │  │  Use Cases                │  │ │
+│  │  │  (application services)   │  │ │
+│  │  │  ┌─────────────────────┐  │  │ │
+│  │  │  │  Entities (domain)  │  │  │ │
+│  │  │  └─────────────────────┘  │  │ │
+│  │  └───────────────────────────┘  │ │
+│  └─────────────────────────────────┘ │
+└─────────────────────────────────────┘
+```
+
+**Both share:**
+- Domain at the centre
+- Dependencies go inward (frameworks know domain, domain doesn't know frameworks)
+- DTO mapping at boundaries
+- Testability without infrastructure
+
+**Practical reality:** the differences are mostly diagrams. For a team, pick one terminology and stick with it. Hexagonal/Ports & Adapters is the same family with the simplest mental model. **Don't over-layer for small services** — the ceremony costs more than it saves.
+
+### Q202. Anti-patterns — God class, anemic domain model, primitive obsession, feature envy.
+
+**God class** — one class doing far too much. Hundreds of methods, thousands of lines, every team member edits it. Symptom: every PR touches it. Fix: split by responsibility (SRP).
+
+**Anemic domain model** — entities are bags of getters/setters with no behaviour; logic lives in `*Service` classes that operate on them. Common in Spring/JPA shops because JPA likes plain data. Loses the OO win — you can't enforce invariants at the entity level.
+
+```java
+// Anemic
+class Account { Long id; BigDecimal balance; /* getters/setters */ }
+class AccountService {
+    void withdraw(Account a, BigDecimal amt) {
+        if (a.balance < amt) throw new InsufficientFundsException();
+        a.balance -= amt;
+    }
+}
+
+// Rich
+class Account {
+    private BigDecimal balance;
+    void withdraw(BigDecimal amt) {
+        if (balance.compareTo(amt) < 0) throw new InsufficientFundsException();
+        balance = balance.subtract(amt);
+    }
+}
+```
+
+**Primitive obsession** — using built-in types (`String`, `int`, `BigDecimal`) for things that have meaning (`UserId`, `Money`, `Email`). Errors aren't caught at the type level: `transfer(toUserId, fromUserId)` compiles even if you swap them.
+
+```java
+// Obsessive
+void transfer(String fromAccount, String toAccount, BigDecimal amount) {}
+
+// Typed
+void transfer(AccountId from, AccountId to, Money amount) {}
+record AccountId(UUID value) {}
+record Money(BigDecimal amount, Currency currency) {}
+```
+
+Records make this cheap. Use them.
+
+**Feature envy** — a method that uses another class's data more than its own. Sign that the method should live on the other class.
+
+### Q203. Strangler Fig pattern — what's it for?
+
+Migration pattern from Martin Fowler. Named after the strangler fig tree, which grows around a host tree until eventually it stands on its own and the host dies.
+
+**Use case:** legacy monolith you can't rewrite in one go. Need to migrate to new architecture incrementally without big-bang risk.
+
+**Steps:**
+1. Put a routing layer (proxy/gateway) in front of the monolith
+2. Build new functionality as new services
+3. Route specific URLs / features to the new services
+4. As more features migrate, the monolith shrinks
+5. Eventually, the monolith is empty or dies; new services stand alone
+
+```
+Step 1:           Step 3:                    Step 5:
+[Client]          [Client]                   [Client]
+   │                │                            │
+   ▼                ▼                            ▼
+[Monolith]      [Gateway]                   [Gateway]
+                /  │  \                     /  │  \
+       [Mono] [New A] [New B]       [New A] [New B] [New C]
+```
+
+**Practical tips:**
+- Pick the right routing seam (URL prefix, header, feature flag)
+- Keep the monolith and new services using the same DB initially; migrate data later
+- Have a rollback plan per migrated feature
+- Track migration progress as a metric
+
+### Q204. Backend for Frontend (BFF) pattern.
+
+Each client (web, iOS, Android) gets its own dedicated backend service tailored to its UX needs. Sits between the client and downstream microservices.
+
+```
+[Web Client]      [iOS Client]     [Android Client]
+     │                │                  │
+     ▼                ▼                  ▼
+[Web BFF]        [iOS BFF]        [Android BFF]
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+   [User Service] [Order Service] [Catalog Service]
+```
+
+**Why:**
+- Each client has different data shapes and aggregation needs (mobile wants compact responses, web can handle richer)
+- Authentication / session management differs per client
+- Shielding clients from backend service evolution
+- Each client team owns their BFF — fewer cross-team coordination headaches
+
+**Trade-off:** one more service per client, more code to maintain. Pays off when client teams genuinely need different aggregations or experiences. For small apps with one client, just one general API is fine.
+
+### Q205. Outbox pattern — what problem does it solve?
+
+**Problem:** "save to DB AND publish to Kafka" needs to be atomic. Either both happen or neither. Two-phase commit is heavy and broker-specific. What if you crash between the two?
+
+**Outbox pattern:** atomic write of business state + an event row in the same DB transaction. Async dispatcher polls/streams the outbox table, publishes to Kafka, marks rows sent.
+
+```sql
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+INSERT INTO outbox (id, aggregate_id, event_type, payload, created_at)
+       VALUES (uuid(), 1, 'AccountDebited', '{...}', now());
+COMMIT;
+
+-- Async dispatcher:
+SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY created_at LIMIT 100;
+-- Publish to Kafka
+UPDATE outbox SET sent_at = now() WHERE id IN (...);
+```
+
+**Variants:**
+- **Polling outbox** — dispatcher polls the outbox table on a timer. Simple, lag = poll interval.
+- **CDC outbox** (Debezium, Maxwell) — DB write-ahead log streamed to Kafka. Lower latency, no polling.
+
+**Guarantees:** at-least-once delivery (publish might succeed but `UPDATE outbox SET sent_at` might fail → retry → duplicate). Consumers must be idempotent.
+
+**Why not 2PC:** XA across DB + Kafka exists but is operationally fragile. Outbox keeps the atomicity in one resource (the DB) and pushes the cross-resource coordination async.
+
+### Q206. Event-driven architecture — when does it earn the complexity?
+
+Communication via events rather than synchronous request/response. Producer emits an event; one or more consumers react.
+
+**Earns the complexity when:**
+- Multiple downstream services react to the same business event (one fact, many side effects)
+- You want loose temporal coupling — producer doesn't wait, consumer can be down without breaking the producer
+- Audit log / event sourcing is part of the design
+- You need to evolve consumers independently (add a new consumer without touching the producer)
+
+**Costs:**
+- Eventual consistency by default — reads might lag writes
+- Harder to reason about end-to-end flow (no single stack trace)
+- Schema evolution is hard (consumers might be on old versions)
+- Debugging is harder; need distributed tracing
+- More moving parts (broker, schema registry, dead letter queues)
+
+**Don't go event-driven for:** simple CRUD, request/response with a single consumer, anything where you need synchronous confirmation.
+
+**Real-world hybrid:** sync REST for command path (return 202 Accepted with idempotency key), events for downstream side effects. Best of both.
+
+---
+
+## Testing — Advanced
+
+### Q207. JMH for micro-benchmarks — why and how?
+
+Measuring Java performance in a `main()` method gives misleading numbers. JIT warm-up, dead code elimination, escape analysis can all skew results unpredictably.
+
+**JMH (Java Microbenchmark Harness)** — OpenJDK's official benchmarking tool. Handles:
+- Warmup iterations (let JIT stabilise)
+- Measurement iterations
+- Forking (separate JVM per benchmark — clean state)
+- Dead-code elimination via `Blackhole`
+- Branch prediction effects
+
+```java
+@State(Scope.Benchmark)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 5)
+@Measurement(iterations = 10)
+@Fork(1)
+public class StringConcatBench {
+    String a = "hello";
+    String b = "world";
+
+    @Benchmark
+    public String plus() {
+        return a + " " + b;
+    }
+
+    @Benchmark
+    public String stringBuilder() {
+        return new StringBuilder().append(a).append(" ").append(b).toString();
+    }
+
+    @Benchmark
+    public void blackholedConcat(Blackhole bh) {
+        bh.consume(a + " " + b);   // prevent dead-code elimination
+    }
+}
+```
+
+Run: `mvn clean install` then `java -jar target/benchmarks.jar`.
+
+**Don't use** for application-level perf — JMH is for measuring nanoseconds of specific methods. For end-to-end, use load testing (Gatling, k6, JMeter).
+
+### Q208. Property-based testing — what's the idea?
+
+Instead of writing example-based tests (specific inputs, specific outputs), declare **properties** that should hold for all valid inputs. The framework generates many random inputs and finds counterexamples.
+
+**Tools:** **jqwik** (idiomatic JUnit 5 integration), QuickTheories.
+
+```java
+import net.jqwik.api.*;
+
+class StringPropertiesTest {
+
+    @Property
+    boolean reverseTwiceYieldsOriginal(@ForAll String input) {
+        return new StringBuilder(input).reverse().reverse().toString().equals(input);
+    }
+
+    @Property
+    boolean concatLengthIsSumOfLengths(@ForAll String a, @ForAll String b) {
+        return (a + b).length() == a.length() + b.length();
+    }
+
+    @Property
+    boolean sortingIsIdempotent(@ForAll List<@WithNull Integer> xs) {
+        var once = xs.stream().sorted().toList();
+        var twice = once.stream().sorted().toList();
+        return once.equals(twice);
+    }
+}
+```
+
+**On failure**, jqwik shrinks the input — finds the minimal failing case. So instead of "fails on `[3, -7, 12, 0, -1, 5]`" you get "fails on `[-1]`" or whatever the smallest failing input is.
+
+**Use for:** functions with algebraic properties (commutativity, associativity, idempotence, identity), parsers (`parse(format(x)) == x`), comparators, hash functions, any pure function with invariants.
+
+**Don't use for:** interaction-heavy code (it's example-based by nature), business workflows with many side effects.
+
+### Q209. The full taxonomy of test doubles.
+
+Gerard Meszaros's classification (*xUnit Test Patterns*):
+
+**Dummy** — passed but never used. Just to satisfy a parameter list.
+```java
+service.methodTakingLogger(new DummyLogger());
+```
+
+**Stub** — provides canned answers. Doesn't verify calls.
+```java
+when(repo.findById(id)).thenReturn(Optional.of(user));
+```
+
+**Spy** — wraps a real implementation, records call info for later verification.
+```java
+@Spy AuditService audit;   // real audit, but records all calls
+audit.log(event);
+verify(audit).log(any(Event.class));
+```
+
+**Mock** — pre-programmed expectations + verification. Test fails if expectations not met.
+```java
+@Mock EmailService email;
+when(email.send(...)).thenReturn(true);
+service.confirmBooking(id);
+verify(email).send(eq(customer), contains("confirmed"));
+```
+
+**Fake** — working implementation, simpler than the real thing. In-memory DB, Map-backed repo, in-memory message broker. Often the cleanest choice.
+```java
+class InMemoryBookingRepo implements BookingRepository {
+    private final Map<UUID, Booking> store = new ConcurrentHashMap<>();
+    public Optional<Booking> findById(UUID id) { return Optional.ofNullable(store.get(id)); }
+    public Booking save(Booking b) { store.put(b.id(), b); return b; }
+}
+```
+
+**Choosing:**
+- Dummy / Stub for collaborators whose specific calls aren't being tested
+- Spy when you want to verify side effects but keep real behaviour
+- Mock when verifying interaction is the test's purpose
+- Fake when the dependency has rich behaviour and you want realistic interactions across modules
+
+**Mockist (London) vs Classicist (Detroit)** schools differ on overuse of mocks. Lean classicist — mocks coupled to implementation make tests brittle. Use fakes where reasonable.
+
+### Q210. Mockito limitations and workarounds.
+
+**Default Mockito (mockito-core 3.4+):**
+- Can mock interfaces, abstract classes, concrete classes
+- **Cannot** mock final classes, final methods, static methods, constructors, private methods, native methods (without help)
+
+**`mockito-inline`** — adds bytecode instrumentation to handle:
+- Final classes / methods (most useful — Java records, immutable wrappers)
+- Static methods (`mockStatic(Files.class)`)
+- Constructors (`mockConstruction(MyClass.class)`)
+
+```java
+try (MockedStatic<Files> mocked = Mockito.mockStatic(Files.class)) {
+    mocked.when(() -> Files.readString(any(Path.class))).thenReturn("stub");
+    assertEquals("stub", service.loadConfig());
+}
+```
+
+**Still cannot:** mock `final` methods on `java.*` classes (sealed by JDK), capture lambdas (mock the SAM interface instead).
+
+**`@InjectMocks` gotchas:**
+- Constructor injection preferred — works most reliably
+- Field injection by reflection — fragile if the class has multiple constructors
+- Doesn't inject `@Spy`-annotated fields automatically; verify via `verifyNoMoreInteractions` if testing strictly
+
+**PowerMock** historically handled what Mockito couldn't — but it's largely obsolete with mockito-inline. Avoid PowerMock for new code; it slows tests massively and breaks with new Java versions.
+
+**Mockito limitations are often a design smell.** If you need to mock a final class, ask: should that class have an interface? If you need to mock a static method, ask: should it be an injectable service? Resist mocking everything; reach for fakes for cleaner tests.
+
+### Q211. JaCoCo coverage and quality gates — how do you set them up?
+
+**JaCoCo** (Java Code Coverage) — bytecode-instrumented coverage tool. Default in Spring Boot, Gradle, and Maven projects.
+
+**Maven setup:**
+```xml
+<plugin>
+    <groupId>org.jacoco</groupId>
+    <artifactId>jacoco-maven-plugin</artifactId>
+    <version>0.8.12</version>
+    <executions>
+        <execution>
+            <goals><goal>prepare-agent</goal></goals>
+        </execution>
+        <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+        </execution>
+        <execution>
+            <id>check</id>
+            <goals><goal>check</goal></goals>
+            <configuration>
+                <rules>
+                    <rule>
+                        <element>BUNDLE</element>
+                        <limits>
+                            <limit>
+                                <counter>LINE</counter>
+                                <value>COVEREDRATIO</value>
+                                <minimum>0.80</minimum>
+                            </limit>
+                        </limits>
+                    </rule>
+                </rules>
+            </configuration>
+        </execution>
+    </executions>
+</plugin>
+```
+
+`mvn test` produces `target/site/jacoco/index.html` — drill-down HTML report with line/branch/method coverage.
+
+**Quality gate integration:**
+- **Sonar** consumes JaCoCo reports for trend tracking
+- **Codecov / Coveralls** show coverage diff per PR
+- **CI failure** if coverage drops below threshold (the `check` execution above)
+
+**Coverage isn't quality.** A 100% covered codebase with weak assertions is worse than 70% with strong tests. Use coverage as a *floor* (catch huge drops) not a target.
+
+**Branch coverage** is more valuable than line coverage for `if`/`switch`-heavy code. Configure JaCoCo to require branch coverage too.
+
+**Mutation testing (PIT)** complements coverage by measuring whether tests would catch mutations — far more meaningful than coverage alone.
+
+---
+
+## Build Tools
+
+### Q212. Maven lifecycle phases — what runs in what order?
+
+Maven has three built-in lifecycles: **default**, **clean**, **site**. The default lifecycle has 23 phases, but you'll mostly care about these:
+
+```
+validate → compile → test → package → verify → install → deploy
+```
+
+- **`validate`** — project structure correct, all info available
+- **`compile`** — `src/main/java` → `target/classes`
+- **`test-compile`** — `src/test/java` → `target/test-classes`
+- **`test`** — runs unit tests via Surefire
+- **`package`** — creates the JAR/WAR in `target/`
+- **`verify`** — runs integration tests via Failsafe; quality gates run here (JaCoCo check, Spotless check, dependency-check)
+- **`install`** — installs to local `~/.m2/repository`
+- **`deploy`** — uploads to remote artifact repo (Nexus, Artifactory)
+
+Running a phase runs **all preceding phases**. `mvn package` runs validate→compile→test→package.
+
+**Surefire vs Failsafe:**
+- Surefire — `*Test.java`, runs in `test` phase
+- Failsafe — `*IT.java`, runs in `verify` phase. Failsafe doesn't fail the build immediately on test failure; it lets `post-integration-test` (e.g. teardown of containers) run first
+
+**`clean` lifecycle:** `pre-clean` → `clean` (deletes `target/`) → `post-clean`.
+
+### Q213. Maven dependency scopes — when to use each.
+
+Six scopes determine when a dependency is on the classpath:
+
+| Scope | Compile | Test | Runtime | Packaged in JAR |
+|---|---|---|---|---|
+| `compile` (default) | ✓ | ✓ | ✓ | ✓ |
+| `provided` | ✓ | ✓ | ✗ (provided by container) | ✗ |
+| `runtime` | ✗ | ✓ | ✓ | ✓ |
+| `test` | ✗ | ✓ | ✗ | ✗ |
+| `system` | ✓ | ✓ | ✓ | ✗ (use `<systemPath>`) |
+| `import` | (BOM only) | | | |
+
+**Examples:**
+- `spring-boot-starter-web` — `compile` (default)
+- `javax.servlet-api` — `provided` (Tomcat provides at runtime)
+- `mysql-connector-j` — `runtime` (driver loaded reflectively, no compile-time refs)
+- `junit-jupiter` — `test`
+- `spring-boot-dependencies` BOM — `import` (provides versions but no JARs)
+
+**`system` scope** is legacy — links to a JAR by file path. Avoid; use a local Maven repository instead.
+
+### Q214. How does Maven resolve dependency conflicts?
+
+Maven's resolution rule: **nearest wins** (shortest path from the root).
+
+```
+your-app
+├── A
+│   └── lib-X 1.0
+└── B
+    └── C
+        └── lib-X 2.0
+```
+
+`A → lib-X 1.0` is depth 2; `B → C → lib-X 2.0` is depth 3. Maven picks **lib-X 1.0**.
+
+If both are at the same depth, **first declaration wins** (order in `<dependencies>`).
+
+**Inspect:**
+```bash
+mvn dependency:tree
+mvn dependency:tree -Dverbose -Dincludes=org.example:lib-x   # shows what got excluded
+```
+
+**Force a specific version** — declare it explicitly in your top-level `<dependencyManagement>`:
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.example</groupId>
+            <artifactId>lib-x</artifactId>
+            <version>2.0</version>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
+This pins the version regardless of where it's transitively pulled in. Used by Spring Boot's parent POM and BOMs to enforce coherent version sets.
+
+**Dependency convergence enforcement** — `maven-enforcer-plugin` rule `dependencyConvergence` fails the build if two transitives need different versions, forcing you to make an explicit decision.
+
+### Q215. BOM imports — what problem do they solve?
+
+**Bill of Materials (BOM)** — a POM that declares versions for a coherent set of libraries that work together. Imported via `<scope>import</scope>` in `<dependencyManagement>`.
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-dependencies</artifactId>
+            <version>3.4.0</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<dependencies>
+    <!-- No version needed — BOM provides it -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+</dependencies>
+```
+
+**Why:**
+- One source of truth for versions across hundreds of artifacts
+- Spring Boot publishes a BOM that pins ~500 libraries to versions tested to work together
+- Multiple BOMs can coexist; later imports override earlier (use cautiously)
+
+**Common BOMs:**
+- `spring-boot-dependencies` — Spring Boot ecosystem
+- `spring-cloud-dependencies` — Spring Cloud
+- `junit-bom` — JUnit 5 modules
+- `testcontainers-bom` — Testcontainers modules
+- AWS SDK BOM, Azure SDK BOM
+
+**Without BOM:** you manually pin every library version → version skew → runtime `NoSuchMethodError`. With BOM: one version property to bump.
+
+### Q216. Multi-module Maven projects — how do they work?
+
+Parent POM with `<modules>`, each module is a sub-directory with its own POM.
+
+```
+my-project/
+├── pom.xml                      (parent — packaging: pom)
+├── api/
+│   └── pom.xml                  (packaging: jar)
+├── domain/
+│   └── pom.xml
+└── infrastructure/
+    └── pom.xml
+```
+
+**Parent POM:**
+```xml
+<groupId>com.example</groupId>
+<artifactId>my-project</artifactId>
+<version>1.0-SNAPSHOT</version>
+<packaging>pom</packaging>
+
+<modules>
+    <module>api</module>
+    <module>domain</module>
+    <module>infrastructure</module>
+</modules>
+```
+
+**Child POM:**
+```xml
+<parent>
+    <groupId>com.example</groupId>
+    <artifactId>my-project</artifactId>
+    <version>1.0-SNAPSHOT</version>
+</parent>
+<artifactId>api</artifactId>
+```
+
+**Benefits:**
+- Single `mvn install` from parent builds everything in dependency order
+- Common config (Java version, plugin versions, dependency BOMs) defined once in parent
+- Easy module isolation — `infrastructure` depends on `domain`, `api` depends on both, but `domain` has no infra dependencies (enforce hexagonal architecture)
+
+**Reactor:** Maven's term for the ordered build of all modules. `-pl module-name -am` builds a single module and its dependencies.
+
+### Q217. Gradle vs Maven — trade-offs.
+
+**Maven:**
+- XML-based POM
+- Convention over configuration
+- Massive ecosystem, every CI tool understands it
+- Build is declarative; non-trivial customisation is painful
+- Slow on large projects (no incremental compilation by default)
+
+**Gradle:**
+- Groovy or Kotlin DSL
+- Programmatic build script
+- Incremental compilation, build cache, daemon — much faster on large projects
+- More flexibility, more rope to hang yourself
+- Steeper learning curve; build scripts can become unmaintainable
+
+**When to pick Maven:**
+- Standard Spring Boot / library project
+- Team unfamiliar with Gradle
+- Strong preference for declarative
+
+**When to pick Gradle:**
+- Large multi-module project where build time matters
+- Android (Gradle is the default)
+- Need build customisation that Maven plugins make awkward
+- Kotlin shop (Kotlin DSL is type-safe and IDE-discoverable)
+
+**Build performance** is Gradle's main edge. Build cache (`~/.gradle/caches`) shares compiled outputs across CI runs and developers — massive for large monorepos.
+
+**Reproducibility:** both can be made reproducible (same input → same output bytes). Gradle has built-in support; Maven needs the `reproducible-build-maven-plugin`.
+
+### Q218. SBOM — what is it and why does it matter?
+
+**Software Bill of Materials.** A machine-readable inventory of every dependency in your build, including versions and licences.
+
+**Standards:**
+- **CycloneDX** — OWASP-led, JSON/XML/Protobuf
+- **SPDX** — Linux Foundation, broader scope (includes file-level)
+
+**Generate:**
+- Maven: `cyclonedx-maven-plugin` produces `bom.xml` in `target/`
+- Gradle: `cyclonedx-gradle-plugin`
+- Spring Boot 3.5+ has built-in SBOM support
+- GitHub: dependency graph + Dependabot effectively maintain a live SBOM
+
+**Why it matters:**
+- **Vulnerability tracking** — when CVE-2024-XYZ drops on `commons-text` 1.10, you grep your SBOMs to find affected services in seconds
+- **Licence compliance** — flag GPL or AGPL deps slipping into a closed-source product
+- **Supply chain attacks** — Log4Shell hit hard partly because nobody had a clean inventory of what was deployed
+- **Regulation** — US Executive Order 14028, EU Cyber Resilience Act mandate SBOMs for federal/regulated software
+- **Customers** — increasingly required by enterprise procurement
+
+**In practice:** generate during CI, attach to releases, ingest into Dependency-Track / Snyk / GitHub Dependency Graph for continuous monitoring.
+
+### Q219. Reproducible builds — what's required?
+
+**Reproducible build** = same source + same toolchain → byte-identical output. Lets you verify a binary matches its claimed source.
+
+**Java specifics:**
+- JAR files contain timestamps in entries — must be normalised. Maven plugin `reproducible-build-maven-plugin` or `maven-jar-plugin` 3.x with `<archive><manifestEntries><Built-By>` config.
+- Manifest order matters — sort entries deterministically.
+- File order in the JAR — sort entries.
+- `Class-Path` and other manifest entries must be deterministic.
+- JDK version + OS shouldn't affect output (mostly fine for plain Java).
+
+**Maven flags:**
+```xml
+<properties>
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
+</properties>
+```
+
+**Why reproducibility matters:**
+- Supply chain trust — Reproducible Builds project verifies popular Linux packages match upstream source
+- Distroless / scratch container images often verify reproducibility
+- Required for some regulated sectors
+
+**Gradle** has built-in reproducible builds support: `tasks.withType<Jar> { isReproducibleFileOrder = true; isPreserveFileTimestamps = false }`.
+
+---
+
+## Cloud-Native Java
+
+### Q220. JVM in containers — what's special?
+
+**Pre-Java 10:** the JVM saw the *host* CPU and memory, ignoring container limits. A 16-core, 64GB host with a 2-core, 4GB cgroup → JVM thought it had 16 cores, set thread pools accordingly, OOM-killed by the kernel for using too much memory.
+
+**Java 10+:** `-XX:+UseContainerSupport` (default on) reads cgroup limits. JVM:
+- Sees container CPU limit → sizes default thread pools accordingly
+- Sees container memory limit → sizes heap as a fraction (default 25% before Java 19, since Java 19 it's based on `MaxRAMPercentage` defaulting to 25%)
+
+**Tuning:**
+```bash
+# Old way
+-Xmx2g
+
+# Container-aware way (preferred)
+-XX:MaxRAMPercentage=75       # 75% of cgroup memory limit
+-XX:InitialRAMPercentage=75
+```
+
+Set RAM percentage so heap + native memory + container overhead fits in the limit. Typical: 75% on a 2GB container leaves ~512MB for native (JIT cache, Metaspace, threads, off-heap buffers).
+
+**Other knobs:**
+- `-XX:ActiveProcessorCount=N` to override detected CPUs
+- `-XX:+ExitOnOutOfMemoryError` so K8s restarts the pod cleanly
+- `-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/var/log/heap.hprof` for postmortems
+
+### Q221. GraalVM native image — when does it earn its keep?
+
+**GraalVM native image** AOT-compiles a Java app to a self-contained native binary. No JVM at runtime; everything resolved at build time.
+
+**Wins:**
+- **Cold start** ~10-100x faster than JVM (50ms vs 5s for a typical Spring Boot app)
+- **Memory** ~50-75% lower at idle (no JIT, no Metaspace overhead)
+- **Distribution** — single binary, no JRE needed
+
+**Costs:**
+- **Build time** — minutes (vs seconds for normal JVM build)
+- **Reflection / dynamic class loading** must be configured (manual `reflect-config.json` or framework-generated)
+- **No JIT** — peak throughput typically 20-40% lower than warmed JVM
+- **No agent-based monitoring** (some APM tools work, others don't)
+- **Library compatibility** — frameworks must support native; many do now (Spring Boot 3 + Spring AOT, Quarkus, Micronaut)
+
+**Best for:**
+- Serverless (cold start matters most)
+- CLI tools (start, do work, exit)
+- Highly-replicated services where idle cost dominates
+
+**Bad for:**
+- Long-running services where JIT optimisation matters more than startup time
+- Heavy reflection-using apps without first-class native support
+- Apps with frequent code reload (dev workflows)
+
+**Build:**
+```bash
+mvn -Pnative native:compile
+# or
+gradle nativeCompile
+```
+
+### Q222. Spring Boot 3 + AOT processing for native image.
+
+Spring Boot 3 introduced **AOT processing** to make Spring apps native-image-friendly.
+
+**At build time:**
+- AOT processor analyses the app context: scanned components, configurations, conditional beans
+- Generates Java source code reflecting the determined bean graph (`*.aot.java`)
+- Generates native-image config: `reflect-config.json`, `resource-config.json`, `proxy-config.json`, `serialization-config.json`
+- These tell GraalVM what to keep in the binary (otherwise GraalVM eliminates "unused" code that's actually used reflectively)
+
+**Build:**
+```xml
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-maven-plugin</artifactId>
+        </plugin>
+    </plugins>
+</build>
+```
+Then `mvn -Pnative native:compile` (with the GraalVM Maven plugin).
+
+**Limitations:**
+- Conditional bean activation is **frozen at build time** — no runtime profile switching that changes the bean graph
+- `@ConfigurationProperties` binding paths are scanned ahead of time
+- Some third-party libraries need explicit hints (`@RegisterReflectionForBinding`, `@TypeHint`)
+
+**Runtime tracing:** if your app uses something native-image doesn't auto-detect, run the JVM version with the native-image-agent attached:
+```bash
+java -agentlib:native-image-agent=config-output-dir=src/main/resources/META-INF/native-image -jar app.jar
+```
+The agent records reflection / resource access, generates configs you commit.
+
+### Q223. Multi-stage Docker builds for Java.
+
+A naive `Dockerfile` ships the entire build environment + JDK + dependencies in the image — bloated and slow.
+
+**Multi-stage** uses one stage to build, another to run:
+
+```dockerfile
+# Build stage
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline    # cache layer for deps
+COPY src ./src
+RUN mvn package -DskipTests
+
+# Runtime stage
+FROM eclipse-temurin:21-jre-alpine
+COPY --from=build /app/target/app.jar /app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+```
+
+**Optimisations:**
+- **Cache deps separately from source** — copy `pom.xml`, run `dependency:go-offline`, *then* copy source. Source changes don't invalidate the dependency layer.
+- **JRE image, not JDK** — runtime doesn't need the compiler
+- **Distroless base** (`gcr.io/distroless/java21`) — minimal attack surface, ~80MB vs Alpine's ~220MB
+- **Non-root user:**
+  ```dockerfile
+  RUN adduser -D appuser
+  USER appuser
+  ```
+
+### Q224. Spring Boot layered jars for Docker.
+
+Spring Boot 2.3+ supports layered JARs — splits the fat JAR into stable layers (dependencies, snapshots, app) so Docker can cache them separately.
+
+**Configure in pom:**
+```xml
+<plugin>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-maven-plugin</artifactId>
+    <configuration>
+        <layers><enabled>true</enabled></layers>
+    </configuration>
+</plugin>
+```
+
+**Multi-stage Dockerfile using layers:**
+```dockerfile
+FROM eclipse-temurin:21 AS extract
+WORKDIR /app
+COPY target/app.jar app.jar
+RUN java -Djarmode=layertools -jar app.jar extract
+
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+COPY --from=extract /app/dependencies/ ./
+COPY --from=extract /app/spring-boot-loader/ ./
+COPY --from=extract /app/snapshot-dependencies/ ./
+COPY --from=extract /app/application/ ./
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
+```
+
+Each `COPY` is a Docker layer. When you change app code, only the `application/` layer rebuilds — saves minutes on CI rebuilds and speeds up registry pushes.
+
+**Alternative — Buildpacks:** `mvn spring-boot:build-image` produces an OCI image directly using Paketo buildpacks. No Dockerfile needed. Layers automatically.
+
+```bash
+mvn spring-boot:build-image -Dspring-boot.build-image.imageName=interview-prep:latest
+```
+
+### Q225. Kubernetes liveness vs readiness vs startup probes.
+
+Three probes, three jobs.
+
+**Liveness probe** — "is the container alive?" K8s restarts it if this fails. Use for catching deadlocks or wedged states.
+
+**Readiness probe** — "is it ready to serve traffic?" K8s removes from load balancer if it fails. Use for "still warming up", "DB connection lost, can't serve", etc.
+
+**Startup probe** — "has it finished starting?" Disables liveness/readiness until it succeeds. Use for slow-starting apps where liveness might falsely restart them during startup.
+
+**Spring Boot 2.3+** built-in probes via Actuator:
+```yaml
+management.endpoint.health.probes.enabled: true
+# Endpoints:
+#   /actuator/health/liveness
+#   /actuator/health/readiness
+```
+
+**K8s manifest:**
+```yaml
+livenessProbe:
+  httpGet: { path: /actuator/health/liveness, port: 8080 }
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  httpGet: { path: /actuator/health/readiness, port: 8080 }
+  periodSeconds: 5
+startupProbe:
+  httpGet: { path: /actuator/health/liveness, port: 8080 }
+  failureThreshold: 30      # 30 * 5s = 150s grace
+  periodSeconds: 5
+```
+
+**Custom health indicators** — implement `HealthIndicator` for app-specific checks (DB query, external API ping):
+```java
+@Component
+class DatabaseHealthIndicator implements HealthIndicator {
+    public Health health() {
+        try (Connection c = dataSource.getConnection()) {
+            return c.isValid(2) ? Health.up().build() : Health.down().build();
+        } catch (Exception e) {
+            return Health.down(e).build();
+        }
+    }
+}
+```
+
+### Q226. Graceful shutdown for Java services.
+
+When a pod terminates, K8s sends SIGTERM, then waits `terminationGracePeriodSeconds` (default 30s), then SIGKILL.
+
+**Spring Boot 2.3+** built-in:
+```yaml
+server.shutdown: graceful
+spring.lifecycle.timeout-per-shutdown-phase: 30s
+```
+
+What it does:
+- Stop accepting new HTTP requests
+- Let in-flight requests complete (up to timeout)
+- Run `@PreDestroy` and `DisposableBean#destroy`
+- Close `EntityManager`, message consumers, thread pools
+
+**Manual hooks** (for non-Spring or custom logic):
+```java
+Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+    log.info("Shutdown signal received");
+    kafkaConsumer.close(Duration.ofSeconds(10));
+    executor.shutdown();
+    if (!executor.awaitTermination(10, TimeUnit.SECONDS)) executor.shutdownNow();
+}));
+```
+
+**For K8s:** ensure `terminationGracePeriodSeconds >= shutdown-phase-timeout`. Otherwise SIGKILL fires mid-shutdown.
+
+**For Kafka consumers:** call `consumer.close()` to commit offsets and leave the consumer group cleanly. Without it, you wait for `session.timeout.ms` before partitions rebalance — clients lag.
+
+### Q227. 12-factor app applied to Java services.
+
+Heroku's 12 factors, the foundation of cloud-native design.
+
+1. **Codebase** — one repo, many deploys. ✓ Standard.
+2. **Dependencies** — explicitly declare. Maven/Gradle do this.
+3. **Config** — store in environment, not code. `@ConfigurationProperties` reading env vars / mounted secrets.
+4. **Backing services** — DB, Redis, Kafka are attached resources. Configurable via env. Swap dev DB for prod via config alone.
+5. **Build, release, run** — separate stages. CI builds artifact, deploy combines artifact + config, run executes. Don't build in production.
+6. **Processes** — stateless. Use external session store (Redis), no local files persistent across restarts.
+7. **Port binding** — service exposes via port (Spring Boot auto). No external web server needed.
+8. **Concurrency** — scale via processes (more pods), not threads. Each pod stateless.
+9. **Disposability** — fast startup, graceful shutdown. Spring Boot is fast enough for normal cases; native image for cold-start sensitivity.
+10. **Dev/prod parity** — same DB engine in dev and prod. Use Testcontainers locally, not H2 (which has different SQL semantics from Postgres).
+11. **Logs** — write to stdout/stderr, let the platform handle aggregation. Don't write log files inside the container.
+12. **Admin processes** — one-off jobs (DB migrations, batch imports) run as separate processes/pods, not within the running app.
+
+Spring Boot defaults align well; the harder factors are #4 (truly external services) and #6 (stateless) — they require discipline.
+
+---
+
+## Networking & Protocols
+
+### Q228. HTTP/1.1 vs HTTP/2 vs HTTP/3 — what changed?
+
+**HTTP/1.1 (1997, still everywhere)**
+- Text-based
+- One request per TCP connection (head-of-line blocking)
+- Solved partially by pipelining (buggy, mostly disabled) and 6 parallel connections per origin
+- Keep-alive reduces TCP handshake cost
+
+**HTTP/2 (2015)**
+- Binary framing
+- **Multiplexing** — multiple requests on one TCP connection, no head-of-line blocking at the HTTP level
+- **Header compression** (HPACK) — repeated headers cost almost nothing
+- **Server push** (deprecated, never widely used)
+- Mandates TLS in browsers
+- Still uses TCP — head-of-line blocking at the **TCP** level remains
+
+**HTTP/3 (2022)**
+- Replaces TCP with **QUIC** (UDP-based, multiplexed transport)
+- No TCP head-of-line blocking
+- Connection migration (keep connection alive across IP changes — moving from WiFi to mobile)
+- Faster handshake (TLS 1.3 baked in, 1-RTT for new, 0-RTT for resumed)
+- Encrypted by default
+
+**Java support:**
+- HTTP/2: Java 9+ via `HttpClient`. Servers via Jetty, Undertow, Tomcat.
+- HTTP/3: Java 22+ preview in `HttpClient`; servers via Netty + JCQUIC
+
+### Q229. TLS handshake — what happens?
+
+TLS 1.3 (the modern default since 2018) simplified the handshake to **1-RTT**.
+
+```
+Client                                          Server
+
+1. ClientHello —————————————————————————————→
+   - supported TLS versions
+   - cipher suites
+   - random
+   - key share (ephemeral DH public)
+   - SNI (server name)
+
+                                               2. ServerHello ←—————
+                                                  - chosen version
+                                                  - chosen cipher
+                                                  - random
+                                                  - key share
+                                                  - certificate (encrypted)
+                                                  - signature over handshake
+
+3. Certificate verified
+4. Derive shared session keys via DH
+5. Finished —————————————————————————————→
+
+                                               6. Finished ←—————
+
+Encrypted application data flows
+```
+
+**TLS 1.3 simplifications vs 1.2:**
+- 1 round trip vs 2
+- 0-RTT for resumed sessions (with replay risk for non-idempotent ops)
+- Mandatory ECDHE (forward secrecy by default)
+- Removed legacy cipher suites (RSA key exchange, RC4, SHA-1, etc.)
+
+**Java specifics:**
+- Java 8u261+ supports TLS 1.3
+- TrustStore (`cacerts`) holds CA certificates — keep updated
+- KeyStore holds your own certs + keys (server-side)
+- `-Djavax.net.debug=ssl,handshake` for handshake debugging
+
+### Q230. gRPC vs REST — when each?
+
+**REST:**
+- HTTP/JSON, human-readable
+- Universal client support (browser, curl, Postman)
+- Cacheable via HTTP semantics
+- Schema is informal (OpenAPI documents but doesn't enforce)
+- Streaming via SSE / WebSocket / long-polling — bolted on
+
+**gRPC:**
+- HTTP/2 + Protobuf (binary)
+- Strongly-typed schema (.proto files), code generation in any language
+- Bidirectional streaming first-class
+- Built-in features: deadlines, cancellation, metadata, interceptors
+- Smaller payloads (binary), faster serialisation
+- No browser support without gRPC-web proxy
+
+**Use REST when:**
+- Public API consumed by browsers / curl / Postman
+- Caching matters (HTTP caching is well-supported)
+- Simple request/response, JSON is fine
+- Polyglot consumers without code-gen tooling
+
+**Use gRPC when:**
+- Internal service-to-service in a microservices estate
+- Strict schema discipline + version evolution matters
+- Streaming (chat, real-time updates, file transfer)
+- Performance-sensitive (binary serialisation, HTTP/2 multiplexing)
+- Code generation across languages is welcome
+
+**Hybrid:** REST at the public edge, gRPC internally. Common at scale.
+
+### Q231. WebSocket vs SSE vs long-polling.
+
+Three ways to push data from server to client over HTTP.
+
+**Long-polling:**
+- Client makes HTTP request; server holds it open until data arrives or timeout
+- On data, server responds; client immediately re-requests
+- Works everywhere; high overhead per message (full HTTP request/response cycle)
+- Use only when stuck on legacy infrastructure
+
+**Server-Sent Events (SSE):**
+- One-way (server → client) over HTTP
+- Single long-lived HTTP response, server writes events: `data: {...}\n\n`
+- Auto-reconnect, last-event-id resumption built in
+- Browser support: `new EventSource('/events')`
+- Use for: notifications, live feeds, dashboards, anything one-way
+
+**WebSocket:**
+- Full bidirectional over a single TCP connection (upgraded from HTTP)
+- Binary or text frames
+- Use for: chat, multiplayer games, real-time collaboration, anything two-way
+
+**Java support:**
+- Spring WebFlux: `Flux<ServerSentEvent>` for SSE
+- Spring MVC: `SseEmitter`
+- WebSocket: `@MessageMapping` + STOMP, or raw `@OnMessage` JSR-356
+- Reactor Netty / Undertow handle both natively
+
+### Q232. HTTP caching — `Cache-Control`, ETag, Last-Modified.
+
+Three mechanisms layered together.
+
+**`Cache-Control`** — directive header controlling cacheability:
+```
+Cache-Control: public, max-age=3600
+Cache-Control: private, no-cache
+Cache-Control: no-store
+Cache-Control: max-age=600, stale-while-revalidate=60, stale-if-error=3600
+```
+
+- `public` / `private` — shared (CDN) or per-user
+- `max-age=N` — fresh for N seconds
+- `no-cache` — must revalidate every time (still cacheable, just verified)
+- `no-store` — never cache (sensitive data)
+- `stale-while-revalidate` — serve stale while fetching fresh (great UX)
+
+**ETag** — opaque version identifier:
+```
+Server: ETag: "abc123"
+Client: If-None-Match: "abc123"
+Server: 304 Not Modified  (saves the body)
+```
+
+**Last-Modified** — timestamp-based version:
+```
+Server: Last-Modified: Tue, 01 May 2026 10:00:00 GMT
+Client: If-Modified-Since: Tue, 01 May 2026 10:00:00 GMT
+Server: 304 Not Modified
+```
+
+ETag is more precise (millisecond changes); Last-Modified relies on second-precision clocks. Most CDNs prefer ETag.
+
+**Spring Boot:**
+```java
+@GetMapping("/items/{id}")
+public ResponseEntity<Item> get(@PathVariable UUID id) {
+    Item item = service.find(id);
+    return ResponseEntity.ok()
+        .eTag("\"" + item.version() + "\"")
+        .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS))
+        .body(item);
+}
+```
+
+Or auto via `ShallowEtagHeaderFilter` for any response (computes ETag from response body hash).
+
+### Q233. Reverse proxy basics — what does Nginx / Envoy / Traefik do?
+
+A **reverse proxy** sits in front of your services, terminating client connections and forwarding to backends.
+
+**What they handle:**
+- TLS termination — proxy speaks HTTPS to clients, plain HTTP to backends (often)
+- Load balancing — round-robin, least-connections, weighted, IP-hash
+- HTTP/2, HTTP/3 to clients while backends still run HTTP/1.1
+- Caching — cache GET responses with appropriate headers
+- Rate limiting — per IP, per token
+- Routing — by path, host, header
+- Authentication offload — JWT validation before request reaches backend
+- gzip / Brotli compression
+- Header rewriting
+
+**Common choices:**
+- **Nginx** — battle-tested, ubiquitous, config-file-based
+- **HAProxy** — pure load balancer, very fast
+- **Traefik** — auto-discovers services from Docker / K8s labels, popular in cloud-native
+- **Envoy** — modern, used by Istio service mesh, gRPC-first
+- **AWS ALB / GCP LB / Cloudflare** — managed equivalents
+
+**In K8s:** an **Ingress controller** (typically Nginx-based, Traefik, or Envoy) handles all this declaratively via `Ingress` resources. Service mesh (Istio, Linkerd) puts an Envoy sidecar next to every pod for finer control.
+
+---
+
+## Resilience Patterns
+
+### Q234. Circuit breaker — what does it do and when?
+
+Trips open after N consecutive failures, immediately rejecting calls until the dependency recovers. Prevents cascading failures and gives the failing service time to recover.
+
+**Three states:**
+- **Closed** (normal) — calls pass through, failures counted
+- **Open** (tripped) — calls fail immediately without hitting the backend
+- **Half-Open** (probing) — after a wait period, allow a few test calls; succeed → close, fail → open again
+
+**Resilience4j (Java standard):**
+```java
+CircuitBreaker breaker = CircuitBreaker.of("payment", CircuitBreakerConfig.custom()
+    .failureRateThreshold(50)              // 50% failures triggers open
+    .slidingWindowSize(10)                 // over last 10 calls
+    .waitDurationInOpenState(Duration.ofSeconds(30))
+    .permittedNumberOfCallsInHalfOpenState(3)
+    .build());
+
+// Wrap a call
+Supplier<Result> wrapped = CircuitBreaker.decorateSupplier(breaker,
+    () -> paymentClient.charge(req));
+
+Try.ofSupplier(wrapped)
+   .recover(throwable -> Result.failed("circuit open"))
+   .get();
+```
+
+**Spring integration:**
+```java
+@CircuitBreaker(name = "payment", fallbackMethod = "fallback")
+public Result charge(Request req) { return paymentClient.charge(req); }
+public Result fallback(Request req, Throwable t) { return Result.failed(...); }
+```
+
+**When to use:** any synchronous call to a remote dependency that might fail. Without a breaker, your service hangs waiting for timeouts, exhausts thread pool, breaks itself trying to call a broken downstream.
+
+### Q235. Retry with exponential backoff and jitter.
+
+Naive retry storms the failed service when many clients retry simultaneously. Two fixes: exponential backoff and jitter.
+
+**Exponential backoff:** wait longer after each failure.
+```
+attempt 1: wait 1s
+attempt 2: wait 2s
+attempt 3: wait 4s
+attempt 4: wait 8s
+```
+
+**Jitter:** randomise the wait to spread out simultaneous retries. Without jitter, all clients retry at exactly the same intervals, creating thundering herds.
+
+```
+wait = random(0, base * 2^attempt)
+```
+
+**Resilience4j:**
+```java
+RetryConfig config = RetryConfig.custom()
+    .maxAttempts(3)
+    .intervalFunction(IntervalFunction.ofExponentialRandomBackoff(
+        Duration.ofMillis(100),    // initial
+        2.0,                        // multiplier
+        0.5                         // randomisation factor (jitter)
+    ))
+    .retryOnException(ex -> ex instanceof IOException)
+    .build();
+
+Retry retry = Retry.of("payment", config);
+```
+
+**Don't retry:**
+- Non-idempotent operations without idempotency keys (you might double-charge)
+- Errors that are permanent (4xx not 5xx — don't retry validation failures)
+- Business logic failures
+
+**Circuit breaker + retry combo:** retry inside the circuit breaker. Once breaker opens, retries stop entirely.
+
+### Q236. Bulkhead pattern — isolating failure domains.
+
+Named after ship hulls — compartments separated so flooding one doesn't sink the whole vessel.
+
+**Problem:** all calls to backend X share one thread pool. Backend X gets slow → all threads block on X → other backends starved → cascading failure.
+
+**Bulkhead:** dedicated resource pool per dependency.
+
+```java
+// Resilience4j thread-pool bulkhead
+ThreadPoolBulkhead bh = ThreadPoolBulkhead.of("payment-api",
+    ThreadPoolBulkheadConfig.custom()
+        .maxThreadPoolSize(8)
+        .coreThreadPoolSize(4)
+        .queueCapacity(100)
+        .build());
+
+bh.executeSupplier(() -> paymentClient.charge(req));
+```
+
+**Two flavours:**
+- **Thread-pool bulkhead** — separate thread pool per dependency. Heavy.
+- **Semaphore bulkhead** — limit concurrent calls per dependency. Lightweight, but doesn't isolate scheduling.
+
+**When to use:** any service that calls multiple slow dependencies. Without bulkheads, one slow dependency contaminates the whole service.
+
+**With virtual threads (Java 21+),** thread-pool bulkheads are largely unnecessary — virtual threads are cheap, blocking is fine. Semaphore bulkheads still useful for capping concurrency on rate-limited APIs.
+
+### Q237. Timeout strategies — connect / read / total.
+
+Three layers of timeout, each catching different failure modes.
+
+**Connect timeout** — how long to wait for TCP connection establishment. Defaults are often huge (~30s). Set low (1-3s) for healthy networks.
+
+**Read timeout** — max idle time waiting for response bytes. Catches "connected but never responded" — common with overloaded services.
+
+**Total / call timeout** — max wall-clock time for the entire request. Catches "responding slowly but bytes keep dribbling in".
+
+**Java HttpClient:**
+```java
+HttpClient client = HttpClient.newBuilder()
+    .connectTimeout(Duration.ofSeconds(2))
+    .build();
+
+HttpRequest req = HttpRequest.newBuilder(uri)
+    .timeout(Duration.ofSeconds(5))   // total request timeout
+    .build();
+```
+
+**Spring WebClient:**
+```java
+WebClient.builder()
+    .clientConnector(new ReactorClientHttpConnector(
+        HttpClient.create()
+            .responseTimeout(Duration.ofSeconds(5))
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000)
+    ))
+    .build();
+```
+
+**Pitfalls:**
+- Default timeouts in many libraries are infinite or hours — always override
+- Timeouts must respect circuit breaker / retry budgets — total time should not exceed user-facing SLO
+- For database calls (HikariCP), `connectionTimeout` is borrow-from-pool, not connect-to-DB. Set socket-level timeout on the JDBC URL: `?socketTimeout=10` (Postgres).
+
+### Q238. Fallback strategies — degrade gracefully.
+
+When a dependency fails, what do you return? Three approaches, ranked by user impact.
+
+**1. Cached value** — return last-known-good. Best UX if data isn't real-time critical.
+```java
+@CircuitBreaker(name = "exchange-rates", fallbackMethod = "cachedRates")
+public ExchangeRate getRate(Currency c) { return rateClient.fetch(c); }
+public ExchangeRate cachedRates(Currency c, Throwable t) {
+    return rateCache.get(c);
+}
+```
+
+**2. Sensible default** — for non-critical fields. Recommendation engine down → return popular items list.
+
+**3. Partial response** — drop the failed component, return what works. "Couldn't load reviews, but here's the product."
+
+**4. Fail fast with clear error** — better than hanging. 503 + `Retry-After`.
+
+**Don't fallback to the same broken dependency.** Don't fallback by retrying immediately (that's what retry is for, with backoff).
+
+**Document fallbacks** — operations team needs to know "we're returning stale rates, freshness drops to 1 hour".
+
+### Q239. Rate limiting algorithms — token bucket / leaky bucket / sliding window.
+
+Four common algorithms; trade-offs in burst handling and accuracy.
+
+**Token bucket:**
+- Bucket has capacity N, refills at rate R per second
+- Each request consumes 1 token
+- If empty, request rejected
+- **Allows bursts** up to bucket capacity
+
+```
+capacity=10, rate=2/s
+[burst of 10 immediate requests OK, then 2/s sustained]
+```
+
+**Leaky bucket:**
+- Requests fill a bucket; bucket drains at constant rate
+- Overflow → reject
+- **Smooths bursts** to a constant output rate
+
+**Fixed window:**
+- Count requests per fixed time window (per minute)
+- Reset counter at window boundary
+- Simple but suffers boundary stampede (1000 req at 11:59:59 + 1000 req at 12:00:01 = 2000 in 2 seconds)
+
+**Sliding window log:**
+- Track timestamp of every request
+- Count those within the window
+- Accurate but expensive (memory per request)
+
+**Sliding window counter:**
+- Two fixed windows; weighted average
+- Approximation but cheap and accurate enough
+
+**Implementations:**
+- Single-instance: in-process map (not safe across pods)
+- Distributed: Redis with atomic Lua script, or a dedicated rate-limiting service (Envoy global rate limiter, Kong, Traefik plugin)
+
+**Java libraries:** Bucket4j (in-process or Hazelcast/Redis-backed), Resilience4j-RateLimiter (token bucket).
+
+```java
+RateLimiter limiter = RateLimiter.of("api", RateLimiterConfig.custom()
+    .limitForPeriod(100)
+    .limitRefreshPeriod(Duration.ofSeconds(1))
+    .timeoutDuration(Duration.ofMillis(50))
+    .build());
+
+if (limiter.acquirePermission()) { handleRequest(); }
+else { return ResponseEntity.status(429).build(); }
+```
 
 ---
 
