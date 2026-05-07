@@ -30,20 +30,29 @@ Each answer is interview-shaped: 2–6 sentences, code where useful, no textbook
 14. [[#Testing Deep Dive]] (6)
 15. [[#Common Java Pitfalls]] (6)
 
-**Sections (Tier 2 — senior depth, Q136-237):**
+**Sections (Tier 2 — senior depth, Q136-245):**
 16. [[#Core Java — Senior Depth]] (7)
 17. [[#Modern Java — Deep Dive]] (10)
 18. [[#Collections — Senior Depth]] (12)
-19. [[#Concurrency — Senior Depth]] (10)
-20. [[#JVM Internals]] (8)
-21. [[#Spring — Advanced]] (8)
+19. [[#Concurrency — Senior Depth]] (10+ cross-cutting)
+20. [[#JVM Internals]] (8+ cross-cutting)
+21. [[#Spring — Advanced]] (8+ cross-cutting)
 22. [[#Database — Deep Dive]] (8)
 23. [[#Architecture — Advanced]] (8)
-24. [[#Testing — Advanced]] (5)
+24. [[#Testing — Advanced]] (5+ cross-cutting)
 25. [[#Build Tools]] (8)
 26. [[#Cloud-Native Java]] (8)
 27. [[#Networking & Protocols]] (6)
 28. [[#Resilience Patterns]] (6)
+
+**Sections (Tier 3 — expert, Q246-296):**
+29. [[#JVM Performance Engineering]] (10)
+30. [[#Lock-Free & Low-Latency Concurrency]] (8)
+31. [[#JVM Tooling & Diagnostics]] (8)
+32. [[#Java Module System (JPMS)]] (5)
+33. [[#Modern Java Roadmap]] (5)
+34. [[#Spot-the-Bug Scenarios]] (10)
+35. [[#Spring Ecosystem Extras]] (5)
 
 ---
 
@@ -6572,6 +6581,1298 @@ RateLimiter limiter = RateLimiter.of("api", RateLimiterConfig.custom()
 if (limiter.acquirePermission()) { handleRequest(); }
 else { return ResponseEntity.status(429).build(); }
 ```
+
+---
+
+---
+
+## JVM Performance Engineering
+
+### Q246. JMH benchmark gotchas — what does `Blackhole`, `@Setup`, `@State` do?
+
+JMH (Java Microbenchmark Harness) requires explicit machinery to defeat JIT optimisations.
+
+- **`@State(Scope.X)`** — declares state lifetime: `Benchmark` (one per benchmark), `Group` (shared per group of threads), `Thread` (per thread)
+- **`@Setup` / `@TearDown`** — fixture methods, with `Trial` / `Iteration` / `Invocation` levels
+- **`@Param`** — parameterised runs across multiple values
+- **`Blackhole.consume(x)`** — prevents dead-code elimination. Without it, JIT may delete the entire benchmark.
+
+```java
+@State(Scope.Benchmark)
+public class HashMapBench {
+    @Param({"100", "10000", "1000000"})
+    int size;
+    Map<Integer, Integer> map;
+
+    @Setup public void setup() {
+        map = new HashMap<>();
+        for (int i = 0; i < size; i++) map.put(i, i);
+    }
+
+    @Benchmark
+    public void get(Blackhole bh) {
+        bh.consume(map.get(size / 2));
+    }
+}
+```
+
+**Common JMH mistakes:**
+- Returning a value instead of `Blackhole.consume()` — JIT eliminates the call
+- Using `System.currentTimeMillis()` instead of JMH's high-res timing
+- Insufficient warmup — JIT needs ~5-10 iterations to stabilise
+- `@Fork(0)` — runs in same JVM as previous tests, contaminates results
+- Forgetting `@OutputTimeUnit(TimeUnit.NANOSECONDS)` — unreadable units
+
+### Q247. How does the JIT decide what to inline?
+
+C2 inlining heuristics, controllable via `-XX:CompileCommand`:
+
+- **Hot method** detected (high invocation count or large back-edge counter)
+- **Size budget:** `MaxInlineSize` (default 35 bytes) for cold callees, `FreqInlineSize` (default 325 bytes) for hot callees
+- **Inlining depth limit:** `MaxInlineLevel` (default 9-15 depending on tier)
+- **Polymorphic call sites:** monomorphic (single concrete type) inlines easily; bimorphic (2 types) sometimes; **megamorphic** (3+ types) goes through vtable, no inline
+- **Calling convention:** `final` / `static` / `private` inlines best; virtual calls need type profile data
+
+**Useful flags:**
+```
+-XX:+PrintInlining               # log every inlining decision
+-XX:+UnlockDiagnosticVMOptions
+-XX:+PrintCompilation            # compilation log
+-XX:CompileCommand="exclude,com/example/Foo.bar"   # block inlining
+```
+
+**Senior signal:** know that **fewer, smaller methods often outperform one large one** because of inlining cascades. Hot loops with deeply-nested small calls inline beautifully; one giant method exceeds size budgets and stops.
+
+### Q248. What's the difference between escape analysis and scalar replacement?
+
+Both are C2 optimisations.
+
+**Escape analysis (EA):** prove an object never escapes its creating method. "Escape" means stored in a static/instance field, in an array, returned, or thrown.
+
+**Scalar replacement:** if EA proves no escape, decompose the object into its fields, store them in registers/stack, **don't allocate the heap object at all**.
+
+```java
+public int distSq(int x, int y) {
+    Point p = new Point(x, y);   // allocation may be eliminated
+    return p.x * p.x + p.y * p.y;
+}
+```
+
+If `p` doesn't escape, C2 stores `x` and `y` in registers. No heap object, no GC pressure, no constructor cost.
+
+**Verify:**
+```
+-XX:+UnlockDiagnosticVMOptions
+-XX:+PrintEscapeAnalysis
+-XX:+PrintEliminateAllocations
+```
+
+**Why it matters in interviews:** explains why writing "many small short-lived objects" in modern Java is often free at runtime — the JIT inlines the methods, proves non-escape, scalarises the objects out of existence.
+
+### Q249. What are JVM intrinsics and why do they matter?
+
+**Intrinsics** are method implementations the JIT replaces with hand-written assembly or specialised IR. The Java method body is ignored; the JIT emits optimal machine code.
+
+Examples of intrinsified methods:
+- `Math.sqrt`, `Math.sin`, `Math.cos` — single CPU instructions
+- `String.compareTo`, `String.indexOf` — vectorised with SIMD
+- `System.arraycopy` — `memcpy` / SIMD
+- `Thread.currentThread()` — register read
+- `Object.hashCode()` — special path
+- `Unsafe.compareAndSwapInt` — single CAS instruction
+- Vector API operations — direct SIMD
+
+List active intrinsics with `-XX:+PrintIntrinsics`. Reference: `c2_intrinsics.cpp` in OpenJDK source.
+
+**Practical implication:** rewriting hot loops in raw arithmetic vs `Math.fma` etc. is sometimes worse — intrinsics already use the optimal CPU instruction. **Trust the JIT first; benchmark before "optimising."**
+
+### Q250. How would you tune G1GC for a 16GB heap, low-latency service?
+
+Default G1 ergonomics target 200ms pauses. Tuning levers:
+
+```bash
+-Xms16g -Xmx16g                        # set equal — no resize storms
+-XX:+UseG1GC                           # explicit
+-XX:MaxGCPauseMillis=100               # target 100ms
+-XX:G1HeapRegionSize=16m               # default auto, 1-32MB; larger for huge heaps
+-XX:InitiatingHeapOccupancyPercent=45  # trigger concurrent mark earlier
+-XX:G1NewSizePercent=20                # min young gen %
+-XX:G1MaxNewSizePercent=40             # max young gen %
+-XX:G1MixedGCLiveThresholdPercent=85   # skip regions >85% live during mixed GC
+-XX:G1HeapWastePercent=5               # acceptable waste before mixed GC
+-XX:ParallelGCThreads=8                # explicit (default = CPU count)
+-XX:ConcGCThreads=2                    # background mark threads
+```
+
+**Diagnose first** with `-Xlog:gc*:file=gc.log:time,uptime:filecount=10,filesize=100m`, analyse with GCEasy.
+
+**Common patterns:**
+- Pause spikes during concurrent mark → increase `ConcGCThreads`
+- Frequent old-gen pauses → increase heap or reduce promotion
+- Mixed GC pauses too long → tighten `G1MixedGCLiveThresholdPercent`
+
+**For truly low-latency** (~10ms target), G1 hits a wall. Switch to ZGC: `-XX:+UseZGC -XX:SoftMaxHeapSize=14g`.
+
+### Q251. When and how do you use `-XX:+PrintCompilation` and JIT logs?
+
+`-XX:+PrintCompilation` shows what's being compiled, when, and at what tier:
+
+```
+123  45    3  com.example.Foo::bar (35 bytes)
+```
+
+Columns: timestamp (ms since start), compile id, **tier** (0=interpreted, 1-3=C1, 4=C2), method, size.
+
+**Common use:**
+- See if a hot method is reaching tier 4 (C2)
+- Spot **deoptimizations** — `made not entrant` log entries
+- Detect compilation queue saturation under load
+
+**Deeper analysis** with **JITWatch** — visualises compilation log + bytecode + assembly:
+```bash
+-XX:+UnlockDiagnosticVMOptions
+-XX:+LogCompilation
+-XX:+PrintAssembly                # requires hsdis disassembler
+-XX:LogFile=jit.log
+```
+
+**Practical tip:** if a critical method shows up as `made not entrant` repeatedly, your code's behaviour is changing in ways that defeat C2's speculative optimisations. Look for `instanceof` checks against many types, or polymorphic call sites becoming megamorphic.
+
+### Q252. What's the difference between sampling and instrumenting profilers?
+
+**Sampling profiler:** periodically pauses each thread (or uses Linux signals) and records the stack. Aggregates samples into flame graphs.
+- Low overhead (~1-3%)
+- Statistical — accurate trends, less precise on individual methods
+- Doesn't see methods that ran but never sampled
+- Used by: async-profiler, JFR, VisualVM sampler
+
+**Instrumenting profiler:** modifies bytecode at load time (or runtime via agent) to record entry/exit of every method.
+- High overhead (10-100%) — can change application behaviour and timings
+- Exact counts and timings
+- Heavy for production
+- Used by: YourKit, JProfiler, JaCoCo coverage
+
+**For production: always sampling** (JFR or async-profiler). Instrumentation is dev/debugging only.
+
+**`async-profiler`** is the gold standard for JVM CPU/lock/wall-clock profiling — uses Linux `perf_events`, very low overhead, generates flame graphs:
+
+```bash
+asprof -d 30 -e cpu -f profile.html <pid>
+asprof -d 30 -e alloc -f alloc.html <pid>      # allocation profiling
+asprof -d 30 -e lock -f lock.html <pid>         # contention profiling
+asprof -d 30 -e wall -f wall.html <pid>         # wall-clock incl. blocked
+```
+
+### Q253. How do you detect and fix allocation hotspots?
+
+**Detect:**
+1. JFR allocation event sampling: `jcmd <pid> JFR.start name=alloc settings=profile filename=alloc.jfr`
+2. async-profiler `-e alloc` — generates allocation flame graph
+3. `-XX:+UnlockDiagnosticVMOptions -XX:+TraceClassResolution` for class-loading hot paths
+
+**Common allocation hotspots in Java code:**
+- **Boxing in tight loops** — `Long sum` instead of `long`
+- **Stream creation** in hot path — streams allocate per pipeline
+- **String concatenation** in loops
+- **Lambdas capturing locals** — capturing lambdas allocate per invocation (stateless ones are singletons)
+- **Iterator allocation** — for-each on a collection allocates an Iterator
+- **`HashMap.entrySet()`** — entry objects allocated per iteration in older JDKs
+- **Defensive copies** — `Collections.unmodifiableList(new ArrayList<>(input))`
+- **Exception construction** — stack traces are expensive; never use exceptions for control flow
+- **Date / DateTime parsing** — repeated `DateTimeFormatter` parsing creates intermediate objects
+
+**Fix:**
+- Reuse objects (pool expensive ones like `Pattern`, `DateTimeFormatter`)
+- Primitive-specialised collections (Eclipse Collections, fastutil, Koloboke)
+- Avoid streams in hot loops; for-loops are still fastest
+- `StringBuilder.setLength(0)` to reuse
+- Capture-free lambdas (use method references when possible)
+
+### Q254. What's "deoptimization" in the JVM?
+
+C2 makes speculative optimisations based on type profiles and class hierarchies. When those assumptions break, it falls back to interpreter or C1 — that's **deoptimization**.
+
+**Common triggers:**
+- New subclass of a previously-monomorphic type appears (megamorphic call site)
+- `Class.forName` loads a class C2 assumed wouldn't appear
+- A null check fails on a path C2 had optimised assuming non-null
+- Integer overflow not seen in profile happens
+- `instanceof` outcome changes from observed pattern
+- BiasedLocking revocation (pre-Java 18)
+
+**See deoptimizations:**
+```
+-XX:+UnlockDiagnosticVMOptions
+-XX:+PrintDeoptimization
+-XX:+TraceDeoptimization
+```
+
+Frequent deopts on a critical path = perf bug. Possible fixes:
+- Make types `final` / sealed to enforce monomorphism
+- Avoid runtime class loading on hot paths
+- Initialise classes eagerly to prevent runtime first-use
+- Don't throw exceptions on hot paths
+
+### Q255. What does `-XX:+UseStringDeduplication` do?
+
+G1GC option (Java 8u20+, also ZGC). During concurrent marking, GC detects `String` objects whose backing array is identical to another's — merges them to share the array.
+
+**Typical savings:** 10-25% heap reduction on services with many duplicate strings (HTTP headers, JSON keys, log messages, status codes, enum values stringified).
+
+**Cost:** small CPU overhead during GC concurrent mark phase. Negligible in practice.
+
+```bash
+-XX:+UseG1GC
+-XX:+UseStringDeduplication
+-XX:StringDeduplicationAgeThreshold=3   # only dedupe Strings that survived 3 GCs
+```
+
+**Different from `String.intern()`:** `intern()` is application-level, blocking, uses a hash table. Deduplication is GC-managed, async, transparent — strings remain distinct objects but share the underlying `char[]` / `byte[]`.
+
+---
+
+## Lock-Free & Low-Latency Concurrency
+
+### Q256. What's the Treiber stack and how does it work?
+
+Lock-free LIFO stack using compare-and-swap.
+
+```java
+public class TreiberStack<T> {
+    private final AtomicReference<Node<T>> top = new AtomicReference<>();
+
+    public void push(T value) {
+        Node<T> newTop = new Node<>(value);
+        Node<T> currentTop;
+        do {
+            currentTop = top.get();
+            newTop.next = currentTop;
+        } while (!top.compareAndSet(currentTop, newTop));
+    }
+
+    public T pop() {
+        Node<T> currentTop, newTop;
+        do {
+            currentTop = top.get();
+            if (currentTop == null) return null;
+            newTop = currentTop.next;
+        } while (!top.compareAndSet(currentTop, newTop));
+        return currentTop.value;
+    }
+
+    private static class Node<T> {
+        final T value;
+        volatile Node<T> next;
+        Node(T v) { value = v; }
+    }
+}
+```
+
+**Pros:** lock-free, scales to many concurrent writers, no thread parking.
+
+**Cons:**
+- **ABA problem** if nodes are recycled
+- Allocates a `Node` per push (GC pressure)
+- No progress guarantee for any individual thread (only system-wide progress)
+
+Production-ready: `ConcurrentLinkedDeque` in JDK uses related techniques.
+
+### Q257. Michael-Scott queue — the lock-free FIFO standard.
+
+Most non-blocking concurrent queues use the Michael-Scott algorithm (1996). FIFO with two pointers (head, tail), each updated independently with CAS.
+
+Key idea: each enqueue requires **two CAS operations** — one to link the new node, one to swing tail forward. If either fails, retry. Other threads can **help** advance the tail on behalf of slow predecessors — that's the lock-free progress property.
+
+```java
+public void enqueue(T value) {
+    Node<T> node = new Node<>(value);
+    while (true) {
+        Node<T> currentTail = tail.get();
+        Node<T> nextOfTail = currentTail.next.get();
+        if (currentTail == tail.get()) {
+            if (nextOfTail == null) {
+                if (currentTail.next.compareAndSet(null, node)) {
+                    tail.compareAndSet(currentTail, node);   // best-effort
+                    return;
+                }
+            } else {
+                tail.compareAndSet(currentTail, nextOfTail); // help advance
+            }
+        }
+    }
+}
+```
+
+**`ConcurrentLinkedQueue`** in `java.util.concurrent` is a Michael-Scott queue.
+
+### Q258. What's the LMAX Disruptor and when do you use it?
+
+Disruptor (LMAX, ~2010): single-producer / single-consumer (or multi-cons) **ring buffer** designed for ultra-low-latency financial trading. Sub-microsecond message passing.
+
+**Key innovations:**
+- **Pre-allocated ring buffer** — no per-message allocation, no GC pressure
+- **Sequence numbers** as cursors instead of locks
+- **Memory padding** to prevent false sharing between producer and consumer cursors
+- **Mechanical sympathy** — designed for CPU cache layout, branch prediction, modern memory ordering
+
+```java
+Disruptor<MyEvent> disruptor = new Disruptor<>(MyEvent::new, 1024, ...);
+disruptor.handleEventsWith((event, sequence, endOfBatch) -> process(event));
+disruptor.start();
+
+RingBuffer<MyEvent> ring = disruptor.getRingBuffer();
+long seq = ring.next();
+try {
+    MyEvent event = ring.get(seq);
+    event.set(payload);
+} finally {
+    ring.publish(seq);
+}
+```
+
+**When it earns its keep:**
+- Sub-microsecond message-passing requirements (HFT, exchange matching engines)
+- Predictable allocation profile (no GC interference)
+- SPSC / SPMC scenarios where the pattern shines
+
+For typical app code, `BlockingQueue` is fine. Disruptor wins when nanoseconds matter.
+
+### Q259. What's the Java Memory Model's "release-acquire" semantics?
+
+Underlying CPU memory ordering primitives, exposed in Java via `volatile`, `final`, and `VarHandle`.
+
+**Release semantics (write side):** all writes before the volatile write are visible to threads that observe the volatile write.
+
+**Acquire semantics (read side):** all reads after the volatile read see writes that were visible to whoever did the matching release.
+
+```java
+class State {
+    int data;                // plain
+    volatile boolean ready;  // release on write, acquire on read
+
+    void publish() {
+        data = 42;        // (1) plain write
+        ready = true;     // (2) release write — guarantees (1) visible to any acquire reader
+    }
+
+    int read() {
+        if (ready) {       // (3) acquire read — pairs with (2)
+            return data;   // (4) sees 42, guaranteed
+        }
+        return -1;
+    }
+}
+```
+
+**`VarHandle`** (Java 9+) gives explicit access to memory ordering modes:
+
+```java
+private static final VarHandle DATA = MethodHandles.lookup()
+    .findVarHandle(State.class, "data", int.class);
+
+DATA.setRelease(this, 42);            // weaker than volatile, faster
+DATA.getAcquire(this);                // weaker than volatile read
+DATA.compareAndSet(this, 42, 43);    // CAS with full barrier
+```
+
+**Why VarHandle?** `volatile` always uses sequential consistency (most expensive). `setRelease` / `getAcquire` are weaker but cheaper, sufficient for many lock-free patterns. Used in JDK internals (e.g. `ConcurrentHashMap`).
+
+### Q260. What's a memory barrier and what kinds exist?
+
+CPU instruction that prevents reordering of memory operations across it.
+
+**Four kinds (per JMM):**
+- **`LoadLoad`** — prevents reordering of two loads
+- **`LoadStore`** — load before store
+- **`StoreStore`** — store before store (used after volatile writes for release semantics)
+- **`StoreLoad`** — store before load (the most expensive — full memory fence)
+
+**On x86:** `LoadLoad`, `LoadStore`, `StoreStore` are mostly free (Total Store Ordering). Only `StoreLoad` requires an explicit `MFENCE` or locked instruction. ARM and POWER are weaker — need explicit barriers more often.
+
+**Java surfaces these via:**
+- `volatile` writes emit `StoreStore` + `StoreLoad`
+- `volatile` reads emit `LoadLoad` + `LoadStore`
+- `synchronized` exit emits `StoreStore` + `StoreLoad`
+- `Unsafe.fullFence`, `loadFence`, `storeFence`
+- `VarHandle.fullFence`, `releaseFence`, `acquireFence`
+
+**Why interviewers ask:** at low-latency level, you need to know that `volatile` is more expensive than necessary for many patterns. `VarHandle` weaker modes win for tight inner loops.
+
+### Q261. ABA problem deep — how does `AtomicStampedReference` solve it?
+
+Classic ABA: thread T1 reads value `A`, prepares CAS to update. T2 changes A→B→A in the meantime. T1's CAS sees `A`, succeeds — but the meaning has changed.
+
+```
+T1 reads head = NodeA
+T1 prepares CAS(head, NodeA, NodeA.next)
+T2 pops NodeA, pops NodeB, recycles NodeA, pushes NodeA again
+T1 CAS succeeds — but NodeA.next now points elsewhere
+```
+
+**`AtomicStampedReference`** pairs the reference with a counter. CAS on both:
+
+```java
+AtomicStampedReference<Node> head = new AtomicStampedReference<>(initial, 0);
+
+int[] stampHolder = new int[1];
+Node oldHead = head.get(stampHolder);
+int oldStamp = stampHolder[0];
+Node newHead = oldHead.next;
+
+// CAS only succeeds if BOTH reference and stamp match
+head.compareAndSet(oldHead, newHead, oldStamp, oldStamp + 1);
+```
+
+Counter increments on every write. Even if reference returns to original, stamp differs.
+
+**Alternative — Hazard pointers** (Maged Michael, 2004): readers register what they're reading; reclaimers check before recycling. Used in C++ concurrent collections; rare in Java because GC eliminates most ABA risk for object references.
+
+**Most app code never hits ABA** — JDK's lock-free collections (`ConcurrentLinkedQueue`, `ConcurrentSkipListMap`) handle it internally. Encounter only when writing custom lock-free data structures or atomic state machines that recycle references.
+
+### Q262. False sharing in detail — how to identify and fix?
+
+Two threads writing to **different variables that share a CPU cache line** (typically 64 bytes) cause the cache line to ping-pong between cores. Threads aren't logically sharing anything, but the cache thinks they are.
+
+**Detection:**
+- `perf c2c` (Linux) — cache-to-cache load latency analysis
+- `async-profiler` with `-e LLC-load-misses`
+- Symptom: parallel benchmarks scale linearly until N cores, then collapse
+
+**Fix 1 — manual padding:**
+```java
+class PaddedCounter {
+    long p1, p2, p3, p4, p5, p6, p7;        // 56 bytes padding before
+    volatile long value;                      // 8 bytes
+    long p8, p9, p10, p11, p12, p13, p14;    // padding after
+}
+```
+
+**Fix 2 — `@Contended` annotation:**
+```java
+import jdk.internal.vm.annotation.Contended;
+
+@Contended
+class Counter {
+    volatile long value;
+}
+```
+
+Requires `--add-opens java.base/jdk.internal.vm.annotation=ALL-UNNAMED` or `-XX:-RestrictContended` flag.
+
+**`LongAdder`** uses internal padding for high-contention counters — beats `AtomicLong` because each thread updates its own padded cell, no false sharing across threads.
+
+### Q263. What are `VarHandle` and `MethodHandle`?
+
+**`MethodHandle`** (Java 7) — typed reference to a method, faster than reflection:
+
+```java
+MethodHandle hello = MethodHandles.lookup()
+    .findStatic(String.class, "valueOf", MethodType.methodType(String.class, int.class));
+String result = (String) hello.invokeExact(42);
+```
+
+Used internally by `invokedynamic`, lambda metafactory, dynamic linking. Can be combined (`bind`, `dropArguments`, `insertArguments`, `asType`) into call site adapters — flexibility close to reflection without runtime cost.
+
+**`VarHandle`** (Java 9) — typed reference to a variable (field, array element, off-heap address):
+
+```java
+private static final VarHandle COUNT = MethodHandles.lookup()
+    .findVarHandle(MyClass.class, "count", int.class);
+
+COUNT.set(this, 5);                              // plain write
+COUNT.setVolatile(this, 5);                      // volatile semantics
+COUNT.setRelease(this, 5);                       // release-only
+COUNT.compareAndSet(this, 4, 5);                 // CAS
+COUNT.getAndAdd(this, 1);                        // atomic increment
+COUNT.compareAndExchangeRelease(this, 4, 5);     // release CAS
+```
+
+Replaces `sun.misc.Unsafe` for atomic field access. Modern lock-free code uses VarHandle, not `AtomicInteger` (which has wrapper allocation overhead in some patterns).
+
+---
+
+## JVM Tooling & Diagnostics
+
+### Q264. Java Flight Recorder (JFR) — what is it and how do you use it?
+
+JFR is a low-overhead production-grade profiler built into the JVM. Records events: GC, allocation, locks, JIT compilation, I/O, custom application events.
+
+**Start a recording:**
+```bash
+# At launch
+java -XX:StartFlightRecording=duration=60s,filename=app.jfr,settings=profile MyApp
+
+# Attach to running JVM
+jcmd <pid> JFR.start name=app duration=60s filename=app.jfr settings=profile
+jcmd <pid> JFR.dump name=app filename=app.jfr
+jcmd <pid> JFR.stop name=app
+```
+
+**Analyse:** JDK Mission Control (JMC) — free GUI from Oracle. Or `jfr summary app.jfr` for CLI summary.
+
+**Settings:**
+- `default.jfc` — minimal overhead (~1%), suitable for production always-on
+- `profile.jfc` — more detail, ~3-5% overhead
+
+**Custom events:**
+```java
+@Name("com.example.RequestEvent")
+@Category("Application")
+class RequestEvent extends Event {
+    String endpoint;
+    long durationMs;
+}
+
+RequestEvent ev = new RequestEvent();
+ev.begin();
+processRequest();
+ev.endpoint = "/api/users";
+ev.commit();
+```
+
+Visible in JMC alongside JVM events — correlate app performance with GC pauses, lock contention, allocation rates.
+
+### Q265. JFR streaming — recording continuously without files.
+
+JFR streaming (Java 14+) lets you consume events live without writing files.
+
+```java
+try (RecordingStream rs = new RecordingStream()) {
+    rs.enable("jdk.GarbageCollection").withoutThreshold();
+    rs.enable("jdk.ExceptionStatistics").withPeriod(Duration.ofSeconds(1));
+
+    rs.onEvent("jdk.GarbageCollection", event -> {
+        long durationMs = event.getDuration().toMillis();
+        if (durationMs > 50) log.warn("Long GC: {}ms", durationMs);
+    });
+
+    rs.startAsync();
+    Thread.sleep(Duration.ofSeconds(60));
+}
+```
+
+**Use cases:**
+- In-process anomaly detection (long GC, deadlocks, hot CPU)
+- Custom metrics export to Prometheus/CloudWatch
+- Adaptive instrumentation — turn on detailed events only when latency spikes
+
+Production-ready, supported in major Java versions, ~1% overhead.
+
+### Q266. `jcmd` — what can it do?
+
+`jcmd` is the swiss-army knife for live JVM diagnostics. Replaces `jstack`, `jmap`, `jinfo`, parts of `jhat`.
+
+```bash
+# List all running JVMs
+jcmd
+
+# Thread dump
+jcmd <pid> Thread.print
+
+# Heap dump
+jcmd <pid> GC.heap_dump /tmp/heap.hprof
+
+# Heap histogram (lighter than full dump)
+jcmd <pid> GC.class_histogram
+
+# Trigger GC (avoid in prod — disturbs measurement)
+jcmd <pid> GC.run
+
+# JFR control
+jcmd <pid> JFR.start
+jcmd <pid> JFR.dump filename=...
+jcmd <pid> JFR.stop
+
+# Native memory tracking (must enable at startup with -XX:NativeMemoryTracking=summary)
+jcmd <pid> VM.native_memory summary
+
+# JVM flags
+jcmd <pid> VM.flags
+
+# Set a flag at runtime (only manageable flags)
+jcmd <pid> VM.set_flag MaxHeapFreeRatio 70
+```
+
+**Pre-Java 9 equivalents:** `jstack` (threads), `jmap` (heap dumps), `jinfo` (flags). Modern code uses `jcmd` for everything.
+
+### Q267. How do you analyse a heap dump for a memory leak?
+
+**Tool:** Eclipse MAT (Memory Analyzer Tool) — free, gold standard.
+
+**Workflow:**
+1. Capture: `jcmd <pid> GC.heap_dump /tmp/heap.hprof` or `-XX:+HeapDumpOnOutOfMemoryError`
+2. Open in MAT
+3. **Leak Suspect Report** — auto-generated, identifies dominant objects
+4. **Histogram view** — class instance counts and retained sizes
+5. **Dominator tree** — what objects keep what alive
+6. **Path to GC roots** — for any object, what references prevent it from being collected
+
+**Common leak patterns to look for:**
+- A `HashMap` holding millions of entries
+- A `ThreadLocal` referenced via thread-pool threads
+- A static collection growing unbounded
+- Many class loaders in old gen (class loader leak)
+- One huge `byte[]` (off-heap or buffer)
+
+**MAT Object Query Language (OQL):**
+```sql
+SELECT * FROM java.util.HashMap WHERE size > 10000
+SELECT t.name, t FROM java.lang.Thread t WHERE t.contextClassLoader != null
+```
+
+For **off-heap leaks** (DirectByteBuffer, native memory): MAT won't help. Use `-XX:NativeMemoryTracking=summary` + `jcmd VM.native_memory` and OS tools (`pmap`, `valgrind`).
+
+### Q268. What's `jlink` and when do you use it?
+
+`jlink` (Java 9+) builds custom modular Java runtime images — a stripped-down JRE containing only modules your app needs.
+
+```bash
+jlink --module-path $JAVA_HOME/jmods:mods \
+      --add-modules com.example.app \
+      --launcher app=com.example.app/com.example.Main \
+      --output dist/myapp-runtime \
+      --strip-debug \
+      --compress=2 \
+      --no-header-files \
+      --no-man-pages
+```
+
+**Result:** `dist/myapp-runtime/` is a self-contained JRE + your app. Run with `dist/myapp-runtime/bin/app`.
+
+**Benefits:**
+- Smaller distribution — typically 30-80MB vs 300+MB full JDK
+- Faster startup
+- Simpler deployment — no separate JRE required
+
+**Requires** your app to be modular (or use `jdeps` to discover required modules of a non-modular app).
+
+### Q269. `jdeps` — analysing dependencies.
+
+`jdeps` (Java 8+) reports class-level and module-level dependencies.
+
+```bash
+# What modules does my JAR need?
+jdeps --list-deps myapp.jar
+
+# Check for use of internal APIs (sun.*, jdk.internal.*)
+jdeps --jdk-internals myapp.jar
+
+# Generate module-info.java for a non-modular JAR
+jdeps --generate-module-info ./out myapp.jar
+
+# Class-level dependency graph
+jdeps -verbose:class myapp.jar
+```
+
+**Use cases:**
+- Migrating to JPMS — what `requires` clauses do I need?
+- Finding usages of deprecated/internal APIs before upgrading Java
+- Dependency analysis for security review (catches use of internal APIs that may break in future versions)
+
+### Q270. `jpackage` — building native installers.
+
+`jpackage` (Java 14+) creates native installers (.dmg, .msi, .deb, .rpm) bundling your app + a runtime image.
+
+```bash
+jpackage --name MyApp \
+         --input lib \
+         --main-jar myapp.jar \
+         --main-class com.example.Main \
+         --runtime-image dist/myapp-runtime \
+         --type dmg \
+         --icon app.icns
+```
+
+**Output:** `MyApp.dmg` — drag to Applications, runs natively. No separate Java required.
+
+Combined with `jlink`: distribute desktop apps without users installing Java. Used for IDE installers (IntelliJ, NetBeans), regulated-environment deployments where pre-installed Java isn't allowed.
+
+### Q271. `async-profiler` — when and how?
+
+Best-in-class JVM profiler. Sampling-based, very low overhead, generates flame graphs.
+
+```bash
+# CPU profile, 30 seconds
+asprof -d 30 -e cpu -f cpu.html <pid>
+
+# Allocation profile
+asprof -d 30 -e alloc -f alloc.html <pid>
+
+# Lock contention
+asprof -d 30 -e lock -f lock.html <pid>
+
+# Wall-clock (includes time blocked, not just on-CPU)
+asprof -d 30 -e wall -f wall.html <pid>
+
+# Multiple events
+asprof -d 30 --all-user -f profile.html <pid>
+```
+
+**Why it's better than alternatives:**
+- ~1% overhead — usable in production
+- Doesn't suffer from JVM "safepoint bias" that older sampling profilers do
+- Full mixed Java + native + kernel stacks (when permissions allow)
+- Open source, single binary
+
+**Read the flame graph:** width = total time spent in stack frames at that level. A wide tower at the top = hot leaf method. A wide stack starting low = expensive caller chain. Look for unexpected wide bars where your mental model says "this should be fast."
+
+---
+
+## Java Module System (JPMS)
+
+### Q272. JPMS basics — `module-info.java`.
+
+Java Platform Module System (Java 9+) adds a layer above packages. Each module has a `module-info.java`:
+
+```java
+module com.example.api {
+    requires java.sql;
+    requires com.example.util;            // depends on another module
+    requires transitive com.example.dto;  // re-exports — consumers see DTO too
+
+    exports com.example.api;              // public API
+    exports com.example.api.internal to com.example.tests;  // qualified
+
+    opens com.example.entity to spring.core;  // reflection access
+    opens com.example.dto;                     // reflection to anyone
+
+    provides com.example.spi.Plugin
+        with com.example.api.MyPlugin;         // service provider
+
+    uses com.example.spi.Plugin;               // service consumer
+}
+```
+
+**Directives:**
+- `requires` — depends on another module
+- `requires transitive` — consumers automatically get the transitive dep
+- `requires static` — compile-time only (optional dep)
+- `exports` — public API; without it, even `public` classes aren't visible across modules
+- `exports ... to` — qualified, restricts to specific modules
+- `opens` — allows deep reflection (Spring/Hibernate need this for entities)
+- `opens ... to` — qualified opens
+- `provides ... with` — declares this module provides a service implementation
+- `uses` — declares this module consumes a service via `ServiceLoader`
+
+### Q273. JPMS reflection access — `--add-opens`, `--add-exports`.
+
+If you need reflection across modules without modifying source:
+
+```bash
+# Allow reflection from any unnamed module into java.base/java.lang
+--add-opens java.base/java.lang=ALL-UNNAMED
+
+# Allow access to internal API
+--add-exports java.base/sun.security.util=com.example.app
+```
+
+**Why this comes up:**
+- Spring needs to reflectively access user entities — fails on Java 17+ without `--add-opens`
+- Many older libraries use `sun.misc.Unsafe` or `java.lang.reflect` deeply
+- Hibernate, Mockito, Lombok rely on reflection access
+
+**Permanent fix:** module author should `opens` the package. Workaround: caller passes `--add-opens` at runtime (e.g. via `JAVA_OPTS`, surefire `argLine`).
+
+`module-info.java` defaults are strict — consider this when migrating.
+
+### Q274. `ServiceLoader` and JPMS service providers.
+
+JPMS formalises the `ServiceLoader` pattern for plugin architectures.
+
+```java
+// Service interface (in module com.example.spi)
+public interface Plugin { void run(); }
+
+// Provider (in module com.example.plugin.foo)
+module com.example.plugin.foo {
+    requires com.example.spi;
+    provides com.example.spi.Plugin with com.example.plugin.foo.FooPlugin;
+}
+
+// Consumer (in module com.example.app)
+module com.example.app {
+    requires com.example.spi;
+    uses com.example.spi.Plugin;
+}
+
+// In code:
+ServiceLoader<Plugin> plugins = ServiceLoader.load(Plugin.class);
+plugins.forEach(Plugin::run);
+```
+
+JDK uses this internally: JDBC drivers, charsets, security providers, locale providers all register via `ServiceLoader`.
+
+**Pre-JPMS** — providers declared in `META-INF/services/com.example.spi.Plugin` text file. Still works in non-modular code; both mechanisms can coexist.
+
+### Q275. Migrating a non-modular app to JPMS — strategies.
+
+**Option 1: Stay non-modular (classpath).** Easiest — most apps do this. Loses module benefits.
+
+**Option 2: Bottom-up migration.** Convert leaf modules first (no deps), add `module-info.java` to each, work upward through the dependency graph.
+
+**Option 3: Top-down with automatic modules.** Apps' own JARs become "automatic modules" by sitting on the module path. Auto-modules export everything and require all other modules. Useful as a transitional state.
+
+**Tooling:** `jdeps --generate-module-info ./out myapp.jar` produces a starter `module-info.java`.
+
+**Common blockers:**
+- Reflection-heavy frameworks (Spring, Hibernate) need explicit `opens` clauses
+- Internal API usage flagged by `jdeps --jdk-internals`
+- Split packages (same package across multiple JARs) forbidden in modules — must be merged
+
+### Q276. `jlink` + JPMS — the smaller-runtime workflow.
+
+```
+1. App is fully modular (or auto-modular)
+2. jdeps --list-deps app.jar → list of required modules
+3. jlink --add-modules <those modules> --output ./runtime
+4. Distribute ./runtime + your app
+```
+
+Result: 30-80MB runtime including only what your app uses, vs 300MB+ full JDK.
+
+**Combine with:**
+- `--strip-debug` — removes debug info
+- `--compress=2` — strongest compression
+- `--no-man-pages --no-header-files` — strip unused
+
+**Use case:** containerised Java apps. Smaller runtime → smaller image → faster pulls and faster cold starts. **Spring Boot 3 native image** offers a different path for the same goal.
+
+---
+
+## Modern Java Roadmap
+
+### Q277. Project Loom internals — how do virtual threads work mechanically?
+
+Virtual threads are Java-managed (not OS-managed) threads multiplexed onto a small pool of **carrier** OS threads.
+
+**Lifecycle:**
+1. Virtual thread created — JVM allocates a small stack-frame region (~kB, not MB)
+2. Submitted to scheduler (default: a `ForkJoinPool` of carrier threads)
+3. Scheduler **mounts** virtual thread onto a free carrier
+4. Code runs on the carrier
+5. Blocking call (sleep, socket read, sync I/O) — JVM **unmounts** the virtual thread, parks it
+6. Carrier runs another virtual thread
+7. When the blocking operation completes, the virtual thread is rescheduled
+8. Eventually mounted again, possibly on a different carrier
+
+**Continuation:** the runtime mechanism that captures a paused virtual thread's stack and restores it on resume. Implemented in the JVM (`jdk.internal.vm.Continuation`).
+
+**Pinning:** when a virtual thread can't be unmounted from its carrier:
+- `synchronized` blocks (Java 21 — fixed in 24 via JEP 491)
+- Native frames (JNI calls)
+- Class initialisers running on this thread
+
+**Key insight:** virtual threads are **cheap to create** but the carrier pool is bounded. Many virtual threads → few carriers → unmounting must work for the model to scale.
+
+### Q278. Project Valhalla — value types coming.
+
+Long-running JEP. Aim: add **value types** to Java — objects without identity, can be inlined into containers.
+
+**Today's box-vs-primitive split:**
+```java
+List<Integer> list = ...;   // each Integer = object header + payload, scattered in heap
+int[] arr = ...;             // contiguous primitives, no headers
+```
+
+**With Valhalla (preview Java 22+):**
+```java
+value class Point { int x; int y; }
+Point[] points = new Point[1000];   // contiguous, no per-element header
+List<Point> list = ...;             // potentially flattened
+```
+
+**Benefits:**
+- Cache-friendly — no pointer chase
+- Lower memory — no headers (~12-16 bytes per object saved)
+- Allows generic specialisation — `List<int>` would be a real thing
+
+**Status (May 2026):** in active preview, expected GA Java 25-26. Worth knowing because it changes how you'll model value types — fewer reasons to use primitives over value classes.
+
+### Q279. Project Leyden — ahead-of-time compilation roadmap.
+
+Aim: improve Java startup time and predictability. Less radical than GraalVM native image, more incremental.
+
+**Phases:**
+- **AppCDS** (already in JDK) — share class metadata across runs
+- **JIT cache** — persist compiled methods between runs
+- **Static images** (long-term) — fully ahead-of-time-compiled binaries
+
+**Trade-off vs GraalVM native image:** Leyden keeps the dynamic language features (reflection, dynamic class loading) but improves startup; GraalVM gives up dynamism for the smallest, fastest binaries.
+
+**Practical:** as of Java 24-25, Leyden is in active development. Watch JEPs 483 (Ahead-of-Time Class Loading), 514 (Ahead-of-Time Method Profiling).
+
+### Q280. Vector API (incubator) — SIMD in Java.
+
+Lets Java code emit SIMD (Single Instruction Multiple Data) CPU instructions explicitly.
+
+```java
+import jdk.incubator.vector.*;
+
+static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+
+void multiplyAdd(float[] a, float[] b, float[] c, float[] out) {
+    int i = 0;
+    int upperBound = SPECIES.loopBound(a.length);
+    for (; i < upperBound; i += SPECIES.length()) {
+        FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+        FloatVector vc = FloatVector.fromArray(SPECIES, c, i);
+        va.fma(vb, vc).intoArray(out, i);
+    }
+    for (; i < a.length; i++) out[i] = Math.fma(a[i], b[i], c[i]);   // tail
+}
+```
+
+**Use cases:** numerical libraries, ML inference, image/audio processing, hashing/checksums.
+
+**Status (May 2026):** still incubator. Likely promoted to standard around Java 26.
+
+### Q281. Project Panama / Foreign Function & Memory API.
+
+Replaces JNI for calling native code. Final in Java 22.
+
+```java
+Linker linker = Linker.nativeLinker();
+SymbolLookup libc = linker.defaultLookup();
+
+MemorySegment strlenAddr = libc.find("strlen").orElseThrow();
+MethodHandle strlen = linker.downcallHandle(
+    strlenAddr,
+    FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS)
+);
+
+try (Arena arena = Arena.ofConfined()) {
+    MemorySegment cString = arena.allocateUtf8String("Hello, world!");
+    long len = (long) strlen.invoke(cString);
+    System.out.println(len);   // 13
+}
+```
+
+**Vs JNI:**
+- No `.h` files, no native compilation step
+- Type-safe via `MemoryLayout` and `MethodHandle`
+- Memory automatically freed when `Arena` closed
+- ~10x faster for FFI calls
+
+**Use cases:** native library integration (image codecs, crypto, ML), legacy C API access, embedded systems.
+
+---
+
+## Spot-the-Bug Scenarios
+
+### Q282. Spot the bug — concurrent counter.
+
+```java
+public class Counter {
+    private int count = 0;
+    public synchronized int increment() { return ++count; }
+    public int get() { return count; }
+}
+```
+
+**Bug:** `get()` is not synchronised — readers can see stale values from CPU caches. The `++count` write is published only on `synchronized` exit; `get()` may read from a different thread's cache.
+
+**Fix:** synchronise `get()`, or make `count` volatile, or use `AtomicInteger`.
+
+### Q283. Spot the bug — double-checked locking.
+
+```java
+public class Singleton {
+    private static Singleton instance;
+    public static Singleton get() {
+        if (instance == null) {
+            synchronized (Singleton.class) {
+                if (instance == null) instance = new Singleton();
+            }
+        }
+        return instance;
+    }
+}
+```
+
+**Bug:** `instance` not declared `volatile`. JVM may reorder constructor execution (assign reference before fields are fully initialised). Other threads doing the no-lock first check see a non-null reference but may read a partially-constructed object.
+
+**Fix:** `private static volatile Singleton instance;` — or use the holder idiom.
+
+### Q284. Spot the bug — `ConcurrentModificationException`.
+
+```java
+List<String> list = new ArrayList<>(List.of("a", "b", "c"));
+for (String s : list) {
+    if (s.equals("b")) list.remove(s);
+}
+```
+
+**Bug:** for-each uses an `Iterator`; modifying the list during iteration throws `ConcurrentModificationException` even single-threaded.
+
+**Fix:**
+```java
+list.removeIf("b"::equals);                          // best
+// or
+Iterator<String> it = list.iterator();
+while (it.hasNext()) if ("b".equals(it.next())) it.remove();
+```
+
+### Q285. Spot the bug — `Integer` comparison.
+
+```java
+Integer a = 200;
+Integer b = 200;
+if (a == b) System.out.println("equal");
+```
+
+**Bug:** `==` compares references. `Integer` cache covers `-128..127`. Outside that range, `valueOf` returns new objects, so `a == b` is false even when values match.
+
+**Fix:** `if (a.equals(b))` — or use `int` if values are guaranteed primitive.
+
+### Q286. Spot the bug — `HashMap` with mutable key.
+
+```java
+class Point {
+    int x, y;
+    @Override public int hashCode() { return Objects.hash(x, y); }
+    @Override public boolean equals(Object o) { /* by x,y */ }
+}
+
+Map<Point, String> map = new HashMap<>();
+Point p = new Point(1, 2);
+map.put(p, "hello");
+p.x = 10;
+map.get(p);   // null — entry "lost"
+```
+
+**Bug:** mutating a key after insertion changes its hash code. The entry is in a bucket determined by the OLD hash; lookups use the NEW hash → wrong bucket → not found.
+
+**Fix:** make keys immutable. Records solve this — fields are final.
+
+### Q287. Spot the bug — `try-with-resources` chained.
+
+```java
+try (Connection c = ds.getConnection()) {
+    PreparedStatement s = c.prepareStatement("SELECT 1");
+    ResultSet r = s.executeQuery();
+    while (r.next()) { ... }
+}
+```
+
+**Bug:** `PreparedStatement` and `ResultSet` are NOT in the try-with-resources. They never close. Connection pool may eventually leak handles even though the connection itself returns to the pool.
+
+**Fix:**
+```java
+try (Connection c = ds.getConnection();
+     PreparedStatement s = c.prepareStatement("SELECT 1");
+     ResultSet r = s.executeQuery()) {
+    while (r.next()) { ... }
+}
+```
+
+### Q288. Spot the bug — exception swallowing.
+
+```java
+try {
+    doWork();
+} catch (Exception e) {
+    log.error("Failed");
+}
+```
+
+**Bug:** exception's stack trace and message lost — only "Failed" logged. Debugging nightmare.
+
+**Fix:** `log.error("Failed", e);` — pass the exception so the framework logs the stack trace.
+
+### Q289. Spot the bug — `Optional` usage.
+
+```java
+public Optional<User> findUser(String email) {
+    User u = repo.findByEmail(email);
+    return Optional.of(u);
+}
+```
+
+**Bug:** `Optional.of(null)` throws `NullPointerException`. If `repo.findByEmail` can return null, this fails.
+
+**Fix:** `return Optional.ofNullable(u);`
+
+### Q290. Spot the bug — `BigDecimal` equality.
+
+```java
+BigDecimal a = new BigDecimal("1.0");
+BigDecimal b = new BigDecimal("1.00");
+if (a.equals(b)) System.out.println("equal");
+```
+
+**Bug:** `BigDecimal.equals` requires same scale. `1.0` and `1.00` have different scales — `equals` returns false even though numerically equal.
+
+**Fix:** `a.compareTo(b) == 0` for value equality; `a.equals(b)` only for scale-strict equality.
+
+### Q291. Spot the bug — `synchronized` on `Boolean`.
+
+```java
+class Cache {
+    private Boolean ready = false;
+    public synchronized void init() { ... }
+    public void use() {
+        synchronized (ready) { /* critical section */ }
+    }
+}
+```
+
+**Bug:** `synchronized (ready)` locks on the cached `Boolean.FALSE` (or `Boolean.TRUE`) instance, which is shared across the entire JVM. Different `Cache` instances all lock the same monitor. Massive contention; not what you want.
+
+**Fix:** lock on a private final `Object` field:
+```java
+private final Object lock = new Object();
+synchronized (lock) { ... }
+```
+
+---
+
+## Spring Ecosystem Extras
+
+### Q292. Spring Modulith — what problem does it solve?
+
+`spring-modulith` (Spring 6.1+) adds **modular monolith** support to Spring Boot. Forces explicit module boundaries within a single deployable.
+
+**Concepts:**
+- Each top-level package = a module
+- Modules can declare APIs (public types) and internals (`internal` sub-package)
+- Modules communicate via Spring events or explicitly-exposed APIs
+- Cross-module access to internals fails the build via ArchUnit-style verification
+
+**Test** with `@ApplicationModuleTest` — boots only one module's Spring context, integration testing per module.
+
+**Use case:** medium-sized teams that want microservices' isolation without microservices' operational cost. Strangler-fig friendly — split modules into services later if scale forces it.
+
+### Q293. Spring Batch — when does it earn its weight?
+
+Heavy-duty batch processing framework: chunk-oriented step processing, restart from checkpoint, parallel partitioning, transaction management per chunk.
+
+**Anatomy:**
+```java
+@Bean
+public Step processOrders(JobRepository repo, PlatformTransactionManager tx,
+                          ItemReader<Order> reader, ItemWriter<Order> writer) {
+    return new StepBuilder("processOrders", repo)
+        .<Order, Order>chunk(100, tx)
+        .reader(reader)
+        .processor(this::transform)
+        .writer(writer)
+        .faultTolerant()
+        .skipLimit(10).skip(ParseException.class)
+        .retryLimit(3).retry(TransientException.class)
+        .build();
+}
+```
+
+**Wins:**
+- Restart from last successful chunk after failure
+- Chunk-level transactions — failure rolls back only that chunk
+- Skip / retry policies per exception type
+- Parallel step partitioning across nodes
+- Job repository tracks history, status, parameters
+
+**Use cases:** ETL pipelines, nightly reconciliation jobs, bulk data imports, regulatory reports. Overkill for one-shot scripts.
+
+### Q294. Spring Integration vs Spring Cloud Stream — which when?
+
+**Spring Integration** — Enterprise Integration Patterns (EIP) framework. Channels, transformers, routers, aggregators, splitters. Synchronous or async.
+
+```java
+@Bean
+public IntegrationFlow flow() {
+    return IntegrationFlow.from("inputChannel")
+        .filter(this::isValid)
+        .transform(this::enrich)
+        .route(MyMessage::type, r -> r
+            .subFlowMapping("ORDER",  sf -> sf.handle(orderHandler))
+            .subFlowMapping("REFUND", sf -> sf.handle(refundHandler)))
+        .get();
+}
+```
+
+**Spring Cloud Stream** — abstraction over message brokers (Kafka, RabbitMQ, Pulsar). Auto-configures bindings, partitioning, dead-letter queues.
+
+```java
+@Bean
+public Function<KStream<String, Order>, KStream<String, EnrichedOrder>> process() {
+    return stream -> stream.map((k, o) -> KeyValue.pair(k, enrich(o)));
+}
+```
+
+**When each:**
+- Integration — complex routing within one app, multiple sources/sinks (file, JMS, FTP, HTTP)
+- Cloud Stream — event-driven microservices on a message broker, less plumbing
+
+### Q295. Spring Cloud Sleuth → OpenTelemetry migration.
+
+Spring Cloud Sleuth (auto-tracing library) **deprecated in Spring Boot 3** in favour of native OpenTelemetry support via Micrometer Tracing.
+
+**New stack:**
+```yaml
+management:
+  tracing:
+    sampling.probability: 1.0
+  otlp:
+    tracing.endpoint: http://collector:4318/v1/traces
+```
+
+```xml
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-tracing-bridge-otel</artifactId>
+</dependency>
+<dependency>
+    <groupId>io.opentelemetry</groupId>
+    <artifactId>opentelemetry-exporter-otlp</artifactId>
+</dependency>
+```
+
+Auto-instruments: HTTP clients (`RestTemplate`, `WebClient`), Spring MVC, Reactor, DataSource, Kafka. Trace context propagated via W3C `traceparent` header.
+
+**Manual spans:**
+```java
+@Autowired Tracer tracer;
+
+Span span = tracer.spanBuilder("compute-totals").startSpan();
+try (Scope scope = span.makeCurrent()) {
+    return computeTotals();
+} finally {
+    span.end();
+}
+```
+
+Backwards-compatible with B3 propagation if you have legacy services still on Sleuth.
+
+### Q296. AspectJ vs Spring AOP — when does Spring AOP fall short?
+
+**Spring AOP** (proxy-based):
+- Only intercepts public methods on Spring beans
+- Doesn't work for self-invocation (covered in Q65)
+- Doesn't intercept fields, constructors, internal calls
+- Relies on the Spring container — only managed objects
+
+**AspectJ** (compile-time or load-time weaving):
+- Intercepts everything: private methods, field access, constructors, static methods
+- Works for non-Spring objects
+- Compile-time weaving — zero runtime overhead vs proxy
+- Load-time weaving via Java agent
+
+```java
+@Aspect
+public class FieldAccessAspect {
+    @Before("get(* com.example.entity..*) && !within(FieldAccessAspect)")
+    public void onFieldRead(JoinPoint jp) {
+        // intercept every field read in the entity package
+    }
+}
+```
+
+**When AspectJ wins:**
+- Cross-cutting concerns Spring AOP can't reach (self-invocation, field access)
+- Performance-sensitive (no proxy indirection)
+- Frameworks like Hibernate's lazy loading use AspectJ-style bytecode enhancement
+
+**Cost:** more complex build (weaver plugin), longer compile times, harder debugging. Rare in app code; common in framework code (Spring itself uses AspectJ for some annotations like `@Configurable`).
 
 ---
 
