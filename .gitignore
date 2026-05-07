@@ -23,3 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# Mobile
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/.metro-cache/
+mobile/android/
+mobile/ios/
