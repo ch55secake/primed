@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { parseContent, sortSections, SOURCES } from "./lib/parser";
-import type { Pattern, SourceId } from "./lib/parser";
+import { parseContent, sortSections, SOURCES } from "@interview-prep/parser";
+import type { Pattern, SourceId } from "@interview-prep/parser";
 import { Sidebar } from "./components/Sidebar";
 import { PatternView } from "./components/PatternView";
 import { SourceTabs } from "./components/SourceTabs";

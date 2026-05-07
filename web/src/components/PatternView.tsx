@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
-import type { Pattern, SourceConfig } from "../lib/parser";
-import { sortSections } from "../lib/parser";
+import type { Pattern, SourceConfig } from "@interview-prep/parser";
+import { sortSections } from "@interview-prep/parser";
 import { Section } from "./Section";
 
 interface Props {

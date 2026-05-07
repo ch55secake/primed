@@ -1,4 +1,4 @@
-import type { Pattern, SourceConfig } from "../lib/parser";
+import type { Pattern, SourceConfig } from "@interview-prep/parser";
 import { useTheme } from "../theme/ThemeContext";
 
 interface Props {
