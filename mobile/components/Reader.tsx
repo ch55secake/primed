@@ -111,36 +111,14 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
       </PagerView>
 
       <View style={styles.indicator}>
-        <Pressable
-          onPress={() => onNeighbourItem(-1)}
-          style={styles.navArrow}
-          disabled={currentPage > 0}
-        >
-          <Text
-            style={[
-              styles.navArrowText,
-              currentPage > 0 && styles.navArrowDisabled,
-            ]}
-          >
-            ‹ prev item
-          </Text>
+        <Pressable onPress={() => onNeighbourItem(-1)} style={styles.navArrow}>
+          <Text style={styles.navArrowText}>‹ prev</Text>
         </Pressable>
         <Text style={styles.pageCount}>
           {currentPage + 1} / {pages.length}
         </Text>
-        <Pressable
-          onPress={() => onNeighbourItem(1)}
-          style={styles.navArrow}
-          disabled={currentPage < pages.length - 1}
-        >
-          <Text
-            style={[
-              styles.navArrowText,
-              currentPage < pages.length - 1 && styles.navArrowDisabled,
-            ]}
-          >
-            next item ›
-          </Text>
+        <Pressable onPress={() => onNeighbourItem(1)} style={styles.navArrow}>
+          <Text style={styles.navArrowText}>next ›</Text>
         </Pressable>
       </View>
     </View>
@@ -189,7 +167,6 @@ const styles = StyleSheet.create({
   },
   navArrow: { paddingVertical: 4, paddingHorizontal: 6 },
   navArrowText: { color: "#7c9cff", fontSize: 13 },
-  navArrowDisabled: { color: "#3a4154" },
   pageCount: {
     color: "#8a93a6",
     fontSize: 13,
