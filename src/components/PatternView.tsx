@@ -78,23 +78,23 @@ export function PatternView({
   };
 
   return (
-    <main className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-8 py-8">
-        <header className="mb-6 flex items-start justify-between gap-6">
-          <div>
+    <main className="flex-1 overflow-y-auto min-w-0">
+      <div className="max-w-4xl mx-auto px-4 py-4 md:px-8 md:py-8">
+        <header className="mb-4 md:mb-6 flex flex-col md:flex-row md:items-start md:justify-between gap-2 md:gap-6">
+          <div className="min-w-0">
             <div className="text-xs text-[var(--color-text-dim)] tracking-widest uppercase mb-1">
               {source.itemLabel} {pattern.id}
             </div>
-            <h2 className="m-0 text-3xl font-bold text-[var(--color-text-strong)] tracking-tight">
+            <h2 className="m-0 text-xl md:text-3xl font-bold text-[var(--color-text-strong)] tracking-tight break-words">
               {pattern.title}
             </h2>
           </div>
-          <span className="chip">
+          <span className="chip self-start md:self-auto flex-shrink-0">
             {revealed.size} / {sortedSections.length} revealed
           </span>
         </header>
 
-        <div className="flex gap-2 mb-6 flex-wrap">
+        <div className="flex gap-2 mb-4 md:mb-6 flex-wrap">
           <button type="button" className="btn btn-primary" onClick={handleRevealNextClick}>
             Reveal next ↓
           </button>
@@ -104,7 +104,7 @@ export function PatternView({
           <button type="button" className="btn" onClick={onHideAll}>
             Hide all
           </button>
-          <span className="ml-auto self-center text-xs text-[var(--color-text-dim)]">
+          <span className="ml-auto self-center text-xs text-[var(--color-text-dim)] hidden md:inline">
             <kbd className="font-mono px-1.5 py-0.5 bg-[var(--color-panel-2)] rounded border border-[var(--color-border)] mx-0.5">Space</kbd>
             reveal ·
             <kbd className="font-mono px-1.5 py-0.5 bg-[var(--color-panel-2)] rounded border border-[var(--color-border)] mx-0.5">Esc</kbd>

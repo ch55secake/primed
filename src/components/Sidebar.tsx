@@ -7,6 +7,8 @@ interface Props {
   selectedId: number;
   progress: Record<number, { revealed: number; total: number }>;
   onSelect: (id: number) => void;
+  /** Called when the user closes the mobile drawer (close button or item select on mobile). */
+  onClose?: () => void;
 }
 
 function progressDot(state?: { revealed: number; total: number }) {
@@ -25,10 +27,10 @@ function progressDot(state?: { revealed: number; total: number }) {
   );
 }
 
-export function Sidebar({ source, patterns, selectedId, progress, onSelect }: Props) {
+export function Sidebar({ source, patterns, selectedId, progress, onSelect, onClose }: Props) {
   const { theme, toggle } = useTheme();
   return (
-    <aside className="w-72 flex-shrink-0 border-r border-[var(--color-border)] bg-[var(--color-panel)] flex flex-col">
+    <aside className="w-72 h-full flex-shrink-0 border-r border-[var(--color-border)] bg-[var(--color-panel)] flex flex-col">
       <div className="px-4 py-4 border-b border-[var(--color-border)] flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h1 className="m-0 text-lg font-bold text-[var(--color-text-strong)] tracking-tight">
@@ -38,15 +40,27 @@ export function Sidebar({ source, patterns, selectedId, progress, onSelect }: Pr
             {patterns.length} {source.itemsPlural}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label="Toggle theme"
-          title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          className="btn !px-2 !py-1.5 text-base leading-none flex-shrink-0"
-        >
-          {theme === "dark" ? "☀" : "☾"}
-        </button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label="Toggle theme"
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            className="btn !px-2 !py-1.5 text-base leading-none"
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close menu"
+              className="btn !px-2 !py-1.5 text-base leading-none md:hidden"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
       <ul className="m-0 p-0 list-none overflow-y-auto flex-1">
         {patterns.map((p) => {
@@ -56,7 +70,7 @@ export function Sidebar({ source, patterns, selectedId, progress, onSelect }: Pr
               <button
                 type="button"
                 onClick={() => onSelect(p.id)}
-                className={`w-full text-left px-4 py-2.5 flex items-center gap-3 text-sm border-l-2 transition-colors ${
+                className={`w-full text-left px-4 py-3 md:py-2.5 flex items-center gap-3 text-sm border-l-2 transition-colors ${
                   isSelected
                     ? "bg-[var(--color-panel-2)] border-[var(--color-accent)] text-[var(--color-text-strong)]"
                     : "border-transparent text-[var(--color-text)] hover:bg-[var(--color-panel-2)] hover:text-[var(--color-text-strong)]"

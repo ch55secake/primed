@@ -12,7 +12,7 @@ export function SourceTabs({ active, onSelect }: Props) {
   return (
     <div
       role="tablist"
-      className="flex items-center gap-1 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel)]"
+      className="flex items-center gap-1 px-2 md:px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel)] overflow-x-auto"
     >
       {ORDER.map((id) => {
         const cfg: SourceConfig = SOURCES[id];

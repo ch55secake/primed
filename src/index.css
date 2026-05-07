@@ -114,15 +114,20 @@ body {
   font-size: 0.85rem;
   line-height: 1.5;
 }
+/* Wrap tables in a horizontal scroll container so wide tables don't break the layout on mobile */
 .markdown-body table {
   border-collapse: collapse;
   margin: 0.75rem 0;
   width: 100%;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .markdown-body th, .markdown-body td {
   border: 1px solid var(--color-border);
   padding: 0.5rem 0.75rem;
   text-align: left;
+  white-space: nowrap;
 }
 .markdown-body th {
   background: var(--color-panel-2);
@@ -192,6 +197,33 @@ body {
   padding: 1rem 1.25rem 1.25rem;
   border-top: 1px solid var(--color-border);
   animation: slideDown 0.18s ease-out;
+}
+
+/* Tighten layout on mobile viewports */
+@media (max-width: 767px) {
+  .section-body {
+    padding: 0.75rem 0.85rem 1rem;
+  }
+  .section-header {
+    padding: 0.65rem 0.85rem;
+  }
+  .markdown-body pre {
+    padding: 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+  }
+  .markdown-body pre code { font-size: 0.78rem; }
+  .markdown-body h1 { font-size: 1.5rem; }
+  .markdown-body h2 { font-size: 1.25rem; }
+  .markdown-body h3 { font-size: 1.1rem; }
+  .ascii-diagram {
+    padding: 0.75rem;
+    font-size: 0.7rem;
+  }
+  .mermaid-host {
+    padding: 0.75rem;
+    min-height: 150px;
+  }
 }
 
 @keyframes slideDown {

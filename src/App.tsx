@@ -74,6 +74,9 @@ export default function App() {
     return readSourceFromHash();
   });
 
+  // Mobile drawer state — open on mobile when user taps menu, closed by default
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const [sources, setSources] = useState<Record<SourceId, SourceState>>({
     patterns: { patterns: [], loading: true, error: null },
     neetcode: { patterns: [], loading: true, error: null },
@@ -141,6 +144,8 @@ export default function App() {
     (id: number) => {
       setSelectedIds((prev) => ({ ...prev, [activeSource]: id }));
       localStorage.setItem(selectedKey(activeSource), String(id));
+      // On mobile, close the drawer after selection so the user sees their pick
+      setSidebarOpen(false);
     },
     [activeSource],
   );
@@ -243,7 +248,30 @@ export default function App() {
   return (
     <div className="h-full flex flex-col">
       <SourceTabs active={activeSource} onSelect={onSelectSource} />
-      <div className="flex-1 min-h-0">
+
+      {/* Mobile-only top bar: hamburger + current item title */}
+      <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel)]">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          className="btn !px-3 !py-2 text-base leading-none flex-shrink-0"
+          aria-label="Open menu"
+        >
+          ☰
+        </button>
+        <div className="text-sm text-[var(--color-text-strong)] truncate flex-1 min-w-0">
+          {selected ? (
+            <>
+              <span className="text-[var(--color-text-dim)] mr-1">#{selected.id}</span>
+              {selected.title}
+            </>
+          ) : (
+            sourceConfig.title
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 relative">
         {sourceState.loading ? (
           <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
             Loading {sourceConfig.title}…
@@ -257,14 +285,34 @@ export default function App() {
             No content parsed.
           </div>
         ) : (
-          <div className="h-full flex">
-            <Sidebar
-              source={sourceConfig}
-              patterns={patterns}
-              selectedId={selected.id}
-              progress={progress}
-              onSelect={setSelectedId}
+          <div className="h-full flex relative">
+            {/* Backdrop for mobile drawer */}
+            <div
+              className={`md:hidden fixed inset-0 bg-black/50 z-40 transition-opacity duration-200 ${
+                sidebarOpen
+                  ? "opacity-100 pointer-events-auto"
+                  : "opacity-0 pointer-events-none"
+              }`}
+              onClick={() => setSidebarOpen(false)}
+              aria-hidden="true"
             />
+
+            {/* Sidebar — fixed drawer below md, normal flex column at md+ */}
+            <div
+              className={`fixed md:static inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-out ${
+                sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+              }`}
+            >
+              <Sidebar
+                source={sourceConfig}
+                patterns={patterns}
+                selectedId={selected.id}
+                progress={progress}
+                onSelect={setSelectedId}
+                onClose={() => setSidebarOpen(false)}
+              />
+            </div>
+
             <PatternView
               key={`${activeSource}-${selected.id}`}
               source={sourceConfig}
