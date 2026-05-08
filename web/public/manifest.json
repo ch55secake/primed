@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "patterns",
+      "file": "/patterns.md",
+      "title": "System Design",
+      "itemLabel": "Pattern",
+      "itemsPlural": "interview patterns",
+      "storagePrefix": "sdf:patterns",
+      "defaultRevealedSections": ["Problem"],
+      "sectionOrder": [
+        "Problem",
+        "Summary",
+        "Clarifying Questions",
+        "Requirements",
+        "Scale Estimate",
+        "API Contract",
+        "High-Level Design",
+        "Data Model",
+        "Algorithm Comparison",
+        "Detailed Design",
+        "Potential Follow-Up Questions",
+        "Bottlenecks & Mitigations",
+        "Failure Modes",
+        "Observability — Key Metrics & SLOs",
+        "Multi-Region & DR",
+        "Common Mistakes / Anti-patterns",
+        "Talking Points for the Interview"
+      ]
+    },
+    {
+      "id": "neetcode",
+      "file": "/neetcode-150.md",
+      "title": "NeetCode 150",
+      "itemLabel": "Problem",
+      "itemsPlural": "interview problems",
+      "storagePrefix": "sdf:neetcode",
+      "defaultRevealedSections": ["Problem"],
+      "sectionOrder": ["Problem", "Pattern", "Explanation", "Solution"]
+    },
+    {
+      "id": "java",
+      "file": "/java-interview-primer.md",
+      "title": "Java",
+      "itemLabel": "Topic",
+      "itemsPlural": "Java topics",
+      "storagePrefix": "ip:java",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
+    }
+  ]
+}

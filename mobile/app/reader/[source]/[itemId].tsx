@@ -1,30 +1,32 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { useLocalSearchParams, router, Stack } from "expo-router";
-import {
-  parseContent,
-  SOURCES,
-  type Pattern,
-  type SourceId,
-} from "../../../lib/parser";
+import { parseContent, type Pattern } from "../../../lib/parser";
 import { loadSource } from "../../../lib/content";
 import { Reader } from "../../../components/Reader";
+import { useSource } from "../../../lib/manifest";
+import { useTheme, type Palette } from "../../../lib/theme";
 
 export default function ReaderScreen() {
+  const palette = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
+
   const params = useLocalSearchParams<{ source: string; itemId: string }>();
-  const sourceId = params.source as SourceId;
+  const sourceId = params.source ?? "";
   const itemId = Number(params.itemId);
+  const source = useSource(sourceId);
 
   const [items, setItems] = useState<Pattern[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!source) return;
     let cancelled = false;
     (async () => {
       try {
-        const md = await loadSource(sourceId);
+        const md = await loadSource(source);
         if (cancelled) return;
-        setItems(parseContent(md, SOURCES[sourceId]));
+        setItems(parseContent(md, source));
       } catch (e) {
         if (!cancelled) setError(String(e));
       }
@@ -32,7 +34,7 @@ export default function ReaderScreen() {
     return () => {
       cancelled = true;
     };
-  }, [sourceId]);
+  }, [source]);
 
   const onNeighbourItem = useCallback(
     (delta: 1 | -1) => {
@@ -46,6 +48,14 @@ export default function ReaderScreen() {
     [items, itemId, sourceId],
   );
 
+  if (!source) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.error}>Unknown source “{sourceId}”</Text>
+      </View>
+    );
+  }
+
   if (error) {
     return (
       <View style={styles.center}>
@@ -57,7 +67,7 @@ export default function ReaderScreen() {
   if (!items) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#7c9cff" />
+        <ActivityIndicator color={palette.accent} />
       </View>
     );
   }
@@ -74,22 +84,24 @@ export default function ReaderScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <Reader source={SOURCES[sourceId]} item={item} onNeighbourItem={onNeighbourItem} />
+      <Reader source={source} item={item} onNeighbourItem={onNeighbourItem} />
     </>
   );
 }
 
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0b0d12",
-  },
-  error: {
-    color: "#fbbf24",
-    fontSize: 14,
-    paddingHorizontal: 24,
-    textAlign: "center",
-  },
-});
+function makeStyles(p: Palette) {
+  return StyleSheet.create({
+    center: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: p.bg,
+    },
+    error: {
+      color: p.errorFg,
+      fontSize: 14,
+      paddingHorizontal: 24,
+      textAlign: "center",
+    },
+  });
+}

@@ -1,23 +1,39 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { SourceId } from "./parser";
 
-const LAST_REFRESH_KEY = (id: SourceId) => `lastRefresh:${id}`;
-const LAST_PAGE_KEY = (id: SourceId, itemId: number) => `lastPage:${id}:${itemId}`;
+// Source ids are open — the manifest can add new ones at runtime, so storage
+// keys must accept any string rather than the narrow union from parser.ts.
+type SourceKey = string;
 
-export async function setLastRefreshed(id: SourceId, ms: number): Promise<void> {
+const LAST_REFRESH_KEY = (id: SourceKey) => `lastRefresh:${id}`;
+const LAST_PAGE_KEY = (id: SourceKey, itemId: number) =>
+  `lastPage:${id}:${itemId}`;
+
+export async function setLastRefreshed(
+  id: SourceKey,
+  ms: number,
+): Promise<void> {
   await AsyncStorage.setItem(LAST_REFRESH_KEY(id), String(ms));
 }
 
-export async function getLastRefreshed(id: SourceId): Promise<number | null> {
+export async function getLastRefreshed(
+  id: SourceKey,
+): Promise<number | null> {
   const raw = await AsyncStorage.getItem(LAST_REFRESH_KEY(id));
   return raw ? Number(raw) : null;
 }
 
-export async function setLastPage(id: SourceId, itemId: number, page: number): Promise<void> {
+export async function setLastPage(
+  id: SourceKey,
+  itemId: number,
+  page: number,
+): Promise<void> {
   await AsyncStorage.setItem(LAST_PAGE_KEY(id, itemId), String(page));
 }
 
-export async function getLastPage(id: SourceId, itemId: number): Promise<number> {
+export async function getLastPage(
+  id: SourceKey,
+  itemId: number,
+): Promise<number> {
   const raw = await AsyncStorage.getItem(LAST_PAGE_KEY(id, itemId));
   return raw ? Number(raw) : 0;
 }
