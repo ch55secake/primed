@@ -23,4 +23,9 @@ if [ -d "$ROOT/mobile" ]; then
   cp "$WEB/neetcode-150.md"           "$MOBILE/neetcode-150.md"
   cp "$WEB/java-interview-primer.md"  "$MOBILE/java-interview-primer.md"
   echo "Mirrored to $MOBILE/"
+
+  # Mirror parser source — mobile inlines it (instead of using the workspace dep)
+  # so EAS cloud builds don't need to resolve workspace:* refs.
+  cp "$ROOT/packages/parser/src/parser.ts" "$ROOT/mobile/lib/parser.ts"
+  echo "Mirrored parser.ts → $ROOT/mobile/lib/"
 fi

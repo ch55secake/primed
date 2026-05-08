@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "1ac3fd7a-3358-4682-835f-59362104a968"
+      }
+    },
+    "android": {
+      "package": "com.mjrjh.drilly"
+    }
+  }
+}

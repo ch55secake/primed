@@ -2,7 +2,7 @@
 // The new API (Paths/File/Directory) is fine but verbose for this use case.
 import * as FS from "expo-file-system/legacy";
 import { Asset } from "expo-asset";
-import type { SourceId } from "@drilly/parser";
+import type { SourceId } from "./parser";
 
 const REMOTE_BASE = "https://drilly-rjh-mopjones-projects.vercel.app";
 

@@ -13,7 +13,7 @@ import {
   SOURCES,
   type SourceId,
   type Pattern,
-} from "@drilly/parser";
+} from "../lib/parser";
 import { loadSource, refreshSource } from "../lib/content";
 import {
   setLastRefreshed,

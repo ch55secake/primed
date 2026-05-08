@@ -1,10 +1,7 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true,
-    "paths": {
-      "@drilly/parser": ["../packages/parser/src/index.ts"]
-    }
+    "strict": true
   },
   "include": [
     "**/*.ts",

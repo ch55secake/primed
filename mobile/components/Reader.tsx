@@ -11,7 +11,7 @@ import PagerView from "react-native-pager-view";
 import * as Haptics from "expo-haptics";
 import Markdown from "react-native-markdown-display";
 import { useRouter } from "expo-router";
-import type { Pattern, SourceConfig } from "@drilly/parser";
+import type { Pattern, SourceConfig } from "../lib/parser";
 import { paginate, type Page } from "../lib/pagination";
 import { setLastPage, getLastPage } from "../lib/storage";
 

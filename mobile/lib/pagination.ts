@@ -1,4 +1,4 @@
-import type { Pattern } from "@drilly/parser";
+import type { Pattern } from "./parser";
 
 export interface Page {
   /** Markdown source for this page (joined back together for the renderer). */
