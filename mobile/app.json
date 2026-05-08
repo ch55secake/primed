@@ -15,10 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.rjhmopjones.drilly"
+      "bundleIdentifier": "com.mjrjh.drilly"
     },
     "android": {
-      "package": "com.rjhmopjones.drilly",
+      "package": "com.mjrjh.drilly",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -33,6 +33,11 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1ac3fd7a-3358-4682-835f-59362104a968"
+      }
     }
   }
 }
