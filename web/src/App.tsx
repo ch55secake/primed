@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { parseContent, sortSections, SOURCES } from "@interview-prep/parser";
-import type { Pattern, SourceId } from "@interview-prep/parser";
+import { parseContent, sortSections, SOURCES } from "@drilly/parser";
+import type { Pattern, SourceId } from "@drilly/parser";
 import { Sidebar } from "./components/Sidebar";
 import { PatternView } from "./components/PatternView";
 import { SourceTabs } from "./components/SourceTabs";

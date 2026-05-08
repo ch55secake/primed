@@ -1,5 +1,5 @@
-import type { SourceConfig, SourceId } from "@interview-prep/parser";
-import { SOURCES } from "@interview-prep/parser";
+import type { SourceConfig, SourceId } from "@drilly/parser";
+import { SOURCES } from "@drilly/parser";
 
 interface Props {
   active: SourceId;

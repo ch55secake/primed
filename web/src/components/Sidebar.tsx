@@ -1,4 +1,4 @@
-import type { Pattern, SourceConfig } from "@interview-prep/parser";
+import type { Pattern, SourceConfig } from "@drilly/parser";
 import { useTheme } from "../theme/ThemeContext";
 
 interface Props {

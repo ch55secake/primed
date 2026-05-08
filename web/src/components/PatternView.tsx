@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
-import type { Pattern, SourceConfig } from "@interview-prep/parser";
-import { sortSections } from "@interview-prep/parser";
+import type { Pattern, SourceConfig } from "@drilly/parser";
+import { sortSections } from "@drilly/parser";
 import { Section } from "./Section";
 
 interface Props {

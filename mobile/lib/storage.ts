@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { SourceId } from "@interview-prep/parser";
+import type { SourceId } from "@drilly/parser";
 
 const LAST_REFRESH_KEY = (id: SourceId) => `lastRefresh:${id}`;
 const LAST_PAGE_KEY = (id: SourceId, itemId: number) => `lastPage:${id}:${itemId}`;

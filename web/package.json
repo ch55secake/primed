@@ -1,5 +1,5 @@
 {
-  "name": "@interview-prep/web",
+  "name": "@drilly/web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@interview-prep/parser": "workspace:*",
+    "@drilly/parser": "workspace:*",
     "highlight.js": "^11.11.1",
     "mermaid": "^11.14.0",
     "react": "^19.2.5",

@@ -1,4 +1,4 @@
-import type { Pattern } from "@interview-prep/parser";
+import type { Pattern } from "@drilly/parser";
 
 export interface Page {
   /** Markdown source for this page (joined back together for the renderer). */

@@ -3,7 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@interview-prep/parser": ["../packages/parser/src/index.ts"]
+      "@drilly/parser": ["../packages/parser/src/index.ts"]
     }
   },
   "include": [

@@ -6,7 +6,7 @@ import {
   SOURCES,
   type Pattern,
   type SourceId,
-} from "@interview-prep/parser";
+} from "@drilly/parser";
 import { loadSource } from "../../../lib/content";
 import { Reader } from "../../../components/Reader";
 

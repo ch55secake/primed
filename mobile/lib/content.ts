@@ -2,9 +2,9 @@
 // The new API (Paths/File/Directory) is fine but verbose for this use case.
 import * as FS from "expo-file-system/legacy";
 import { Asset } from "expo-asset";
-import type { SourceId } from "@interview-prep/parser";
+import type { SourceId } from "@drilly/parser";
 
-const REMOTE_BASE = "https://interview-prep-delta-brown.vercel.app";
+const REMOTE_BASE = "https://drilly-rjh-mopjones-projects.vercel.app";
 
 const FILES: Record<SourceId, string> = {
   patterns: "patterns.md",
