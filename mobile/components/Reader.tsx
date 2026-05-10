@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { setLastPage, getLastPage } from "../lib/storage";
 import { useSettings } from "../lib/settings";
 import { useTheme, type Palette } from "../lib/theme";
 import { useVolumePager } from "./VolumePager";
+import { TapZonePager } from "./TapZonePager";
 
 const HEADER_HEIGHT = 56;
 const PAGE_INDICATOR_HEIGHT = 36;
@@ -75,7 +76,8 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
         </View>
       </View>
 
-      {settings.readingMode === "page" ? (
+      {/* E-ink mode forces page reading; user's saved scroll preference is preserved. */}
+      {(settings.eInkMode ? "page" : settings.readingMode) === "page" ? (
         <PagedBody
           source={source}
           item={item}
@@ -117,6 +119,7 @@ function PagedBody({
 }: PagedProps) {
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const insets = useSafeAreaInsets();
+  const settings = useSettings();
   const [currentPage, setCurrentPage] = useState(0);
   const pagerRef = useRef<PagerView>(null);
   const initialPageLoaded = useRef(false);
@@ -128,17 +131,22 @@ function PagedBody({
       const saved = await getLastPage(source.id, item.id);
       if (cancelled) return;
       if (saved > 0 && saved < pages.length) {
-        requestAnimationFrame(() => {
-          pagerRef.current?.setPageWithoutAnimation(saved);
+        if (settings.eInkMode) {
+          // No PagerView in e-ink mode — just set state.
           setCurrentPage(saved);
-        });
+        } else {
+          requestAnimationFrame(() => {
+            pagerRef.current?.setPageWithoutAnimation(saved);
+            setCurrentPage(saved);
+          });
+        }
       }
       initialPageLoaded.current = true;
     })();
     return () => {
       cancelled = true;
     };
-  }, [source.id, item.id, pages.length]);
+  }, [source.id, item.id, pages.length, settings.eInkMode]);
 
   // Persist current page on change
   useEffect(() => {
@@ -146,38 +154,60 @@ function PagedBody({
     setLastPage(source.id, item.id, currentPage);
   }, [source.id, item.id, currentPage]);
 
-  // Hardware volume keys advance / retreat pages
-  useVolumePager(pagerRef, currentPage, pages.length, true);
+  // Unified setter so volume keys work the same way in both modes.
+  const setPage = useCallback(
+    (idx: number) => {
+      if (settings.eInkMode) {
+        setCurrentPage(idx);
+      } else {
+        pagerRef.current?.setPage(idx);
+      }
+    },
+    [settings.eInkMode],
+  );
+  useVolumePager(setPage, currentPage, pages.length, true);
 
   return (
     <>
-      <PagerView
-        ref={pagerRef}
-        style={styles.pager}
-        initialPage={0}
-        onPageSelected={(e) => {
-          const p = e.nativeEvent.position;
-          setCurrentPage(p);
-          Haptics.selectionAsync();
-        }}
-      >
-        {pages.map((page, idx) => (
-          <View key={idx} style={styles.pageWrapper}>
-            {page.oversized ? (
-              <ScrollView
-                style={styles.pageContent}
-                contentContainerStyle={styles.pageContentInner}
-              >
-                <Markdown style={markdownStyles}>{page.markdown}</Markdown>
-              </ScrollView>
-            ) : (
-              <View style={styles.pageContent}>
-                <Markdown style={markdownStyles}>{page.markdown}</Markdown>
-              </View>
-            )}
-          </View>
-        ))}
-      </PagerView>
+      {settings.eInkMode ? (
+        <TapZonePager
+          pages={pages}
+          currentPage={currentPage}
+          onChangePage={setCurrentPage}
+          palette={palette}
+          markdownStyles={markdownStyles}
+        />
+      ) : (
+        <PagerView
+          ref={pagerRef}
+          style={styles.pager}
+          initialPage={0}
+          onPageSelected={(e) => {
+            const p = e.nativeEvent.position;
+            setCurrentPage(p);
+            // Haptics on e-ink would no-op (no motor) but we skip the call
+            // anyway to avoid spurious native-bridge traffic during reading.
+            if (!settings.eInkMode) Haptics.selectionAsync();
+          }}
+        >
+          {pages.map((page, idx) => (
+            <View key={idx} style={styles.pageWrapper}>
+              {page.oversized ? (
+                <ScrollView
+                  style={styles.pageContent}
+                  contentContainerStyle={styles.pageContentInner}
+                >
+                  <Markdown style={markdownStyles}>{page.markdown}</Markdown>
+                </ScrollView>
+              ) : (
+                <View style={styles.pageContent}>
+                  <Markdown style={markdownStyles}>{page.markdown}</Markdown>
+                </View>
+              )}
+            </View>
+          ))}
+        </PagerView>
+      )}
 
       <View
         style={[

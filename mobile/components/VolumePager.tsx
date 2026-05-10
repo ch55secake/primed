@@ -1,30 +1,31 @@
-import { useEffect, useRef, type RefObject } from "react";
-import type PagerView from "react-native-pager-view";
+import { useEffect, useRef } from "react";
 import { VolumeManager } from "react-native-volume-manager";
 import { useSettings } from "../lib/settings";
 
 /**
- * Subscribes to hardware volume key events and advances/retreats a PagerView.
+ * Subscribes to hardware volume key events and advances/retreats the page
+ * via a caller-supplied `setPage(idx)` callback. The callback abstracts
+ * over PagerView (LCD path) and tap-zone state setter (e-ink path) so this
+ * hook works in both reading modes.
  *
- * react-native-volume-manager exposes volume *changes* (not key presses) — so
+ * react-native-volume-manager exposes volume *changes* (not key presses) —
  * we infer direction by comparing the new volume against the previous one.
  * To keep headroom at both ends (a key press at 0% or 100% won't fire a
  * change event), we clamp volume to the middle on enter and restore on exit.
  */
 export function useVolumePager(
-  pagerRef: RefObject<PagerView | null>,
+  setPage: (idx: number) => void,
   currentPage: number,
   pageCount: number,
   enabled: boolean,
 ) {
   const settings = useSettings();
   const lastVolumeRef = useRef<number>(0.5);
-  // Latest page in a ref so the listener callback isn't stale across renders.
-  const pageRef = useRef({ page: currentPage, count: pageCount });
-  pageRef.current = { page: currentPage, count: pageCount };
+  // Latest page + setter in refs so the listener callback isn't stale across renders.
+  const stateRef = useRef({ page: currentPage, count: pageCount, setPage });
+  stateRef.current = { page: currentPage, count: pageCount, setPage };
 
-  const active =
-    enabled && settings.readingMode === "page" && settings.volumeKeyNav;
+  const active = enabled && settings.volumeKeyNav;
 
   useEffect(() => {
     if (!active) return;
@@ -60,11 +61,11 @@ export function useVolumePager(
       lastVolumeRef.current = next;
       if (Math.abs(delta) < 0.02) return;
 
-      const { page, count } = pageRef.current;
+      const { page, count, setPage: doSetPage } = stateRef.current;
       if (delta < 0 && page < count - 1) {
-        pagerRef.current?.setPage(page + 1);
+        doSetPage(page + 1);
       } else if (delta > 0 && page > 0) {
-        pagerRef.current?.setPage(page - 1);
+        doSetPage(page - 1);
       }
     });
 
@@ -75,5 +76,5 @@ export function useVolumePager(
       VolumeManager.showNativeVolumeUI({ enabled: true }).catch(() => {});
       VolumeManager.setVolume(originalVolume).catch(() => {});
     };
-  }, [active, pagerRef]);
+  }, [active]);
 }

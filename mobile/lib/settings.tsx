@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -16,12 +17,29 @@ export interface Settings {
   themeMode: ThemeMode;
   readingMode: ReadingMode;
   volumeKeyNav: boolean;
+  /**
+   * Optimised for e-ink displays (Boox / Kindle / Kobo). When on:
+   *  - reader uses tap zones instead of swipe paging
+   *  - all Stack screen animations are suppressed
+   *  - haptics are silenced
+   *  - reading mode is forced to "page" (scroll is unusable on e-ink)
+   * Auto-defaults to true on Boox / Onyx hardware; user override always wins.
+   */
+  eInkMode: boolean;
+}
+
+/** Probe Android's manufacturer string for known e-ink vendors. */
+function detectEInkDefault(): boolean {
+  if (Platform.OS !== "android") return false;
+  const mfr = (Platform.constants as { Manufacturer?: string }).Manufacturer;
+  return !!mfr && /onyx|boox/i.test(mfr);
 }
 
 const DEFAULTS: Settings = {
   themeMode: "system",
   readingMode: "page",
   volumeKeyNav: true,
+  eInkMode: detectEInkDefault(),
 };
 
 const STORAGE_KEY = "drilly:settings";
