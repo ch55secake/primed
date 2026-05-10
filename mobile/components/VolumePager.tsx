@@ -61,31 +61,32 @@ export function useVolumePager(
       }
     })();
 
-    // Algorithm: the listener fires multiple times per hardware press
-    // (real change + occasional intermediate step + our re-clamp echo).
-    // Trying to identify the echo individually is fragile, so we just
-    // debounce: one page-change per DEBOUNCE_MS regardless of how many
-    // events arrive. After each advance we re-clamp the system volume to
-    // CENTER so the user never runs out of headroom on long items.
-    // Algorithm:
-    // 1. Listener fires on any system volume change.
-    // 2. If we're inside DEBOUNCE_MS of the last detected press, treat the
-    //    event as a side-effect (multi-fire from Android, or our re-clamp
-    //    echo) and just track lastVolumeRef.
-    // 3. Otherwise it's a real press: advance/retreat by direction, then
-    //    fire a single setVolume(CENTER) so the user keeps headroom for
-    //    the next press regardless of where the volume drifted to.
+    // Algorithm: respond to direction (sign of delta) only. The volume is
+    // parked at CENTER once on mount (~7 presses headroom each direction
+    // with Android's default 15 steps). Beyond that, the user falls back
+    // to the reader's tap-zone navigator (left/right thirds) which is the
+    // primary input on e-ink anyway.
     //
-    // VolumeManager.setVolume on Android may only nudge by one step per
-    // call (adjustStreamVolume semantics). Even so, a single nudge per
-    // press is enough — lastVolumeRef tracks wherever the volume ends up
-    // and the next press's delta comes out correctly signed.
+    // We deliberately do NOT re-clamp inside the listener:
+    //  - VolumeManager.setVolume on Android only nudges by one step (it
+    //    maps to AudioManager.adjustStreamVolume), so a programmatic snap
+    //    back to centre is impossible from JS.
+    //  - Each step fires another listener event with an opposite-sign
+    //    delta. With Android's multi-fire (2-3 events per press) plus our
+    //    own echo, distinguishing "real press" from "side-effect" is
+    //    fragile. Several attempts at this caused ghost retreats and the
+    //    page bouncing 7→8→7 / 3→4→3 the user reported.
+    //
+    // Direction-only is deterministic at the cost of headroom — and
+    // headroom is what tap zones cover.
     const sub = VolumeManager.addVolumeListener((result) => {
       const next = result.volume;
       if (typeof next !== "number") return;
 
       const now = Date.now();
       if (now - lastActionAtRef.current < DEBOUNCE_MS) {
+        // Inside the debounce window — Android often fires 2-3 events per
+        // single press; track the latest position but don't act again.
         lastVolumeRef.current = next;
         return;
       }
@@ -98,11 +99,9 @@ export function useVolumePager(
       if (delta < 0 && page < count - 1) {
         doSetPage(page + 1);
         lastActionAtRef.current = now;
-        VolumeManager.setVolume(CENTER_VOLUME).catch(() => {});
       } else if (delta > 0 && page > 0) {
         doSetPage(page - 1);
         lastActionAtRef.current = now;
-        VolumeManager.setVolume(CENTER_VOLUME).catch(() => {});
       }
     });
 
