@@ -36,7 +36,7 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
   const palette = useTheme();
   const settings = useSettings();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const markdownStyles = useMemo(() => makeMarkdownStyles(palette), [palette]);
   // Status-bar safe-area is paid out of the page-area allowance (header
@@ -51,8 +51,8 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
     insets.bottom;
 
   const pages: Page[] = useMemo(
-    () => paginate(item, viewportHeight),
-    [item, viewportHeight],
+    () => paginate(item, viewportHeight, windowWidth),
+    [item, viewportHeight, windowWidth],
   );
 
   return (

@@ -15,7 +15,18 @@ const HEIGHT_LINE_CODE = 18;
 const HEIGHT_LINE_TABLE = 32;
 const HEIGHT_PADDING_BLOCK = 14;
 const HEIGHT_FENCE_OVERHEAD = 24;
-const CHARS_PER_LINE = 42;
+
+/**
+ * Approximate average glyph advance for the reader's body font (15pt
+ * proportional). Used together with the viewport width to derive a
+ * realistic chars-per-line so the height estimator doesn't drastically
+ * over-count paragraph wraps on wide displays (which produced near-empty
+ * pages on phones and especially on 1264px-wide e-readers).
+ */
+const AVG_CHAR_WIDTH_PX = 8;
+const PAGE_HORIZONTAL_PADDING = 32; // 16 each side, matches Reader.styles.pageContent
+/** Code blocks render in a monospace font that's narrower than the body font. */
+const AVG_CODE_CHAR_WIDTH_PX = 7;
 
 /**
  * Split markdown into top-level blocks (paragraphs / headings / fenced code / tables).
@@ -66,13 +77,23 @@ function splitIntoBlocks(md: string): string[] {
   return blocks;
 }
 
-function estimateHeight(block: string): number {
+function estimateHeight(block: string, viewportWidth: number): number {
   const trimmed = block.trim();
+  const usableWidth = Math.max(200, viewportWidth - PAGE_HORIZONTAL_PADDING);
+  const charsPerLine = Math.max(20, Math.floor(usableWidth / AVG_CHAR_WIDTH_PX));
+  const charsPerCodeLine = Math.max(
+    20,
+    Math.floor(usableWidth / AVG_CODE_CHAR_WIDTH_PX),
+  );
 
   // Fenced code block
   if (trimmed.startsWith("```")) {
-    const innerLines = trimmed.split("\n").length - 2; // exclude opening + closing fences
-    return HEIGHT_FENCE_OVERHEAD + innerLines * HEIGHT_LINE_CODE + HEIGHT_PADDING_BLOCK;
+    const inner = trimmed.split("\n").slice(1, -1); // exclude opening + closing fences
+    let lines = 0;
+    for (const l of inner) {
+      lines += Math.max(1, Math.ceil(l.length / charsPerCodeLine));
+    }
+    return HEIGHT_FENCE_OVERHEAD + lines * HEIGHT_LINE_CODE + HEIGHT_PADDING_BLOCK;
   }
 
   // Headings
@@ -86,12 +107,13 @@ function estimateHeight(block: string): number {
     return rows * HEIGHT_LINE_TABLE + HEIGHT_PADDING_BLOCK;
   }
 
-  // Paragraphs / lists / blockquotes — estimate wrapped lines
+  // Paragraphs / lists / blockquotes — estimate wrapped lines using the
+  // width-derived chars-per-line so the same prose paginates differently on
+  // a 1080-wide phone and a 1264-wide e-reader.
   const rawLines = trimmed.split("\n");
   let totalWrapped = 0;
   for (const line of rawLines) {
-    const wrapped = Math.max(1, Math.ceil(line.length / CHARS_PER_LINE));
-    totalWrapped += wrapped;
+    totalWrapped += Math.max(1, Math.ceil(line.length / charsPerLine));
   }
   return totalWrapped * HEIGHT_LINE_PARAGRAPH + HEIGHT_PADDING_BLOCK;
 }
@@ -102,7 +124,11 @@ function estimateHeight(block: string): number {
  * exceeds the viewport on its own gets a dedicated page marked `oversized`
  * (caller should wrap that page in a ScrollView).
  */
-export function paginate(item: Pattern, viewportHeight: number): Page[] {
+export function paginate(
+  item: Pattern,
+  viewportHeight: number,
+  viewportWidth: number,
+): Page[] {
   const blocks: string[] = [];
 
   for (const section of item.sections) {
@@ -117,7 +143,7 @@ export function paginate(item: Pattern, viewportHeight: number): Page[] {
   let used = 0;
 
   for (const block of blocks) {
-    const h = estimateHeight(block);
+    const h = estimateHeight(block, viewportWidth);
 
     if (h > viewportHeight) {
       // Block is too tall on its own — flush current, give this block its own page
