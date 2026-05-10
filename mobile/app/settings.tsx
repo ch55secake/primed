@@ -13,8 +13,8 @@ import {
   useUpdateSettings,
   type ReadingMode,
   type ThemeMode,
-} from "../../lib/settings";
-import { useTheme, type Palette } from "../../lib/theme";
+} from "../lib/settings";
+import { useTheme, type Palette } from "../lib/theme";
 
 export default function SettingsScreen() {
   const palette = useTheme();
@@ -27,10 +27,6 @@ export default function SettingsScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Settings</Text>
-      </View>
-
       <Section title="Theme" palette={palette}>
         <Segmented<ThemeMode>
           value={settings.themeMode}
@@ -152,17 +148,6 @@ function makeStyles(p: Palette) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: p.bg },
     content: { paddingBottom: 32 },
-    header: {
-      paddingHorizontal: 16,
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: p.border,
-    },
-    headerTitle: {
-      color: p.textStrong,
-      fontSize: 22,
-      fontWeight: "700",
-    },
     section: {
       paddingHorizontal: 16,
       paddingVertical: 16,

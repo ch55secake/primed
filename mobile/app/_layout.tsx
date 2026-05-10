@@ -30,13 +30,37 @@ function ThemedRoot() {
   return (
     <>
       <StatusBar style={palette.scheme === "light" ? "dark" : "light"} />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          headerStyle: { backgroundColor: palette.surface },
+          headerTintColor: palette.textStrong,
+          headerTitleStyle: { color: palette.textStrong },
+          contentStyle: { backgroundColor: palette.bg },
+        }}
+      >
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="source/[id]"
+          options={{
+            headerShown: true,
+            headerBackTitle: "Library",
+            animation: "slide_from_right",
+          }}
+        />
+        <Stack.Screen
+          name="settings"
+          options={{
+            headerShown: true,
+            title: "Settings",
+            headerBackTitle: "Library",
+            animation: "slide_from_right",
+          }}
+        />
         <Stack.Screen
           name="reader/[source]/[itemId]"
           options={{
-            headerShown: true,
-            headerBackTitle: "Back",
+            headerShown: false,
             animation: "slide_from_right",
           }}
         />

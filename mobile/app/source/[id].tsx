@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, Stack } from "expo-router";
 import { View, Text, StyleSheet } from "react-native";
 import { useMemo } from "react";
 import { ItemList } from "../../components/ItemList";
@@ -6,37 +6,41 @@ import { useSource, useManifest } from "../../lib/manifest";
 import { useTheme, type Palette } from "../../lib/theme";
 
 /**
- * Dynamic source tab — every chip in <SourceTabBar> routes here with the
- * source id as the [source] param. Looks up the SourceConfig from the
- * runtime manifest and hands it to <ItemList>.
+ * Source detail screen — drilled into from the home library. Looks up the
+ * SourceConfig from the runtime manifest and hands it to <ItemList>.
+ *
+ * The Stack header (configured in app/_layout.tsx) provides the back arrow
+ * and the source title; ItemList renders only the meta sub-line + items.
  */
-export default function SourceTab() {
+export default function SourceScreen() {
   const palette = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
 
-  const params = useLocalSearchParams<{ source: string }>();
-  const sourceId = params.source ?? "";
+  const params = useLocalSearchParams<{ id: string }>();
+  const sourceId = params.id ?? "";
 
   const source = useSource(sourceId);
   const { ready } = useManifest();
 
   if (!source) {
-    // While the manifest is still hydrating, render nothing rather than a
-    // misleading "Unknown source" — the provider seeds with bundled defaults
-    // synchronously, so this is a brief flash on cold start at most.
     if (!ready) {
       return <View style={styles.center} />;
     }
     return (
       <View style={styles.center}>
         <Text style={styles.error}>
-          Unknown source “{sourceId}”. Pull to refresh on a known tab.
+          Unknown source “{sourceId}”. Pull to refresh on the home library.
         </Text>
       </View>
     );
   }
 
-  return <ItemList source={source} />;
+  return (
+    <>
+      <Stack.Screen options={{ title: source.title }} />
+      <ItemList source={source} />
+    </>
+  );
 }
 
 function makeStyles(p: Palette) {
