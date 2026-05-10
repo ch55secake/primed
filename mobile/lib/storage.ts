@@ -9,6 +9,8 @@ const LAST_PAGE_KEY = (id: SourceKey, itemId: number) =>
   `lastPage:${id}:${itemId}`;
 const LAST_PAGE_PREFIX = (id: SourceKey) => `lastPage:${id}:`;
 const ITEM_COUNT_KEY = (id: SourceKey) => `itemCount:${id}`;
+/** Set by the home-screen refresh-all button after a successful sweep. */
+const LAST_FULL_REFRESH_KEY = "drilly:lastFullRefresh";
 
 export async function setLastRefreshed(
   id: SourceKey,
@@ -69,6 +71,21 @@ export async function getProgressCount(id: SourceKey): Promise<number> {
   const keys = await AsyncStorage.getAllKeys();
   const prefix = LAST_PAGE_PREFIX(id);
   return keys.filter((k) => k.startsWith(prefix)).length;
+}
+
+/**
+ * Wall-clock of the last successful "refresh everything" sweep from the
+ * home screen. Distinct from per-source `setLastRefreshed` so the home
+ * label can show "Updated 2h ago" even if individual sources got refreshed
+ * separately at different times.
+ */
+export async function setLastFullRefresh(ms: number): Promise<void> {
+  await AsyncStorage.setItem(LAST_FULL_REFRESH_KEY, String(ms));
+}
+
+export async function getLastFullRefresh(): Promise<number | null> {
+  const raw = await AsyncStorage.getItem(LAST_FULL_REFRESH_KEY);
+  return raw ? Number(raw) : null;
 }
 
 export function formatRelativeTime(ms: number): string {

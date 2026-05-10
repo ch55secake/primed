@@ -1,3 +1,20 @@
+// HOW TO ADD A NEW SOURCE  (no app rebuild required)
+// ====================================================================
+// 1. Drop the markdown file into web/public/<my-source>.md.
+// 2. Append an entry to web/public/manifest.json with at minimum:
+//      { id, file, title, itemLabel, itemsPlural, storagePrefix,
+//        defaultRevealedSections, sectionOrder }
+//    Optional overrides: itemHeadingLevel, sectionHeadingLevel,
+//    autoNumberItems. Mirror an existing entry as a starting point.
+// 3. Deploy to Vercel — `bun run --cwd web build` then redeploy.
+// 4. In the app, tap the home-screen ↻ refresh button (or pull-to-refresh
+//    any source). The new chip appears, the markdown loads on first tap.
+//
+// The BUNDLED map below is purely the offline-first-launch fallback for
+// the original three sources. Anything new is fetched live; the empty
+// cache simply triggers refreshSource() on first read.
+// ====================================================================
+
 // Use the legacy API — stable, matches the FileSystem.cacheDirectory pattern.
 // The new API (Paths/File/Directory) is fine but verbose for this use case.
 import * as FS from "expo-file-system/legacy";
