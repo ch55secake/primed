@@ -2,7 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { SettingsProvider } from "../lib/settings";
+import { SettingsProvider, useSettings } from "../lib/settings";
 import { ThemeProvider, useTheme } from "../lib/theme";
 import { ManifestProvider } from "../lib/manifest";
 
@@ -27,6 +27,11 @@ export default function RootLayout() {
  */
 function ThemedRoot() {
   const palette = useTheme();
+  const { eInkMode } = useSettings();
+  // E-ink panels can't render slide transitions cleanly — every animation
+  // frame leaves a ghost trail. Disable Stack screen animations entirely
+  // while e-ink mode is on; pushes/pops become single-refresh state swaps.
+  const anim: "slide_from_right" | "none" = eInkMode ? "none" : "slide_from_right";
   return (
     <>
       <StatusBar style={palette.scheme === "light" ? "dark" : "light"} />
@@ -45,7 +50,7 @@ function ThemedRoot() {
           options={{
             headerShown: true,
             headerBackTitle: "Library",
-            animation: "slide_from_right",
+            animation: anim,
           }}
         />
         <Stack.Screen
@@ -54,14 +59,14 @@ function ThemedRoot() {
             headerShown: true,
             title: "Settings",
             headerBackTitle: "Library",
-            animation: "slide_from_right",
+            animation: anim,
           }}
         />
         <Stack.Screen
           name="reader/[source]/[itemId]"
           options={{
             headerShown: false,
-            animation: "slide_from_right",
+            animation: anim,
           }}
         />
       </Stack>

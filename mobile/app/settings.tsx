@@ -49,10 +49,12 @@ export default function SettingsScreen() {
           ]}
           onChange={(readingMode) => update({ readingMode })}
           palette={palette}
+          disabled={settings.eInkMode}
         />
         <Text style={styles.hint}>
-          Page turn = swipe between auto-paginated pages. Scroll = one
-          continuous view of the whole item.
+          {settings.eInkMode
+            ? "Forced to page mode while E-ink mode is on (scroll causes ghosting on e-ink)."
+            : "Page turn = swipe between auto-paginated pages. Scroll = one continuous view of the whole item."}
         </Text>
       </Section>
 
@@ -69,6 +71,26 @@ export default function SettingsScreen() {
             <Switch
               value={settings.volumeKeyNav}
               onValueChange={(volumeKeyNav) => update({ volumeKeyNav })}
+              trackColor={{
+                false: palette.border,
+                true: palette.accent,
+              }}
+              thumbColor={palette.surface}
+            />
+          </View>
+
+          <View style={[styles.row, styles.rowSpaced]}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>E-ink mode</Text>
+              <Text style={styles.hint}>
+                Replaces page swipe with tap zones (left third = prev,
+                right third = next) and removes screen animations. Designed
+                for Boox / Kindle-style e-ink devices.
+              </Text>
+            </View>
+            <Switch
+              value={settings.eInkMode}
+              onValueChange={(eInkMode) => update({ eInkMode })}
               trackColor={{
                 false: palette.border,
                 true: palette.accent,
@@ -112,21 +134,25 @@ function Segmented<T extends string>({
   options,
   onChange,
   palette,
+  disabled = false,
 }: {
   value: T;
   options: SegmentedOption<T>[];
   onChange: (next: T) => void;
   palette: Palette;
+  disabled?: boolean;
 }) {
   const styles = makeStyles(palette);
   return (
-    <View style={styles.segmented}>
+    <View style={[styles.segmented, disabled && styles.segmentedDisabled]}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (
           <Pressable
             key={opt.value}
-            onPress={() => onChange(opt.value)}
+            onPress={() => {
+              if (!disabled) onChange(opt.value);
+            }}
             style={[styles.segment, active && styles.segmentActive]}
           >
             <Text
@@ -168,6 +194,9 @@ function makeStyles(p: Palette) {
       borderRadius: 8,
       overflow: "hidden",
     },
+    segmentedDisabled: {
+      opacity: 0.5,
+    },
     segment: {
       flex: 1,
       paddingVertical: 10,
@@ -190,6 +219,12 @@ function makeStyles(p: Palette) {
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
+    },
+    rowSpaced: {
+      marginTop: 16,
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: p.border,
     },
     rowText: { flex: 1 },
     rowLabel: { color: p.textStrong, fontSize: 15 },
