@@ -17,10 +17,12 @@ import { useSettings } from "../lib/settings";
 const CENTER_VOLUME = 0.5;
 /** A real key press shifts volume by ~1/15 (≈0.067). Anything smaller is rounding noise. */
 const PRESS_THRESHOLD = 0.02;
-/** Echo tolerance — Android quantises setVolume(0.5) to the nearest hardware step. */
-const ECHO_TOLERANCE = 0.06;
-/** Safety net: if the echo never lands, drop the suppress flag so the next press isn't swallowed. */
-const ECHO_TIMEOUT_MS = 300;
+/**
+ * Debounce — Android fires 2-3 volume-change events per hardware press
+ * (real change + an intermediate step). One page-change per DEBOUNCE_MS
+ * absorbs the multi-fire reliably.
+ */
+const DEBOUNCE_MS = 200;
 
 export function useVolumePager(
   setPage: (idx: number) => void,
@@ -30,8 +32,8 @@ export function useVolumePager(
 ) {
   const settings = useSettings();
   const lastVolumeRef = useRef<number>(CENTER_VOLUME);
-  /** True between issuing setVolume(CENTER) and seeing its volume-change echo. */
-  const reclampingRef = useRef<boolean>(false);
+  /** Wall-clock of the last advance/retreat — used to debounce multi-fire events. */
+  const lastActionAtRef = useRef<number>(0);
   // Latest page + setter in refs so the listener callback isn't stale across renders.
   const stateRef = useRef({ page: currentPage, count: pageCount, setPage });
   stateRef.current = { page: currentPage, count: pageCount, setPage };
@@ -58,22 +60,32 @@ export function useVolumePager(
       }
     })();
 
-    // We respond to direction only. After every detected press we re-clamp
-    // back to CENTER so the user never runs out of headroom (Android only
-    // emits change events when the volume *actually* changes, so without
-    // re-clamping the listener stops firing once the bar hits 0 or 1).
-    // The setVolume call itself triggers a listener event with the new
-    // volume — we swallow that one via the reclampingRef tombstone.
+    // Algorithm: the listener fires multiple times per hardware press
+    // (real change + occasional intermediate step + our re-clamp echo).
+    // Trying to identify the echo individually is fragile, so we just
+    // debounce: one page-change per DEBOUNCE_MS regardless of how many
+    // events arrive. After each advance we re-clamp the system volume to
+    // CENTER so the user never runs out of headroom on long items.
+    // Algorithm: respond to direction (sign of volume delta) only. We park
+    // the volume at CENTER once on mount, giving ~7 presses of headroom
+    // each direction (Android's default 15 steps). After that the user
+    // hits the limit and presses go silent — they fall back to tap zones
+    // (left/right thirds of the reader) for the rest of the item.
+    //
+    // We deliberately do NOT re-clamp inside the listener:
+    //  - VolumeManager.setVolume() on Android maps to AudioManager.adjust-
+    //    StreamVolume(ADJUST_LOWER/RAISE), which only nudges by one step,
+    //    so a programmatic "snap to centre" is impossible from JS land.
+    //  - Each step fires another volume-change event. With multi-fire
+    //    already in play (2-3 events per real press), trying to detect
+    //    and suppress the re-clamp echoes is brittle and produces ghost
+    //    retreats. Direction-only is deterministic.
     const sub = VolumeManager.addVolumeListener((result) => {
       const next = result.volume;
       if (typeof next !== "number") return;
 
-      // Echo from our own setVolume(CENTER): swallow and reset the tombstone.
-      if (
-        reclampingRef.current &&
-        Math.abs(next - CENTER_VOLUME) < ECHO_TOLERANCE
-      ) {
-        reclampingRef.current = false;
+      const now = Date.now();
+      if (now - lastActionAtRef.current < DEBOUNCE_MS) {
         lastVolumeRef.current = next;
         return;
       }
@@ -85,21 +97,11 @@ export function useVolumePager(
       const { page, count, setPage: doSetPage } = stateRef.current;
       if (delta < 0 && page < count - 1) {
         doSetPage(page + 1);
+        lastActionAtRef.current = now;
       } else if (delta > 0 && page > 0) {
         doSetPage(page - 1);
+        lastActionAtRef.current = now;
       }
-
-      // Re-clamp to keep headroom indefinitely. Set the tombstone first so
-      // the resulting echo event is recognised and ignored above.
-      reclampingRef.current = true;
-      setTimeout(() => {
-        // If the echo never arrived (rare — usually means setVolume failed
-        // silently), clear the flag so a real future press isn't swallowed.
-        reclampingRef.current = false;
-      }, ECHO_TIMEOUT_MS);
-      VolumeManager.setVolume(CENTER_VOLUME).catch(() => {
-        reclampingRef.current = false;
-      });
     });
 
     return () => {
