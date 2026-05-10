@@ -80,10 +80,11 @@ export default function SettingsScreen() {
         <Section title="Hardware" palette={palette}>
           <View style={styles.row}>
             <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Volume keys turn pages</Text>
+              <Text style={styles.rowLabel}>Hardware keys turn pages</Text>
               <Text style={styles.hint}>
-                Vol-Down = next page, Vol-Up = previous. System volume HUD
-                stays hidden while the reader is open. Page mode only.
+                Vol-Down / Page-Down = next, Vol-Up / Page-Up = previous.
+                Captured at the OS level so volume doesn't change. Works
+                with the Boox Go 7's built-in volume → page-turn mapping.
               </Text>
             </View>
             <Switch
