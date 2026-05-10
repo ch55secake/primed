@@ -10,6 +10,7 @@ import {
 import Markdown, { type MarkdownProps } from "react-native-markdown-display";
 import type { Page } from "../lib/pagination";
 import type { Palette } from "../lib/theme";
+import { markdownRules } from "./CodeBlock";
 
 interface Props {
   pages: Page[];
@@ -54,11 +55,13 @@ export function TapZonePager({
           style={styles.body}
           contentContainerStyle={styles.bodyInner}
         >
-          <Markdown style={markdownStyles}>{page.markdown}</Markdown>
+          <Markdown style={markdownStyles} rules={markdownRules}>{page.markdown}</Markdown>
         </ScrollView>
       ) : (
         <View style={styles.body}>
-          <Markdown style={markdownStyles}>{page?.markdown ?? ""}</Markdown>
+          <Markdown style={markdownStyles} rules={markdownRules}>
+            {page?.markdown ?? ""}
+          </Markdown>
         </View>
       )}
     </Pressable>
