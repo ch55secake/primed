@@ -106,7 +106,17 @@ function estimateHeight(
 
   // Fenced code block
   if (trimmed.startsWith("```")) {
+    const opener = trimmed.split("\n")[0].slice(3).trim().toLowerCase();
     const inner = trimmed.split("\n").slice(1, -1); // exclude opening + closing fences
+
+    // Mermaid renders to an SVG whose size has no relation to the source
+    // length. Reserve a conservative chunk so the diagram either gets its
+    // own page (oversized branch in `paginate`) or sits comfortably with
+    // a small amount of surrounding content.
+    if (opener === "mermaid") {
+      return 360 * fontScale + HEIGHT_PADDING_BLOCK;
+    }
+
     let lines = 0;
     for (const l of inner) {
       lines += Math.max(1, Math.ceil(l.length / charsPerCodeLine));

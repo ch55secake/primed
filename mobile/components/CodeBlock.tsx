@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { useTheme, type Palette } from "../lib/theme";
 import { useSettings } from "../lib/settings";
 import { highlight } from "../lib/syntaxHighlight";
+import MermaidView from "./MermaidView";
 
 interface Props {
   /** Fence info string, e.g. "python", "rust", "java", "" if absent. */
@@ -52,6 +53,7 @@ const LANG_LABEL: Record<string, string> = {
   sql: "SQL",
   html: "HTML",
   css: "CSS",
+  mermaid: "Diagram",
 };
 
 export function CodeBlock({ language, code }: Props) {
@@ -65,20 +67,31 @@ export function CodeBlock({ language, code }: Props) {
   const normalised = (language || "").toLowerCase().trim();
   const canonical = LANG_ALIAS[normalised] ?? normalised;
   const label = canonical ? (LANG_LABEL[canonical] ?? canonical) : "Code";
+  const isMermaid = canonical === "mermaid";
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.tag}>
         <Text style={styles.tagText}>{label}</Text>
       </View>
-      <View style={styles.body}>
-        {highlight(code, canonical, palette.scheme, {
-          color: palette.codeFg,
-          fontFamily: "Courier",
-          fontSize: 12 * fontScale,
-          lineHeight: 18 * fontScale,
-        })}
-      </View>
+      {isMermaid ? (
+        // Mermaid blocks render inside a WebView with inline HTML that
+        // loads mermaid from a CDN, then auto-sizes via postMessage.
+        <MermaidView
+          source={code}
+          scheme={palette.scheme}
+          palette={palette}
+        />
+      ) : (
+        <View style={styles.body}>
+          {highlight(code, canonical, palette.scheme, {
+            color: palette.codeFg,
+            fontFamily: "Courier",
+            fontSize: 12 * fontScale,
+            lineHeight: 18 * fontScale,
+          })}
+        </View>
+      )}
     </View>
   );
 }
