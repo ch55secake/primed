@@ -22,6 +22,12 @@ if [ -d "$ROOT/mobile" ]; then
   cp "$WEB/patterns.md"               "$MOBILE/patterns.md"
   cp "$WEB/neetcode-150.md"           "$MOBILE/neetcode-150.md"
   cp "$WEB/java-interview-primer.md"  "$MOBILE/java-interview-primer.md"
+  # Bundled-fallback manifest — kept in lockstep with web/public so a fresh
+  # install with no network still has the same source list that was current
+  # at build time.
+  if [ -f "$WEB/manifest.json" ]; then
+    cp "$WEB/manifest.json"           "$MOBILE/manifest.json"
+  fi
   echo "Mirrored to $MOBILE/"
 
   # Mirror parser source — mobile inlines it (instead of using the workspace dep)

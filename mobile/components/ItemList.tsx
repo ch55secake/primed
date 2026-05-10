@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   ScrollView,
   RefreshControl,
@@ -8,43 +8,42 @@ import {
   StyleSheet,
 } from "react-native";
 import { router } from "expo-router";
-import {
-  parseContent,
-  SOURCES,
-  type SourceId,
-  type Pattern,
-} from "../lib/parser";
+import { parseContent, type SourceConfig, type Pattern } from "../lib/parser";
 import { loadSource, refreshSource } from "../lib/content";
+import { useManifest } from "../lib/manifest";
 import {
   setLastRefreshed,
   getLastRefreshed,
   formatRelativeTime,
 } from "../lib/storage";
+import { useTheme, type Palette } from "../lib/theme";
 
 interface Props {
-  sourceId: SourceId;
+  source: SourceConfig;
 }
 
-export function ItemList({ sourceId }: Props) {
+export function ItemList({ source }: Props) {
+  const palette = useTheme();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const { refresh: refreshManifest } = useManifest();
+
   const [items, setItems] = useState<Pattern[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshLabel, setLastRefreshLabel] = useState<string | null>(null);
 
-  const cfg = SOURCES[sourceId];
-
   const updateRefreshLabel = useCallback(async () => {
-    const ts = await getLastRefreshed(sourceId);
+    const ts = await getLastRefreshed(source.id);
     setLastRefreshLabel(ts ? formatRelativeTime(ts) : null);
-  }, [sourceId]);
+  }, [source.id]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const md = await loadSource(sourceId);
+        const md = await loadSource(source);
         if (cancelled) return;
-        setItems(parseContent(md, cfg));
+        setItems(parseContent(md, source));
         await updateRefreshLabel();
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -53,22 +52,25 @@ export function ItemList({ sourceId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [sourceId, cfg, updateRefreshLabel]);
+  }, [source, updateRefreshLabel]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
     try {
-      const md = await refreshSource(sourceId);
-      setItems(parseContent(md, cfg));
-      await setLastRefreshed(sourceId, Date.now());
+      // Refresh the manifest first so a new section/source published since
+      // last open shows up in the tab strip on this same pull.
+      await refreshManifest().catch(() => {});
+      const md = await refreshSource(source);
+      setItems(parseContent(md, source));
+      await setLastRefreshed(source.id, Date.now());
       await updateRefreshLabel();
     } catch (e) {
       setError(`Couldn't reach server — using cached version. ${e}`);
     } finally {
       setRefreshing(false);
     }
-  }, [sourceId, cfg, updateRefreshLabel]);
+  }, [source, updateRefreshLabel, refreshManifest]);
 
   return (
     <ScrollView
@@ -78,14 +80,14 @@ export function ItemList({ sourceId }: Props) {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor="#7c9cff"
+          tintColor={palette.accent}
         />
       }
     >
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{cfg.title}</Text>
+        <Text style={styles.headerTitle}>{source.title}</Text>
         <Text style={styles.headerSub}>
-          {items.length} {cfg.itemsPlural}
+          {items.length} {source.itemsPlural}
           {lastRefreshLabel ? ` · updated ${lastRefreshLabel}` : ""}
         </Text>
       </View>
@@ -100,7 +102,7 @@ export function ItemList({ sourceId }: Props) {
         <Pressable
           key={item.id}
           style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-          onPress={() => router.push(`/reader/${sourceId}/${item.id}`)}
+          onPress={() => router.push(`/reader/${source.id}/${item.id}`)}
         >
           <Text style={styles.itemNumber}>{item.id}</Text>
           <Text style={styles.itemTitle} numberOfLines={2}>
@@ -117,59 +119,61 @@ export function ItemList({ sourceId }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0d12" },
-  content: { paddingBottom: 24 },
-  header: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#232938",
-  },
-  headerTitle: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  headerSub: {
-    color: "#8a93a6",
-    fontSize: 13,
-    marginTop: 4,
-  },
-  errorBanner: {
-    backgroundColor: "#3a2625",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#7a3b3a",
-  },
-  errorText: { color: "#fbbf24", fontSize: 13 },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#161a23",
-  },
-  itemPressed: { backgroundColor: "#161a23" },
-  itemNumber: {
-    color: "#8a93a6",
-    fontSize: 14,
-    fontVariant: ["tabular-nums"],
-    width: 40,
-    textAlign: "right",
-  },
-  itemTitle: {
-    flex: 1,
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "500",
-  },
-  itemMeta: {
-    color: "#8a93a6",
-    fontSize: 12,
-  },
-  footer: { height: 24 },
-});
+function makeStyles(p: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: p.bg },
+    content: { paddingBottom: 24 },
+    header: {
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: p.border,
+    },
+    headerTitle: {
+      color: p.textStrong,
+      fontSize: 22,
+      fontWeight: "700",
+    },
+    headerSub: {
+      color: p.textMuted,
+      fontSize: 13,
+      marginTop: 4,
+    },
+    errorBanner: {
+      backgroundColor: p.errorBg,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: p.errorBorder,
+    },
+    errorText: { color: p.errorFg, fontSize: 13 },
+    item: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: p.surfacePressed,
+    },
+    itemPressed: { backgroundColor: p.surfacePressed },
+    itemNumber: {
+      color: p.textMuted,
+      fontSize: 14,
+      fontVariant: ["tabular-nums"],
+      width: 40,
+      textAlign: "right",
+    },
+    itemTitle: {
+      flex: 1,
+      color: p.textStrong,
+      fontSize: 15,
+      fontWeight: "500",
+    },
+    itemMeta: {
+      color: p.textMuted,
+      fontSize: 12,
+    },
+    footer: { height: 24 },
+  });
+}
