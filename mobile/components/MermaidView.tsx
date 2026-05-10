@@ -39,7 +39,7 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4, user-scalable=yes" />
   <style>
     html, body {
       margin: 0;
@@ -48,13 +48,20 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
       color: ${palette.text};
       font-family: system-ui, -apple-system, sans-serif;
     }
+    /* The wrapper is horizontally scrollable when the diagram is wider
+       than the viewport. Vertical scroll is owned by the surrounding
+       Reader page so the WebView itself reports its full natural height. */
     #wrap {
       padding: 12px;
-      display: flex;
-      justify-content: center;
+      overflow-x: auto;
+      overflow-y: hidden;
       box-sizing: border-box;
+      -webkit-overflow-scrolling: touch;
     }
-    #wrap svg { max-width: 100%; height: auto; }
+    /* Render the SVG at its native intrinsic size — no horizontal scaling.
+       Mermaid emits width/height in pixels via its <svg> attributes;
+       we strip max-width so wide diagrams scroll instead of squashing. */
+    #wrap svg { max-width: none !important; height: auto; }
     .err {
       color: ${scheme === "dark" ? "#f8b3b3" : "#b00020"};
       font-family: Courier, monospace;
@@ -69,8 +76,19 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
   <script src="${cdn}"></script>
   <script>
     (function () {
-      function report() {
-        var h = document.documentElement.scrollHeight;
+      function reportHeight() {
+        // Use the rendered SVG's bounding box rather than documentElement
+        // .scrollHeight, which over-reports because of the wrap padding
+        // and intrinsic body height.
+        var svg = document.querySelector("#wrap svg");
+        var pad = 24; // 12px top + 12px bottom in #wrap
+        var h;
+        if (svg) {
+          var rect = svg.getBoundingClientRect();
+          h = Math.ceil(rect.height) + pad;
+        } else {
+          h = document.documentElement.scrollHeight;
+        }
         if (window.ReactNativeWebView) {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: "height", value: h }));
         }
@@ -78,21 +96,26 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
       function showError(msg) {
         var w = document.getElementById("wrap");
         w.innerHTML = '<pre class="err">Mermaid render failed:\\n' + String(msg) + '</pre>';
-        report();
+        setTimeout(reportHeight, 50);
       }
       try {
         mermaid.initialize({
           startOnLoad: false,
           theme: ${JSON.stringify(theme)},
           securityLevel: "loose",
-          flowchart: { htmlLabels: true },
+          flowchart: { htmlLabels: true, useMaxWidth: false },
+          sequence: { useMaxWidth: false },
         });
         var el = document.getElementById("diagram");
         var src = el.textContent;
         mermaid.render("m" + Math.random().toString(36).slice(2, 10), src)
           .then(function (out) {
             el.innerHTML = out.svg;
-            requestAnimationFrame(report);
+            // Two delayed reports: one quick (immediate after layout) and
+            // one a beat later to catch the final SVG bbox once mermaid's
+            // font measurement settles.
+            setTimeout(reportHeight, 30);
+            setTimeout(reportHeight, 200);
           })
           .catch(function (e) { showError(e && e.message || e); });
       } catch (e) {
@@ -115,7 +138,12 @@ export default function MermaidView({ source, scheme, palette }: Props) {
         originWhitelist={["*"]}
         source={{ html, baseUrl: "https://cdn.jsdelivr.net/" }}
         style={styles.web}
-        scrollEnabled={false}
+        // Horizontal-scroll is owned by the WebView so wide flowcharts
+        // stay readable instead of being squashed to fit. Vertical scroll
+        // is owned by the surrounding Reader page so this WebView reports
+        // its full natural height back via postMessage.
+        scrollEnabled
+        nestedScrollEnabled
         javaScriptEnabled
         domStorageEnabled
         // Some hosts return strict MIME types on the CDN — accept all.
