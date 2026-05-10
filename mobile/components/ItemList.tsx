@@ -14,6 +14,7 @@ import { useManifest } from "../lib/manifest";
 import {
   setLastRefreshed,
   getLastRefreshed,
+  setItemCount,
   formatRelativeTime,
 } from "../lib/storage";
 import { useTheme, type Palette } from "../lib/theme";
@@ -43,7 +44,11 @@ export function ItemList({ source }: Props) {
       try {
         const md = await loadSource(source);
         if (cancelled) return;
-        setItems(parseContent(md, source));
+        const parsed = parseContent(md, source);
+        setItems(parsed);
+        // Cache the count so the home library can render the meta line
+        // without re-parsing markdown for every source card.
+        await setItemCount(source.id, parsed.length);
         await updateRefreshLabel();
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -58,11 +63,13 @@ export function ItemList({ source }: Props) {
     setRefreshing(true);
     setError(null);
     try {
-      // Refresh the manifest first so a new section/source published since
-      // last open shows up in the tab strip on this same pull.
+      // Refresh the manifest first so a new source published since the
+      // last open shows up in the home library on this same pull.
       await refreshManifest().catch(() => {});
       const md = await refreshSource(source);
-      setItems(parseContent(md, source));
+      const parsed = parseContent(md, source);
+      setItems(parsed);
+      await setItemCount(source.id, parsed.length);
       await setLastRefreshed(source.id, Date.now());
       await updateRefreshLabel();
     } catch (e) {
@@ -84,9 +91,8 @@ export function ItemList({ source }: Props) {
         />
       }
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{source.title}</Text>
-        <Text style={styles.headerSub}>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaText}>
           {items.length} {source.itemsPlural}
           {lastRefreshLabel ? ` · updated ${lastRefreshLabel}` : ""}
         </Text>
@@ -123,21 +129,14 @@ function makeStyles(p: Palette) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: p.bg },
     content: { paddingBottom: 24 },
-    header: {
+    metaRow: {
       paddingHorizontal: 16,
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: p.border,
+      paddingTop: 12,
+      paddingBottom: 8,
     },
-    headerTitle: {
-      color: p.textStrong,
-      fontSize: 22,
-      fontWeight: "700",
-    },
-    headerSub: {
+    metaText: {
       color: p.textMuted,
-      fontSize: 13,
-      marginTop: 4,
+      fontSize: 12,
     },
     errorBanner: {
       backgroundColor: p.errorBg,
