@@ -20,6 +20,7 @@ import { useTheme, type Palette } from "../lib/theme";
 import { useVolumePager } from "./VolumePager";
 import { TapZonePager } from "./TapZonePager";
 import { markdownRules } from "./CodeBlock";
+import { CopyButton } from "./CopyButton";
 
 const HEADER_HEIGHT = 56;
 const PAGE_INDICATOR_HEIGHT = 36;
@@ -79,6 +80,7 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
             {item.title}
           </Text>
         </View>
+        <CopyButton item={item} source={source} />
       </View>
 
       {/* E-ink mode forces page reading; user's saved scroll preference is preserved. */}

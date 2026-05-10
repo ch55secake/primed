@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useManifest } from "../lib/manifest";
 import { useTheme, type Palette } from "../lib/theme";
 import { SourceCard } from "./SourceCard";
+import { RefreshAllButton } from "./RefreshAllButton";
 
 /**
  * Home screen — vertical list of source cards. Replaces the bottom chip
@@ -53,19 +54,22 @@ export function SourceLibrary() {
       }
     >
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.brand}>DRILLY</Text>
           <Text style={styles.brandSub}>
             {sources.length} {sources.length === 1 ? "source" : "sources"}
           </Text>
         </View>
-        <Pressable
-          onPress={() => router.push("/settings")}
-          style={styles.cog}
-          accessibilityLabel="Settings"
-        >
-          <Text style={styles.cogText}>⚙</Text>
-        </Pressable>
+        <View style={styles.headerRight}>
+          <RefreshAllButton />
+          <Pressable
+            onPress={() => router.push("/settings")}
+            style={styles.cog}
+            accessibilityLabel="Settings"
+          >
+            <Text style={styles.cogText}>⚙</Text>
+          </Pressable>
+        </View>
       </View>
 
       {sources.map((s) => (
@@ -93,6 +97,12 @@ function makeStyles(p: Palette) {
       paddingVertical: 16,
       borderBottomWidth: 1,
       borderBottomColor: p.border,
+    },
+    headerLeft: { flex: 1 },
+    headerRight: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
     },
     brand: {
       color: p.textStrong,
