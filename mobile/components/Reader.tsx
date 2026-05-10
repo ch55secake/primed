@@ -38,8 +38,12 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
   const settings = useSettings();
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const fontScale = settings.fontScale;
   const styles = useMemo(() => makeStyles(palette), [palette]);
-  const markdownStyles = useMemo(() => makeMarkdownStyles(palette), [palette]);
+  const markdownStyles = useMemo(
+    () => makeMarkdownStyles(palette, fontScale),
+    [palette, fontScale],
+  );
   // Status-bar safe-area is paid out of the page-area allowance (header
   // grows by insets.top, so subtract it from the available viewport too)
   // along with the bottom navigation gesture inset.
@@ -52,8 +56,8 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
     insets.bottom;
 
   const pages: Page[] = useMemo(
-    () => paginate(item, viewportHeight, windowWidth),
-    [item, viewportHeight, windowWidth],
+    () => paginate(item, viewportHeight, windowWidth, fontScale),
+    [item, viewportHeight, windowWidth, fontScale],
   );
 
   return (
@@ -349,33 +353,37 @@ function makeStyles(p: Palette) {
   });
 }
 
-function makeMarkdownStyles(p: Palette) {
+function makeMarkdownStyles(p: Palette, scale: number) {
+  // Centralised scaling — every text-bearing rule multiplies its sizes by
+  // the user's chosen fontScale. Padding/margin values that are about
+  // visual rhythm (not type) stay constant.
+  const fs = (n: number) => n * scale;
   return {
-    body: { color: p.text, fontSize: 15, lineHeight: 22 },
+    body: { color: p.text, fontSize: fs(15), lineHeight: fs(22) },
     heading1: {
       color: p.textStrong,
-      fontSize: 22,
+      fontSize: fs(22),
       fontWeight: "700" as const,
       marginTop: 12,
       marginBottom: 8,
     },
     heading2: {
       color: p.textStrong,
-      fontSize: 19,
+      fontSize: fs(19),
       fontWeight: "700" as const,
       marginTop: 12,
       marginBottom: 6,
     },
     heading3: {
       color: p.textStrong,
-      fontSize: 16,
+      fontSize: fs(16),
       fontWeight: "600" as const,
       marginTop: 10,
       marginBottom: 4,
     },
     heading4: {
       color: p.textStrong,
-      fontSize: 15,
+      fontSize: fs(15),
       fontWeight: "600" as const,
       marginTop: 8,
       marginBottom: 2,
@@ -394,7 +402,7 @@ function makeMarkdownStyles(p: Palette) {
       backgroundColor: p.codeBg,
       color: p.accent,
       fontFamily: "Courier",
-      fontSize: 13,
+      fontSize: fs(13),
       paddingHorizontal: 4,
       paddingVertical: 1,
       borderRadius: 3,
@@ -403,7 +411,7 @@ function makeMarkdownStyles(p: Palette) {
       backgroundColor: p.codeBg,
       color: p.codeFg,
       fontFamily: "Courier",
-      fontSize: 12,
+      fontSize: fs(12),
       padding: 10,
       borderRadius: 6,
       marginVertical: 6,
@@ -412,7 +420,7 @@ function makeMarkdownStyles(p: Palette) {
       backgroundColor: p.codeBg,
       color: p.codeFg,
       fontFamily: "Courier",
-      fontSize: 12,
+      fontSize: fs(12),
       padding: 10,
       borderRadius: 6,
       marginVertical: 6,

@@ -77,14 +77,32 @@ function splitIntoBlocks(md: string): string[] {
   return blocks;
 }
 
-function estimateHeight(block: string, viewportWidth: number): number {
+function estimateHeight(
+  block: string,
+  viewportWidth: number,
+  fontScale: number,
+): number {
   const trimmed = block.trim();
   const usableWidth = Math.max(200, viewportWidth - PAGE_HORIZONTAL_PADDING);
-  const charsPerLine = Math.max(20, Math.floor(usableWidth / AVG_CHAR_WIDTH_PX));
+  // At larger fontScale, individual glyphs get wider → fewer chars fit per
+  // line → more wrapped lines → taller blocks.
+  const charsPerLine = Math.max(
+    20,
+    Math.floor(usableWidth / (AVG_CHAR_WIDTH_PX * fontScale)),
+  );
   const charsPerCodeLine = Math.max(
     20,
-    Math.floor(usableWidth / AVG_CODE_CHAR_WIDTH_PX),
+    Math.floor(usableWidth / (AVG_CODE_CHAR_WIDTH_PX * fontScale)),
   );
+
+  // Per-line and per-block heights also scale with font.
+  const lineParagraph = HEIGHT_LINE_PARAGRAPH * fontScale;
+  const lineCode = HEIGHT_LINE_CODE * fontScale;
+  const lineTable = HEIGHT_LINE_TABLE * fontScale;
+  const headingH2 = HEIGHT_HEADING_H2 * fontScale;
+  const headingH3 = HEIGHT_HEADING_H3 * fontScale;
+  const headingH4 = HEIGHT_HEADING_H4 * fontScale;
+  const fenceOverhead = HEIGHT_FENCE_OVERHEAD * fontScale;
 
   // Fenced code block
   if (trimmed.startsWith("```")) {
@@ -93,29 +111,30 @@ function estimateHeight(block: string, viewportWidth: number): number {
     for (const l of inner) {
       lines += Math.max(1, Math.ceil(l.length / charsPerCodeLine));
     }
-    return HEIGHT_FENCE_OVERHEAD + lines * HEIGHT_LINE_CODE + HEIGHT_PADDING_BLOCK;
+    return fenceOverhead + lines * lineCode + HEIGHT_PADDING_BLOCK;
   }
 
   // Headings
-  if (trimmed.startsWith("## ")) return HEIGHT_HEADING_H2 + HEIGHT_PADDING_BLOCK;
-  if (trimmed.startsWith("### ")) return HEIGHT_HEADING_H3 + HEIGHT_PADDING_BLOCK;
-  if (trimmed.startsWith("#### ")) return HEIGHT_HEADING_H4 + HEIGHT_PADDING_BLOCK;
+  if (trimmed.startsWith("## ")) return headingH2 + HEIGHT_PADDING_BLOCK;
+  if (trimmed.startsWith("### ")) return headingH3 + HEIGHT_PADDING_BLOCK;
+  if (trimmed.startsWith("#### ")) return headingH4 + HEIGHT_PADDING_BLOCK;
 
   // Tables — count rows
   if (trimmed.includes("|") && trimmed.split("\n").every((l) => l.includes("|"))) {
     const rows = trimmed.split("\n").length;
-    return rows * HEIGHT_LINE_TABLE + HEIGHT_PADDING_BLOCK;
+    return rows * lineTable + HEIGHT_PADDING_BLOCK;
   }
 
   // Paragraphs / lists / blockquotes — estimate wrapped lines using the
-  // width-derived chars-per-line so the same prose paginates differently on
-  // a 1080-wide phone and a 1264-wide e-reader.
+  // width- and scale-derived chars-per-line so the same prose paginates
+  // differently on a 1080-wide phone vs a 1264-wide e-reader, and at
+  // different text-size settings.
   const rawLines = trimmed.split("\n");
   let totalWrapped = 0;
   for (const line of rawLines) {
     totalWrapped += Math.max(1, Math.ceil(line.length / charsPerLine));
   }
-  return totalWrapped * HEIGHT_LINE_PARAGRAPH + HEIGHT_PADDING_BLOCK;
+  return totalWrapped * lineParagraph + HEIGHT_PADDING_BLOCK;
 }
 
 /**
@@ -128,6 +147,7 @@ export function paginate(
   item: Pattern,
   viewportHeight: number,
   viewportWidth: number,
+  fontScale: number,
 ): Page[] {
   const blocks: string[] = [];
 
@@ -143,7 +163,7 @@ export function paginate(
   let used = 0;
 
   for (const block of blocks) {
-    const h = estimateHeight(block, viewportWidth);
+    const h = estimateHeight(block, viewportWidth, fontScale);
 
     if (h > viewportHeight) {
       // Block is too tall on its own — flush current, give this block its own page

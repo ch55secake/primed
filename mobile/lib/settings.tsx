@@ -26,6 +26,14 @@ export interface Settings {
    * Auto-defaults to true on Boox / Onyx hardware; user override always wins.
    */
   eInkMode: boolean;
+  /**
+   * Multiplier applied to every font size and line-height in the reader,
+   * including code blocks and pagination's char-per-line estimate. Stored
+   * as a number for forward-compat with a future continuous slider; the
+   * Settings UI today exposes four discrete steps:
+   *   0.85 (S) | 1.0 (M) | 1.15 (L) | 1.3 (XL).
+   */
+  fontScale: number;
 }
 
 /** Probe Android's manufacturer string for known e-ink vendors. */
@@ -40,6 +48,7 @@ const DEFAULTS: Settings = {
   readingMode: "page",
   volumeKeyNav: true,
   eInkMode: detectEInkDefault(),
+  fontScale: 1.0,
 };
 
 const STORAGE_KEY = "drilly:settings";
