@@ -19,6 +19,7 @@ import { useSettings } from "../lib/settings";
 import { useTheme, type Palette } from "../lib/theme";
 import { useVolumePager } from "./VolumePager";
 import { TapZonePager } from "./TapZonePager";
+import { markdownRules } from "./CodeBlock";
 
 const HEADER_HEIGHT = 56;
 const PAGE_INDICATOR_HEIGHT = 36;
@@ -197,11 +198,11 @@ function PagedBody({
                   style={styles.pageContent}
                   contentContainerStyle={styles.pageContentInner}
                 >
-                  <Markdown style={markdownStyles}>{page.markdown}</Markdown>
+                  <Markdown style={markdownStyles} rules={markdownRules}>{page.markdown}</Markdown>
                 </ScrollView>
               ) : (
                 <View style={styles.pageContent}>
-                  <Markdown style={markdownStyles}>{page.markdown}</Markdown>
+                  <Markdown style={markdownStyles} rules={markdownRules}>{page.markdown}</Markdown>
                 </View>
               )}
             </View>
@@ -265,7 +266,7 @@ function ScrollBody({
         style={styles.pager}
         contentContainerStyle={styles.scrollInner}
       >
-        <Markdown style={markdownStyles}>{fullMarkdown}</Markdown>
+        <Markdown style={markdownStyles} rules={markdownRules}>{fullMarkdown}</Markdown>
       </ScrollView>
       <View
         style={[
