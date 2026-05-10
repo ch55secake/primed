@@ -11,6 +11,7 @@ import PagerView from "react-native-pager-view";
 import * as Haptics from "expo-haptics";
 import Markdown from "react-native-markdown-display";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Pattern, SourceConfig } from "../lib/parser";
 import { paginate, type Page } from "../lib/pagination";
 import { setLastPage, getLastPage } from "../lib/storage";
@@ -33,11 +34,20 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
   const router = useRouter();
   const palette = useTheme();
   const settings = useSettings();
+  const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const markdownStyles = useMemo(() => makeMarkdownStyles(palette), [palette]);
+  // Status-bar safe-area is paid out of the page-area allowance (header
+  // grows by insets.top, so subtract it from the available viewport too)
+  // along with the bottom navigation gesture inset.
   const viewportHeight =
-    windowHeight - HEADER_HEIGHT - PAGE_INDICATOR_HEIGHT - PAGE_PADDING;
+    windowHeight -
+    HEADER_HEIGHT -
+    PAGE_INDICATOR_HEIGHT -
+    PAGE_PADDING -
+    insets.top -
+    insets.bottom;
 
   const pages: Page[] = useMemo(
     () => paginate(item, viewportHeight),
@@ -46,7 +56,12 @@ export function Reader({ source, item, onNeighbourItem }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { paddingTop: insets.top, height: HEADER_HEIGHT + insets.top },
+        ]}
+      >
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backArrow}>‹</Text>
         </Pressable>
@@ -101,6 +116,7 @@ function PagedBody({
   onNeighbourItem,
 }: PagedProps) {
   const styles = useMemo(() => makeStyles(palette), [palette]);
+  const insets = useSafeAreaInsets();
   const [currentPage, setCurrentPage] = useState(0);
   const pagerRef = useRef<PagerView>(null);
   const initialPageLoaded = useRef(false);
@@ -163,7 +179,15 @@ function PagedBody({
         ))}
       </PagerView>
 
-      <View style={styles.indicator}>
+      <View
+        style={[
+          styles.indicator,
+          {
+            paddingBottom: insets.bottom,
+            height: PAGE_INDICATOR_HEIGHT + insets.bottom,
+          },
+        ]}
+      >
         <Pressable
           onPress={() => onNeighbourItem(-1)}
           style={styles.navArrow}
@@ -200,6 +224,7 @@ function ScrollBody({
   onNeighbourItem,
 }: ScrollProps) {
   const styles = useMemo(() => makeStyles(palette), [palette]);
+  const insets = useSafeAreaInsets();
   const fullMarkdown = useMemo(
     () => pages.map((p) => p.markdown).join("\n\n"),
     [pages],
@@ -212,7 +237,15 @@ function ScrollBody({
       >
         <Markdown style={markdownStyles}>{fullMarkdown}</Markdown>
       </ScrollView>
-      <View style={styles.indicator}>
+      <View
+        style={[
+          styles.indicator,
+          {
+            paddingBottom: insets.bottom,
+            height: PAGE_INDICATOR_HEIGHT + insets.bottom,
+          },
+        ]}
+      >
         <Pressable
           onPress={() => onNeighbourItem(-1)}
           style={styles.navArrow}
