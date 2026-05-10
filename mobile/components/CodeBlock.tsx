@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { useTheme, type Palette } from "../lib/theme";
+import { useSettings } from "../lib/settings";
+import { highlight } from "../lib/syntaxHighlight";
 
 interface Props {
   /** Fence info string, e.g. "python", "rust", "java", "" if absent. */
@@ -10,8 +12,9 @@ interface Props {
 }
 
 /**
- * Map common language tags / aliases to a canonical lookup key. Empty or
- * unknown tags fall back to "code" so the label is never blank.
+ * Map common language tags / aliases to a canonical hljs language name.
+ * Empty or unknown tags fall back to "" so we render plain (uncoloured)
+ * text and label as "Code".
  */
 const LANG_ALIAS: Record<string, string> = {
   py: "python",
@@ -53,7 +56,11 @@ const LANG_LABEL: Record<string, string> = {
 
 export function CodeBlock({ language, code }: Props) {
   const palette = useTheme();
-  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const { fontScale } = useSettings();
+  const styles = useMemo(
+    () => makeStyles(palette, fontScale),
+    [palette, fontScale],
+  );
 
   const normalised = (language || "").toLowerCase().trim();
   const canonical = LANG_ALIAS[normalised] ?? normalised;
@@ -65,9 +72,12 @@ export function CodeBlock({ language, code }: Props) {
         <Text style={styles.tagText}>{label}</Text>
       </View>
       <View style={styles.body}>
-        <Text style={styles.code} selectable>
-          {code.replace(/\n$/, "")}
-        </Text>
+        {highlight(code, canonical, palette.scheme, {
+          color: palette.codeFg,
+          fontFamily: "Courier",
+          fontSize: 12 * fontScale,
+          lineHeight: 18 * fontScale,
+        })}
       </View>
     </View>
   );
@@ -76,7 +86,7 @@ export function CodeBlock({ language, code }: Props) {
 /**
  * Custom rules object for `react-native-markdown-display` — replaces the
  * default `fence` (triple-backtick code block) renderer with our themed,
- * language-tagged CodeBlock.
+ * language-tagged, syntax-highlighted CodeBlock.
  *
  * The library passes the fenced language as `node.sourceInfo` and the code
  * body (without the surrounding fences) as `node.content`.
@@ -97,7 +107,7 @@ export const markdownRules = {
   ),
 };
 
-function makeStyles(p: Palette) {
+function makeStyles(p: Palette, scale: number) {
   return StyleSheet.create({
     wrapper: {
       marginVertical: 8,
@@ -115,7 +125,7 @@ function makeStyles(p: Palette) {
     },
     tagText: {
       color: p.textMuted,
-      fontSize: 10,
+      fontSize: 10 * scale,
       fontWeight: "600",
       letterSpacing: 1,
       textTransform: "uppercase",
@@ -124,12 +134,6 @@ function makeStyles(p: Palette) {
       backgroundColor: p.codeBg,
       paddingHorizontal: 10,
       paddingVertical: 8,
-    },
-    code: {
-      color: p.codeFg,
-      fontFamily: "Courier",
-      fontSize: 12,
-      lineHeight: 18,
     },
   });
 }

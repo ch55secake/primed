@@ -58,6 +58,24 @@ export default function SettingsScreen() {
         </Text>
       </Section>
 
+      <Section title="Text size" palette={palette}>
+        <Segmented<number>
+          value={settings.fontScale}
+          options={[
+            { value: 0.85, label: "S" },
+            { value: 1.0, label: "M" },
+            { value: 1.15, label: "L" },
+            { value: 1.3, label: "XL" },
+          ]}
+          onChange={(fontScale) => update({ fontScale })}
+          palette={palette}
+        />
+        <Text style={styles.hint}>
+          Applies to body text, headings, and code blocks. Pages re-flow
+          automatically.
+        </Text>
+      </Section>
+
       {Platform.OS === "android" && (
         <Section title="Hardware" palette={palette}>
           <View style={styles.row}>
@@ -124,12 +142,12 @@ function Section({
   );
 }
 
-interface SegmentedOption<T extends string> {
+interface SegmentedOption<T extends string | number> {
   value: T;
   label: string;
 }
 
-function Segmented<T extends string>({
+function Segmented<T extends string | number>({
   value,
   options,
   onChange,
@@ -149,7 +167,7 @@ function Segmented<T extends string>({
         const active = opt.value === value;
         return (
           <Pressable
-            key={opt.value}
+            key={String(opt.value)}
             onPress={() => {
               if (!disabled) onChange(opt.value);
             }}
