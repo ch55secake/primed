@@ -54,7 +54,7 @@ function loadSelected(source: SourceId): number {
   return Number.isFinite(n) ? n : 1;
 }
 
-const VALID_SOURCES: SourceId[] = ["patterns", "neetcode", "java"];
+const VALID_SOURCES: SourceId[] = ["patterns", "neetcode", "java", "kotlin"];
 
 function readSourceFromHash(): SourceId {
   const h = window.location.hash.replace(/^#\/?/, "").toLowerCase();
@@ -81,18 +81,21 @@ export default function App() {
     patterns: { patterns: [], loading: true, error: null },
     neetcode: { patterns: [], loading: true, error: null },
     java: { patterns: [], loading: true, error: null },
+    kotlin: { patterns: [], loading: true, error: null },
   });
 
   const [selectedIds, setSelectedIds] = useState<Record<SourceId, number>>({
     patterns: loadSelected("patterns"),
     neetcode: loadSelected("neetcode"),
     java: loadSelected("java"),
+    kotlin: loadSelected("kotlin"),
   });
 
   const [revealedMaps, setRevealedMaps] = useState<Record<SourceId, RevealedMap>>({
     patterns: loadRevealed("patterns"),
     neetcode: loadRevealed("neetcode"),
     java: loadRevealed("java"),
+    kotlin: loadRevealed("kotlin"),
   });
 
   useEffect(() => {

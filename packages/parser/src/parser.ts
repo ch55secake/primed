@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin";
 
 export interface SourceConfig {
   id: SourceId;
@@ -75,6 +75,19 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     itemLabel: "Topic",
     itemsPlural: "Java topics",
     storagePrefix: "ip:java",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  kotlin: {
+    id: "kotlin",
+    file: "/kotlin-interview-primer.md",
+    title: "Kotlin",
+    itemLabel: "Topic",
+    itemsPlural: "Kotlin topics",
+    storagePrefix: "ip:kotlin",
     defaultRevealedSections: [],
     itemHeadingLevel: 2,
     sectionHeadingLevel: 3,
