@@ -113,12 +113,14 @@ String d = c.intern();       // returns the pooled "hello" — a == d is true
 
 `intern()` adds a String to the pool (or returns the existing pooled instance). Saves memory when many duplicates exist; cost is hash lookup on every call. Modern advice: rarely needed — JIT and string deduplication (G1) handle most cases.
 
-### Q7. What is the difference between `==` and `equals()`?
+### Q7. == vs `.equals()`, and the `hashCode()`/`equals()` contract.
 
-- `==` — reference equality for objects (same memory address), value equality for primitives
-- `.equals()` — value equality, defined by the class. Default `Object.equals` is `==`; classes override to define meaningful equality.
-
-Always use `.equals()` for objects. The `Integer.valueOf(127) == Integer.valueOf(127)` trap (true) vs `Integer.valueOf(128) == Integer.valueOf(128)` (false, outside cache range) bites people.
+- `==` compares references (memory address) for objects, values for primitives. JVM-level, not overridable.
+- `.equals()` compares logical equality. Default `Object.equals` is `==`; classes override for meaningful comparison.
+- Override `equals()` (and therefore `hashCode()`) when objects need logical equality, will live in hash-based collections (`HashMap`, `HashSet`), or are value-style (Address, Money, Point).
+- Contract: if `a.equals(b)` then `a.hashCode() == b.hashCode()` (mandatory). Reverse is not required — collisions are allowed.
+- Two-step lookup in hash collections: `hashCode()` picks the bucket (fast), `equals()` finds the exact match within it (linear).
+- Classic trap: `Integer.valueOf(127) == Integer.valueOf(127)` is true (cache); `Integer.valueOf(128) == Integer.valueOf(128)` is false.
 
 ### Q8. Explain method overloading vs method overriding.
 
@@ -392,6 +394,13 @@ class A {
 }
 ```
 
+### Q309. Primitive vs object references.
+
+- Primitives store the actual value (`int`, `long`, `double`, `boolean`, …); they live on the stack when local, inside the object when fields.
+- Object references store a memory address pointing to the object on the heap; the object itself is always heap-allocated.
+- Consequences: primitives are passed by value (copy); references are passed by value (the address is copied), so the callee sees the same object but reassignment inside doesn't affect the caller.
+- Wrapper types (`Integer`, `Double`) box primitives — same value but heap-allocated, cache-sensitive, nullable. Costs: allocation, indirection, GC pressure. Use primitives in hot paths.
+
 ---
 
 ## Modern Java (Java 8+)
@@ -409,9 +418,9 @@ class A {
 
 ### Q17. Explain functional interfaces and give examples.
 
-A functional interface has exactly one abstract method (SAM — single abstract method). Lambdas and method references can be used wherever one is expected.
+An interface with exactly one abstract method (SAM). Foundation of lambdas and method references in Java 8+. Marked optionally with `@FunctionalInterface` for compiler enforcement. Default and static methods don't count toward the SAM rule.
 
-Marked with `@FunctionalInterface` for compiler enforcement.
+Built-ins live in `java.util.function`: `Predicate<T>`, `Function<T,R>`, `Consumer<T>`, `Supplier<T>`, `BiFunction<T,U,R>`. Custom ones are common for callback APIs.
 
 ```java
 @FunctionalInterface
@@ -419,13 +428,6 @@ interface Predicate<T> { boolean test(T t); }
 
 Predicate<String> nonEmpty = s -> !s.isEmpty();
 ```
-
-Built-in (`java.util.function`):
-- `Predicate<T>` — `T → boolean`
-- `Function<T, R>` — `T → R`
-- `Consumer<T>` — `T → void`
-- `Supplier<T>` — `() → T`
-- `BiFunction<T, U, R>`, `BinaryOperator<T>`, etc.
 
 ### Q18. How do lambda expressions work internally?
 
@@ -440,8 +442,10 @@ A stateless lambda (`s -> s.isEmpty()`) is typically a singleton. A stateful one
 
 ### Q19. What is the difference between `map()` and `flatMap()` in streams?
 
-- **`map(Function<T, R>)`** — transforms each element. `Stream<T> → Stream<R>`.
-- **`flatMap(Function<T, Stream<R>>)`** — transforms each element to a stream, then flattens. `Stream<T> → Stream<R>` (one level of unwrapping).
+- `map(Function<T, R>)` — 1-to-1 transform, preserves nesting. `Stream<T> → Stream<R>`.
+- `flatMap(Function<T, Stream<R>>)` — 1-to-many transform, flattens one level. `Stream<T> → Stream<R>`.
+
+Use `flatMap` for nested collections, optional unwrapping, or when each input maps to 0..N outputs.
 
 ```java
 List<List<Integer>> nested = List.of(List.of(1, 2), List.of(3, 4));
@@ -449,7 +453,7 @@ nested.stream().map(List::stream);      // Stream<Stream<Integer>> — wrong sha
 nested.stream().flatMap(List::stream);  // Stream<Integer> — flattened
 ```
 
-Same concept appears as `bind`/`>>=` in Haskell, `SelectMany` in LINQ. Use `flatMap` when each input maps to 0..N outputs and you want them all in one stream.
+Same concept appears as `bind`/`>>=` in Haskell, `SelectMany` in LINQ.
 
 ### Q20. Explain `Optional` and its proper usage patterns.
 
@@ -955,6 +959,16 @@ try (Arena arena = Arena.ofConfined()) {
 - ~10x faster for FFI calls
 
 **Use cases:** native library integration (image codecs, crypto, ML), legacy C API access, embedded systems.
+
+### Q310. What is an Observable? (Reactor vs RxJava in the Spring world)
+
+An Observable is a stream of values over time that consumers subscribe to — push-based, async, composable. Operators (`map`, `filter`, `flatMap`) compose into pipelines that don't run until something subscribes (cold streams) or run continuously (hot streams).
+
+In Spring, the reactive library is **Project Reactor**:
+- `Mono<T>` — 0 or 1 element
+- `Flux<T>` — 0 to N elements
+
+Reactor is the foundation of Spring WebFlux and the reactive `WebClient`. RxJava's `Observable`/`Single`/`Maybe` is the equivalent in the wider Java ecosystem. With virtual threads (Loom) the case for reactive in plain Spring MVC is shrinking — Reactor still wins for backpressure-aware streams and event pipelines.
 
 ---
 
@@ -1710,29 +1724,23 @@ Without happens-before, the JVM/CPU is free to reorder reads, writes, and instru
 
 ### Q50. Explain CompletableFuture and its advantages.
 
-A composable, non-blocking future. Supports chaining transformations, exception handling, timeout, combining multiple futures.
+Java 8+ async primitive. Represents a future result that can also be completed manually, chained, combined, and given async callbacks — unlike `Future` which is a pure read-only handle.
+
+Key capabilities:
+- Chain transforms (`thenApply`, `thenCompose`, `thenAccept`)
+- Combine multiple futures (`thenCombine`, `allOf`, `anyOf`)
+- Async dispatch on a custom `Executor`
+- Error handling (`exceptionally`, `handle`, `whenComplete`)
+- Manual completion via `complete()` / `completeExceptionally()`
 
 ```java
-CompletableFuture.supplyAsync(this::fetchUser, exec)
-    .thenApply(this::enrich)                    // sync transform
-    .thenCompose(u -> loadOrders(u.id()))       // flatMap (async)
-    .thenCombine(latestPriceFuture, this::merge)
-    .exceptionally(ex -> fallback())            // catch
-    .orTimeout(2, TimeUnit.SECONDS)
-    .whenComplete((result, ex) -> log(result, ex));
-
-CompletableFuture.allOf(f1, f2, f3).join();    // wait for all
-CompletableFuture.anyOf(f1, f2, f3).join();    // wait for any
+CompletableFuture<String> f = CompletableFuture
+    .supplyAsync(this::fetchUser, executor)
+    .thenApply(User::name)
+    .exceptionally(ex -> "anonymous");
 ```
 
-**Advantages over `Future`:**
-- Non-blocking composition — no `.get()` blocking on intermediate results
-- Functional pipeline — `map`, `flatMap`, `combine`
-- Exception handling
-- Timeout / cancellation
-- Manually completable — `complete(value)` / `completeExceptionally(ex)`
-
-**Gotcha:** default executor is `ForkJoinPool.commonPool()` — shared with parallel streams and other library code. Always pass an explicit executor in production.
+Equivalent to a Promise in JS; building block for async pipelines before Project Reactor / virtual threads.
 
 ### Q165. Walk through `Thread.State` and the transitions.
 
@@ -2422,6 +2430,30 @@ synchronized (map) {                           // compound op needs explicit loc
 }
 ```
 
+### Q311. Callable vs Runnable.
+
+- `Runnable` — `void run()`. No return value, no checked exceptions. Submit to `Executor.execute()` or `ExecutorService.submit()`.
+- `Callable<V>` — `V call() throws Exception`. Returns a value, can throw checked exceptions. Submit to `ExecutorService.submit()` → get a `Future<V>` back.
+
+Use `Callable` when you need the result or expect failures you want to surface to the caller. `Runnable` for fire-and-forget tasks.
+
+```java
+Future<Integer> f = executor.submit(() -> fetchUserId());  // Callable
+executor.execute(() -> log.info("done"));                  // Runnable
+```
+
+### Q312. The Lock interface — when and why over `synchronized`.
+
+`java.util.concurrent.locks.Lock` is the advanced synchronisation API:
+- `lock()` / `unlock()` — explicit acquire/release (always in try/finally).
+- `tryLock(timeout)` — non-blocking or time-bounded acquisition; impossible with `synchronized`.
+- `lockInterruptibly()` — responsive to thread interruption while waiting.
+- Fairness option, multiple `Condition` objects per lock (vs one wait set on `synchronized`).
+
+Main implementation: `ReentrantLock`. Sister types: `ReentrantReadWriteLock` (separate read/write locks), `StampedLock` (optimistic reads).
+
+Use `synchronized` by default — it's simpler and JIT-optimised. Reach for `Lock` when you need timeout, interruptibility, fairness, or multiple condition variables.
+
 ---
 
 ## JVM, Memory & Performance
@@ -2442,17 +2474,13 @@ Stop-the-world phases pause Java threads briefly. Concurrent collectors do most 
 
 ### Q52. What are the different types of garbage collectors?
 
-| Collector | When | Pause | Notes |
-|---|---|---|---|
-| **Serial** | Tiny heap, single thread | Long | Embedded, client mode |
-| **Parallel (Throughput)** | CPU-bound batch jobs | Long, optimised for throughput | Pre-G1 default |
-| **CMS** (Concurrent Mark Sweep) | Pre-G1 low-latency | Concurrent + brief STW | **Removed in Java 14** |
-| **G1** (Garbage First) | **Default since Java 9** | Predictable, tunable (`MaxGCPauseMillis`) | Region-based, mixed collections |
-| **ZGC** | Low-latency, huge heaps | Sub-millisecond, even at TB | Concurrent, production-ready since Java 15. Generational since Java 21. |
-| **Shenandoah** | Low-latency alternative | Sub-millisecond | Red Hat origin, in OpenJDK |
-| **Epsilon** | Testing / short-lived processes | N/A — no-op GC, leaks until OOM | Java 11+ |
+- **Mark-Sweep** — fundamental algorithm. Mark reachable objects from GC roots, sweep the rest. Optional compact phase to defragment.
+- **Serial GC** — single-threaded stop-the-world. For small heaps / single-core. Low overhead, long pauses.
+- **Parallel GC** — multi-threaded stop-the-world. Throughput-oriented (batch jobs). Tune with `-XX:ParallelGCThreads=N`.
+- **G1GC** (default since JDK 9) — region-based heap (~2048 regions), concurrent marking, incremental collection. Targets a pause goal with `-XX:MaxGCPauseMillis=200`. Collects regions with most garbage first.
+- **ZGC** / **Shenandoah** — concurrent, sub-millisecond pauses regardless of heap size. ZGC uses coloured pointers and load barriers for concurrent relocation. Pick for low-latency services with large heaps.
 
-Default to G1. Switch to ZGC or Shenandoah when pause time is the bottleneck. Use Parallel for batch jobs where total throughput matters more than latency.
+GC roots = local variables in live threads, static fields, JNI refs, active threads themselves.
 
 ### Q53. Explain the different memory areas in JVM.
 
@@ -3299,30 +3327,31 @@ asprof -d 30 --all-user -f profile.html <pid>
 
 **Read the flame graph:** width = total time spent in stack frames at that level. A wide tower at the top = hot leaf method. A wide stack starting low = expensive caller chain. Look for unexpected wide bars where your mental model says "this should be fast."
 
+### Q316. What happens when you create a new object — memory allocation, init, constructor order.
+
+1. **Class loading** (if first reference): bytecode loaded, verified, prepared, resolved. Static fields default-initialised, then static blocks run — once per class.
+2. **Heap allocation**: JVM allocates a contiguous block for the instance. Size = object header (~12-16 bytes: class pointer, mark word) + instance fields + padding (8-byte alignment). Usually bump-the-pointer in the young gen TLAB — extremely fast.
+3. **Field defaults**: all fields zeroed (0, null, false).
+4. **Constructor chain**: `super()` (explicit or implicit) runs first up to `Object`, then instance initialisers and field initialisers run in textual order, then this class's constructor body.
+5. **Reference returned** to caller.
+
+Aborted construction (constructor throws) → the partially-constructed object is unreachable and eligible for GC, but any side effects already performed (e.g. registering `this` somewhere) are not undone. Never leak `this` from a constructor.
+
 ---
 
 ## Spring
 
 ### Q61. Explain dependency injection and inversion of control.
 
-**Inversion of Control (IoC)** — a class doesn't construct its own dependencies; the framework provides them. The class declares what it needs, the framework figures out how to give it.
+Inversion of Control: the framework controls object creation, configuration, and wiring instead of your code doing `new` and lookups. "Don't call us, we'll call you" — your components declare dependencies; the container provides them.
 
-**Dependency Injection (DI)** — the mechanism that implements IoC. The framework injects dependencies via constructor, setter, or field.
+Spring's `ApplicationContext` is the IoC container. It:
+1. Creates beans
+2. Configures them (properties, profiles)
+3. Wires dependencies between them
+4. Manages lifecycle (init, destroy)
 
-```java
-// Without DI: hard-wired, hard to test
-class OrderService {
-    private final EmailService email = new SmtpEmailService();
-}
-
-// With DI: framework injects
-class OrderService {
-    private final EmailService email;
-    OrderService(EmailService email) { this.email = email; }   // any impl works
-}
-```
-
-Benefits: testability (inject mocks), decoupling (swap implementations), clear dependency graph, easier configuration.
+Dependency Injection is the mechanism — constructor (preferred), setter, or field. Benefits: testability (inject mocks), loose coupling, declarative wiring.
 
 ### Q62. What are the different types of dependency injection in Spring?
 
@@ -3355,20 +3384,15 @@ class OrderService {
 
 ### Q63. Explain Spring Bean lifecycle.
 
-1. **Instantiation** — Spring calls the constructor
-2. **Populate properties** — setter / field injection
-3. **`*Aware` interfaces** — `BeanNameAware`, `BeanFactoryAware`, `ApplicationContextAware` callbacks
-4. **`BeanPostProcessor.postProcessBeforeInitialization`** — pre-init hooks
-5. **`@PostConstruct`** annotation
-6. **`InitializingBean.afterPropertiesSet()`**
-7. **Custom init method** (`@Bean(initMethod = "...")`)
-8. **`BeanPostProcessor.postProcessAfterInitialization`** — post-init hooks (proxies wrap here)
-9. **In use**
-10. **`@PreDestroy`** annotation
-11. **`DisposableBean.destroy()`**
-12. **Custom destroy method**
-
-In practice, use `@PostConstruct` and `@PreDestroy` for app-level lifecycle. The rest is framework plumbing.
+1. **Instantiation** — constructor runs, dependencies injected (field or setter). Aware interfaces (`BeanNameAware`, `ApplicationContextAware`) invoked.
+2. **postProcessBeforeInitialization** — `BeanPostProcessor` hook; runs on every bean, can return a different object (proxies enter here).
+3. **Initialization** — in order:
+   - `@PostConstruct` methods
+   - `InitializingBean.afterPropertiesSet()`
+   - Custom `init-method` (XML or `@Bean(initMethod=)`)
+4. **postProcessAfterInitialization** — last chance to wrap. AOP proxies, transactions, caching, async — all applied here.
+5. **Ready** — bean serves requests.
+6. **Destruction** — on context close or scope end: `@PreDestroy` → `DisposableBean.destroy()` → custom `destroy-method`. Prototype scope is NOT destroyed by Spring (caller's responsibility).
 
 ### Q64. What are the different bean scopes in Spring?
 
@@ -3494,14 +3518,14 @@ For non-web code, throw domain exceptions (`InsufficientFundsException`, `Bookin
 
 ### Q69. Explain the difference between @Component, @Service, @Repository, and @Controller.
 
-All are `@Component`-derived, register a Spring bean. Differences:
+All four are specialisations of `@Component` — they all register a Spring bean via component scan. Differences are semantic + behavioural:
 
-- **`@Component`** — generic. Use when none of the others fit semantically.
-- **`@Service`** — semantic only. "Holds business logic." No functional difference from `@Component`.
-- **`@Repository`** — adds **exception translation**. DB exceptions (e.g. Hibernate's `JDBCException`) get converted to Spring's `DataAccessException` hierarchy. Auto-applied via `PersistenceExceptionTranslationPostProcessor`.
-- **`@Controller`** — registers as MVC controller (handler-mapping). `@RestController` = `@Controller` + `@ResponseBody` (return values serialise to JSON).
+- `@Component` — generic; utilities, helpers, anything that doesn't fit a layer.
+- `@Service` — business logic layer. Conventionally transactional. No extra runtime behaviour, just intent.
+- `@Repository` — persistence layer. Adds **exception translation** (vendor SQL exceptions → Spring `DataAccessException`).
+- `@Controller` — web layer, returns view names. Use `@RestController` for JSON/XML APIs (combines `@Controller` + `@ResponseBody`).
 
-So `@Repository` does something extra; the others are documentation only.
+Use the most specific one — readers infer layer responsibility from the annotation; some AOP/monitoring tooling targets these specifically.
 
 ### Q70. How does Spring Security work?
 
@@ -3837,63 +3861,23 @@ class IntegrationTest {
 
 ### Q190. What's `@MockBean` vs `@SpyBean` vs `@Mock`?
 
-All replace beans with test doubles, but with different scopes and behaviours.
+- **`@MockBean`** — replaces the bean in the Spring context with a Mockito mock. No real code runs; methods return defaults (`null`, `0`, `false`, empty collection) until stubbed.
+- **`@SpyBean`** — wraps the real bean. Methods call the real implementation unless stubbed; lets you verify interactions on real behaviour.
 
-**`@Mock`** (Mockito) — standalone mock, no Spring context needed:
-```java
-@ExtendWith(MockitoExtension.class)
-class ServiceTest {
-    @Mock Repo repo;
-    @InjectMocks Service service;
-}
-```
+Pick `@MockBean` for full isolation (slow/external deps, error-path simulation). Pick `@SpyBean` when you want real behaviour with selective overrides, or to verify a real method was called.
 
-**`@MockBean`** (Spring Boot Test) — replaces a bean in the Spring context with a Mockito mock. Used inside `@SpringBootTest` / `@WebMvcTest`:
-```java
-@WebMvcTest(BookingController.class)
-class ControllerTest {
-    @MockBean BookingService service;   // fake bean wired into the controller
-}
-```
-
-**`@SpyBean`** (Spring Boot Test) — wraps the real bean in a Mockito spy. Real method calls go through unless stubbed:
-```java
-@SpringBootTest
-class AuditTest {
-    @SpyBean AuditService audit;   // real audit, but you can verify calls
-    @Test void records() {
-        service.book(...);
-        verify(audit).log(any(BookingEvent.class));
-    }
-}
-```
-
-**Key difference vs `@Mock` + `@InjectMocks`:** `@MockBean`/`@SpyBean` work inside the Spring container — your controller's `@Autowired` dependencies become the mocks. `@Mock` + `@InjectMocks` is reflection-based and bypasses Spring entirely.
-
-**Drawback of `@MockBean`:** slow because it dirties the application context — Spring evicts and rebuilds the cached context. Heavy use of `@MockBean` slows test suites measurably.
+Note both reset between tests by default (`@DirtiesContext` not needed). `@Mock`/`@Spy` (without `Bean`) are pure Mockito — they don't touch the Spring context.
 
 ### Q240. How does Spring resolve circular dependencies?
 
-Two beans depending on each other (`A` needs `B`, `B` needs `A`) sound impossible — but Spring's singleton container resolves it via a **three-level cache**:
+Two beans depend on each other directly or transitively. Spring resolves the singleton case via a three-level cache:
+1. **Level 3 — `singletonFactories`** — factory references for in-progress beans
+2. **Level 2 — `earlySingletonObjects`** — partially-constructed instances (memory allocated, not yet initialised)
+3. **Level 1 — `singletonObjects`** — fully initialised beans
 
-- **Level 1 — Singleton cache** — fully initialised, ready-to-use beans
-- **Level 2 — Early singleton cache** — partially constructed beans (instance exists, dependencies not yet injected)
-- **Level 3 — Singleton factories** — `ObjectFactory<?>` callbacks that produce early references on demand (used to create proxies lazily)
+Flow: create A (empty shell, register in L3) → start creating B → B asks for A → L2/L3 hands B the empty shell → B finishes → A receives B → A finishes. Works only for **setter/field injection** of singletons. Constructor cycles fail at startup with `BeanCurrentlyInCreationException`.
 
-**Resolution flow** when creating `A` which depends on `B` which depends on `A`:
-
-1. Start creating `A` — register a singleton factory in level 3
-2. Spring sees `A` needs `B` — start creating `B`
-3. `B` needs `A` — Spring asks the level-1 cache (miss), then level-2 (miss), then level-3 — finds the factory, gets an early reference to half-built `A`
-4. `B` finishes, gets injected into `A`
-5. `A` finishes — moves from level-3 to level-1
-
-**Critical limitation:** **constructor injection cycles can't be resolved this way.** Constructor needs a fully-built dependency, but the dependency can't be built without the dependent. Spring throws `BeanCurrentlyInCreationException` at startup. Workaround: switch one side to setter or field injection (or refactor — circular deps usually indicate a design problem).
-
-**Other circular-dep escape hatches:**
-- `@Lazy` on the dependency — injects a proxy, deferring resolution
-- `ObjectProvider<T>` / `Provider<T>` — explicitly lazy lookup
-- Refactor — split shared logic into a third bean both depend on (preferred)
+Avoid them: redesign for a one-way dependency, extract the shared logic into a third bean, or use `ApplicationEventPublisher` for decoupled communication. Constructor injection forces you to fix it rather than paper over.
 
 ### Q292. Spring Modulith — what problem does it solve?
 
@@ -4066,6 +4050,43 @@ class TxLoggingAspect {
 ```
 
 Caveat: self-invocation still won't be intercepted (same proxy limitation). For exhaustive coverage use AspectJ load-time weaving.
+
+### Q313. What is the Spring ApplicationContext?
+
+The IoC container: a registry of beans plus the machinery to create, configure, wire, and dispose of them. On startup it:
+1. Reads configuration (annotations, `@Configuration` classes, properties files, environment)
+2. Component-scans for `@Component`/`@Service`/`@Repository`/`@Controller`
+3. Instantiates beans
+4. Injects dependencies, applies post-processors (this is where AOP, transactions, security proxies wrap your beans)
+5. Fires `ApplicationListener` events (`ContextRefreshedEvent`), runs `@PostConstruct`, then `ApplicationRunner`/`CommandLineRunner`
+6. Stays alive serving lookups until close, then runs destruction callbacks in reverse order
+
+Spring Boot's `SpringApplication.run()` is essentially "build an `ApplicationContext`, configure it, refresh it, return it".
+
+### Q314. Prototype vs Singleton bean scope.
+
+- **Singleton** (default) — one instance per `ApplicationContext`, cached and shared. Lifecycle fully managed by Spring.
+- **Prototype** — a new instance every time the bean is requested. Spring instantiates and wires it, then hands it off — Spring does NOT call destroy callbacks.
+
+Trap: a singleton holding a prototype dependency gets the prototype once at injection time (still effectively singleton). Fix with `@Lookup`, `ObjectProvider<T>`, or `Provider<T>` to get a fresh instance per call.
+
+Other scopes: `request`, `session`, `application`, `websocket` (web only).
+
+### Q315. What is `@ControllerAdvice`?
+
+A specialisation of `@Component` that applies cross-cutting controller behaviour globally — exception handlers, model attributes, data binders — across every `@Controller`/`@RestController`.
+
+```java
+@ControllerAdvice
+class ApiExceptionHandler {
+    @ExceptionHandler(EntityNotFoundException.class)
+    ResponseEntity<ApiError> notFound(EntityNotFoundException e) {
+        return ResponseEntity.status(404).body(new ApiError(e.getMessage()));
+    }
+}
+```
+
+Scope with `@ControllerAdvice(basePackages = "...")` or `assignableTypes = ...` to restrict to a subset of controllers. Use `@RestControllerAdvice` to combine with `@ResponseBody` for API error responses.
 
 ---
 
@@ -5320,55 +5341,23 @@ For new projects I bake in: Spotless (format), Error Prone (build-time checks), 
 
 ### Q125. How do you write parameterised tests in JUnit 5?
 
-Source the parameters from various providers:
+Run one test method with multiple input sets — preferred over copy-paste tests with different values. JUnit emits a separate test execution per parameter set.
 
 ```java
-@ParameterizedTest
-@ValueSource(strings = {"alice", "bob", "carol"})
-void name_is_lowercase(String name) {
-    assertEquals(name, name.toLowerCase());
-}
-
 @ParameterizedTest
 @CsvSource({
-    "1, 2, 3",
-    "5, 5, 10",
-    "0, 0, 0"
+    "apple, 5",
+    "strawberry, 10",
+    "pear, 4",
+    "'', 0",
+    "' ', 2"
 })
-void add(int a, int b, int expected) {
-    assertEquals(expected, a + b);
+void length(String input, int expected) {
+    assertEquals(expected, input.length());
 }
-
-@ParameterizedTest
-@CsvFileSource(resources = "/test-data.csv", numLinesToSkip = 1)
-void from_file(int input, String expected) { ... }
-
-@ParameterizedTest
-@MethodSource("provideArgs")
-void from_method(String input, int expected) { ... }
-
-static Stream<Arguments> provideArgs() {
-    return Stream.of(
-        Arguments.of("hello", 5),
-        Arguments.of("world", 5)
-    );
-}
-
-@ParameterizedTest
-@EnumSource(Status.class)
-void all_statuses_have_label(Status s) { ... }
-
-@ParameterizedTest
-@NullAndEmptySource
-@ValueSource(strings = {" ", "\t"})
-void blank_input_rejected(String input) { ... }
 ```
 
-**Custom display:**
-```java
-@ParameterizedTest(name = "{0} + {1} = {2}")
-@CsvSource({"1, 2, 3"})
-```
+Sources: `@ValueSource`, `@CsvSource`, `@CsvFileSource`, `@MethodSource` (returns `Stream<Arguments>`), `@EnumSource`. Cucumber tables are heavier and behaviour-test oriented; for unit tests, parameterized is the right tool.
 
 ### Q126. Explain Mockito's ArgumentCaptor and argThat.
 
