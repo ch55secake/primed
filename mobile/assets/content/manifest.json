@@ -51,6 +51,19 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "kotlin",
+      "file": "/kotlin-interview-primer.md",
+      "title": "Kotlin",
+      "itemLabel": "Topic",
+      "itemsPlural": "Kotlin topics",
+      "storagePrefix": "ip:kotlin",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }

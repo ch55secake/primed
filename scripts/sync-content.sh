@@ -14,14 +14,16 @@ MOBILE="$ROOT/mobile/assets/content"
 cp "$VAULT/System-Design-Patterns.md"               "$WEB/patterns.md"
 cp "$VAULT/Neet-150-Pattens.md"                     "$WEB/neetcode-150.md"
 cp "$VAULT/Java Interview Primer - 100 Questions.md" "$WEB/java-interview-primer.md"
+# Kotlin primer is authored directly in web/public (no vault source yet).
 echo "Synced 3 files from $VAULT into $WEB/"
 
 # Mirror to mobile/assets/content/ if mobile exists
 if [ -d "$ROOT/mobile" ]; then
   mkdir -p "$MOBILE"
-  cp "$WEB/patterns.md"               "$MOBILE/patterns.md"
-  cp "$WEB/neetcode-150.md"           "$MOBILE/neetcode-150.md"
-  cp "$WEB/java-interview-primer.md"  "$MOBILE/java-interview-primer.md"
+  cp "$WEB/patterns.md"                  "$MOBILE/patterns.md"
+  cp "$WEB/neetcode-150.md"              "$MOBILE/neetcode-150.md"
+  cp "$WEB/java-interview-primer.md"     "$MOBILE/java-interview-primer.md"
+  cp "$WEB/kotlin-interview-primer.md"   "$MOBILE/kotlin-interview-primer.md"
   # Bundled-fallback manifest — kept in lockstep with web/public so a fresh
   # install with no network still has the same source list that was current
   # at build time.
