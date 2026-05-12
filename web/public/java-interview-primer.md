@@ -2411,6 +2411,17 @@ COUNT.compareAndExchangeRelease(this, 4, 5);     // release CAS
 
 Replaces `sun.misc.Unsafe` for atomic field access. Modern lock-free code uses VarHandle, not `AtomicInteger` (which has wrapper allocation overhead in some patterns).
 
+### Q297. How do you make an existing HashMap thread-safe without ConcurrentHashMap?
+
+Wrap with `Collections.synchronizedMap()`, guard accesses with manual `synchronized` blocks, use a `ReentrantLock`, or swap for an immutable copy-on-write strategy. The catch: `synchronizedMap` synchronizes each call individually, not compound ops — `if (!map.containsKey(k)) map.put(k, v)` is still racy unless the whole block is wrapped. The interview signal is atomicity awareness and coarse vs fine-grained locking, not naming an API. `ConcurrentHashMap` exists because these patterns are easy to get wrong; if you must do without it, encode the invariants in code, not comments.
+
+```java
+Map<String, String> map = Collections.synchronizedMap(new HashMap<>());
+synchronized (map) {                           // compound op needs explicit lock
+    if (!map.containsKey(key)) map.put(key, value);
+}
+```
+
 ---
 
 ## JVM, Memory & Performance
@@ -4028,6 +4039,33 @@ public class FieldAccessAspect {
 - Frameworks like Hibernate's lazy loading use AspectJ-style bytecode enhancement
 
 **Cost:** more complex build (weaver plugin), longer compile times, harder debugging. Rare in app code; common in framework code (Spring itself uses AspectJ for some annotations like `@Configurable`).
+
+### Q298. Why doesn't `@Transactional` work on private/protected methods or self-invocation?
+
+Spring `@Transactional` is implemented via runtime proxies (JDK dynamic or CGLIB). The proxy intercepts calls coming in from outside the bean — calls that go through the proxy reference. Private methods aren't proxyable at all; protected works only with CGLIB (not JDK proxies). Self-invocation (`this.foo()`) bypasses the proxy because it calls the underlying instance directly, so the interceptor never fires and no transaction starts. Fix: extract the transactional method into a separate bean, inject `self` via `ApplicationContext`, or use `AopContext.currentProxy()`.
+
+### Q299. Walk through what `@Transactional` actually does at runtime.
+
+Spring AOP creates a proxy around the bean. On a `@Transactional` method call, `TransactionInterceptor` runs: it asks a `PlatformTransactionManager` to begin a transaction (or join an existing one per the propagation setting), invokes the target method, then commits on normal return or rolls back on a runtime exception (checked exceptions don't trigger rollback by default — configure `rollbackFor`). The transaction is bound to the thread via `TransactionSynchronizationManager` and tied to a JDBC `Connection` or JPA `EntityManager`. `@Transactional` is three things glued together: proxy interception, a transaction manager, and thread-local resource binding — not magic.
+
+### Q300. How would you log every `@Transactional` method using AOP?
+
+Write an aspect with `@Around` advice on `@annotation(...Transactional)`; Spring wires it into the existing proxy chain. Keep the advice cheap (logging only) and don't swallow exceptions — `proceed()` and rethrow.
+
+```java
+@Aspect @Component
+class TxLoggingAspect {
+    @Around("@annotation(org.springframework.transaction.annotation.Transactional)")
+    public Object log(ProceedingJoinPoint pjp) throws Throwable {
+        String m = pjp.getSignature().toShortString();
+        log.debug("→ tx {}", m);
+        try { return pjp.proceed(); }
+        finally { log.debug("← tx {}", m); }
+    }
+}
+```
+
+Caveat: self-invocation still won't be intercepted (same proxy limitation). For exhaustive coverage use AspectJ load-time weaving.
 
 ---
 
@@ -6015,6 +6053,22 @@ record BookingProperties(
 
 The discipline is honest accounting: track it, talk about it, allocate capacity, ship the right things.
 
+### Q303. Two JVM instances each cache the same value. App1 updates it. How does App2 see the change?
+
+In-process caches aren't a source of truth across instances. Promote a single source — DB or a distributed cache — and invalidate everywhere on change. Common patterns: shared Redis with TTL + write-through; a Kafka/SNS event on update with each instance subscribing to evict its local copy (cache-aside); or no local cache at all (Redis-only reads). For strong consistency read from the DB; for eventual consistency the event-bus pattern scales best. Single-JVM thinking — "I'll just put it in a `ConcurrentHashMap`" — breaks the moment you scale horizontally.
+
+### Q304. How do you handle 10× traffic in production?
+
+Scale in layers: (1) horizontal — more replicas behind a load balancer, stateless instances; (2) application — tune thread pools and DB connection pools, cache hot reads, rate-limit abusive clients, circuit-break slow dependencies; (3) data — read replicas for read-heavy load, partitioning/sharding for write-heavy; (4) edge — CDN for static assets, response caching at the gateway. Auto-scaling handles the spike; capacity planning + load tests prevent the cliff. The signal is layered thinking, not naming one trick.
+
+### Q305. How do you stop a payment from being processed twice?
+
+Idempotency key: the client generates a unique transaction ID per logical attempt and sends it as a header. The server stores `(key, status, response)` with a unique constraint on `key`, so the second insert fails; the handler returns the original response. For coordination during the in-flight window use a Redis lock keyed on the idempotency key with a short TTL. Combine with at-most-once side-effects: write the ledger entry inside the same DB transaction as the idempotency record. Stripe, PSP gateways, and every serious payments system work this way.
+
+### Q306. How do you achieve zero data loss?
+
+Strict zero is impossible — what you target is RPO≈0 within a fault domain. Mechanisms: synchronous DB replication (or quorum writes), Kafka with `acks=all`, `min.insync.replicas≥2`, replication factor ≥3, transactional producers, durable WAL flushed before ack, and graceful shutdown that drains in-flight work. Cross-region requires synchronous cross-region replication (latency cost) or accepting some RPO. In finance you trade throughput for durability — `acks=all` is mandatory, not "if performance allows". Honest answer: list the trade-offs, pick the SLO, design to it.
+
 ---
 
 ---
@@ -6377,6 +6431,14 @@ void handle(Event e) {
 **SQS:** when you're on AWS and want zero ops. Pair with SNS for fan-out.
 
 **Honest secondary choice for Java shops:** Kafka. RabbitMQ is great but losing ground; Kafka has won the events/streaming category.
+
+### Q301. In Kafka, how do you guarantee a message is processed by exactly one consumer instance?
+
+Use a consumer group: all instances share the same `group.id`. Kafka assigns each partition to exactly one consumer in the group at a time, so two instances never read the same partition concurrently. If you also need strict global ordering, the topic must have a single partition (which caps throughput). Caveat: "one delivery" ≠ "exactly-once processing" — rebalances can replay uncommitted offsets, so the handler must be idempotent, or use the transactional producer + `isolation.level=read_committed` for end-to-end exactly-once.
+
+### Q302. How do you handle Kafka consumption failures in a financial system?
+
+Disable auto-commit; commit offsets only after the handler succeeds. Retry transient errors with backoff; on poison messages send to a dead-letter topic preserving the original key + headers so they can be replayed after a fix. Keep handlers idempotent — rebalances and retries cause redelivery. For strict guarantees use Kafka transactions (`isolation.level=read_committed`, transactional producer) so the offset commit and any downstream write are atomic. Never "commit then process" — you'll lose messages on a crash between the two.
 
 ---
 
@@ -7237,6 +7299,17 @@ Heroku's 12 factors, the foundation of cloud-native design.
 
 Spring Boot defaults align well; the harder factors are #4 (truly external services) and #6 (stateless) — they require discipline.
 
+### Q307. Alert when the 500-error rate exceeds threshold for 5 minutes.
+
+Emit request metrics (Micrometer `http.server.requests` → Prometheus). Alert on *rate*, not raw count — counter alerts fire forever during sustained load. Example PromQL:
+
+```promql
+sum(rate(http_server_requests_seconds_count{status="500"}[5m]))
+  / sum(rate(http_server_requests_seconds_count[5m])) > 0.01
+```
+
+Wire to Alertmanager → PagerDuty/Slack. Add a `for: 5m` clause so transient spikes don't page. Pair with a dashboard (Grafana) and correlate alerts with deploys — most spikes follow a release.
+
 ---
 
 ## Networking & Protocols
@@ -7661,6 +7734,10 @@ RateLimiter limiter = RateLimiter.of("api", RateLimiterConfig.custom()
 if (limiter.acquirePermission()) { handleRequest(); }
 else { return ResponseEntity.status(429).build(); }
 ```
+
+### Q308. How do you stop one slow downstream from killing the whole service?
+
+Five concurrent patterns: timeouts on every outbound call (no infinite waits), retries with exponential backoff + jitter for idempotent ops only, circuit breaker (fail fast after N errors, half-open probe to recover), bulkhead (separate thread/connection pools per dependency so one stuck pool doesn't starve others), and fallback (cached value, default response, graceful degradation). Make operations idempotent so retries are safe. Resilience4j or Spring Cloud Circuit Breaker wraps this; the discipline is applying it on *every* network boundary, not just the obvious ones.
 
 ---
 
