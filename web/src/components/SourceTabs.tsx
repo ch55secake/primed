@@ -6,7 +6,7 @@ interface Props {
   onSelect: (id: SourceId) => void;
 }
 
-const ORDER: SourceId[] = ["patterns", "neetcode", "java"];
+const ORDER: SourceId[] = ["patterns", "neetcode", "java", "kotlin"];
 
 export function SourceTabs({ active, onSelect }: Props) {
   return (
