@@ -9,36 +9,24 @@ type: interview-prep
 
 # Kotlin Interview Primer — 170+ Questions
 
-Comprehensive Q+A primer covering Kotlin for backend interviews, Android development, and senior roles. This covers language fundamentals through expert-level patterns. Each answer is interview-shaped: 2–6 sentences, code where useful, no textbook padding.
+Comprehensive Q+A primer covering Kotlin for backend interviews, Android development, and senior roles. Each answer is interview-shaped: 2–6 sentences, code where useful, no textbook padding.
 
-**Sections (Tier 1 — interview baseline, Q1-80):**
-1. [[#Kotlin Fundamentals]] (16)
-2. [[#Null Safety & Type System]] (10)
-3. [[#Functions & Lambdas]] (10)
-4. [[#Collections & Sequences]] (10)
-5. [[#Coroutines Intro]] (12)
-6. [[#OOP in Kotlin]] (10)
-7. [[#Spring on Kotlin]] (8)
-8. [[#Testing in Kotlin]] (6)
-9. [[#Common Idioms & Pitfalls]] (8)
-10. [[#Android & Platform Context]] (8)
-
-**Sections (Tier 2 — senior depth, Q81-140):**
-11. [[#Type System — Advanced]] (8)
-12. [[#Coroutines — Deep Dive]] (10)
-13. [[#DSL Design & Building]] (6)
-14. [[#Reflection & Metaprogramming]] (8)
-15. [[#Operator Overloading & Delegation]] (8)
-16. [[#Performance & Optimization]] (8)
-17. [[#Functional Programming in Kotlin]] (8)
-18. [[#Java Interoperability]] (8)
-
-**Sections (Tier 3 — expert, Q141-170):**
-19. [[#Compiler Plugins & Code Generation]] (6)
-20. [[#Advanced Coroutine Patterns]] (8)
-21. [[#Type-Safe DSLs]] (6)
-22. [[#Memory & GC Considerations]] (5)
-23. [[#Spot-the-Bug Scenarios]] (8)
+**Sections:**
+1. [[#Kotlin Fundamentals]]
+2. [[#Null Safety & Type System]]
+3. [[#Functions, Lambdas & Functional Programming]]
+4. [[#Collections & Sequences]]
+5. [[#Coroutines]]
+6. [[#OOP, Operators & Delegation]]
+7. [[#Spring on Kotlin]]
+8. [[#Testing in Kotlin]]
+9. [[#Common Idioms, Pitfalls & Spot-the-Bug]]
+10. [[#Android & Platform Context]]
+11. [[#DSL Design]]
+12. [[#Reflection, Metaprogramming & Compiler Plugins]]
+13. [[#Performance, Memory & GC]]
+14. [[#Java Interoperability]]
+15. [[#Advanced Concepts & Miscellaneous]]
 
 ---
 
@@ -210,9 +198,25 @@ Type projection (`List<out String>`) limits what you can do with a type at the u
 
 Star projection (`List<*>`) means "I don't care about the type parameter." Equivalent to `List<out Any?>` — you can read but cannot write. Used when: the type parameter doesn't matter (e.g., checking list size), you have external Java code with raw types, or you want maximum flexibility. `List<*>` is less strict than `List<Any>` (which is contravariant in reading). Useful for interop with Java generics but lose type information.
 
+### Q97. Explain contravariance in detail with an example.
+
+Contravariance (`in T`) means type parameter can only be consumed (input), never produced. `(in Int) -> Unit` is a function accepting Int. A function accepting `Number` can be passed where `(in Int) -> Unit` is expected (contravariance). Why? If you pass `Number`, the caller can pass an `Int` (number is-a int? no), but... actually, `(in Int)` means "I only read Int", so you can safely pass `(Number) -> Unit` — it handles Int as a Number. Use case: callbacks, consumers. Declaration-site: `interface Consumer<in T> { fun consume(t: T) }`. Interface can be invariant by default.
+
+### Q98. Explain declaration-site vs use-site variance.
+
+Declaration-site variance is declared on the interface/class: `interface Producer<out T> { fun produce(): T }`. Applies to all usages. Use-site variance is declared where used: `fun print(p: Producer<out Any>)`. Scope: just this function signature. Declaration-site is cleaner (declare once, use everywhere); use-site is flexible (different variance in different contexts). If you control the interface, prefer declaration-site. If using external interfaces, use-site variance lets you be flexible.
+
+### Q99. What are bounds and when do you use upper bounds vs lower bounds?
+
+Upper bounds (`<T : Number>`) restrict T to Number and subclasses — you can call Number methods on T. Lower bounds (`<T : in Number>`) restrict T to Number and supertypes (rare, used with contravariance). Upper bounds are common: `fun <T : Comparable<T>> sort(list: List<T>)` ensures T is comparable. Lower bounds are advanced: `<T : in Number>` means "I only pass Number or supertypes". Most code uses upper bounds; lower bounds are niche (advanced generic patterns).
+
+### Q100. Explain type erasure and how it affects Kotlin.
+
+Generic type information is erased at runtime — `List<Int>` and `List<String>` are indistinguishable at runtime (both are `List`). This is a JVM limitation inherited by Kotlin. Consequences: you cannot `is T` check (type is erased), cannot `T::class.java` in non-inline functions, cannot create `T()` instances. Reified type parameters (inline functions) preserve type info by substituting the actual type at compile time: `inline fun <reified T> parseAs(json: String) = gson.fromJson(json, T::class.java)`. Workaround: pass `Class<T>` explicitly or use inline + reified.
+
 ---
 
-## Functions & Lambdas
+## Functions, Lambdas & Functional Programming
 
 ### Q27. What is a higher-order function and what is an example?
 
@@ -257,6 +261,26 @@ A lambda with receiver has access to the receiver object's members via `this`: `
 ### Q36. Explain crossinline and noinline modifiers.
 
 `crossinline` allows a lambda to be passed to nested functions (in the same inline function) without it being inlined itself — used when a lambda cannot be inlined due to non-local returns. `noinline` prevents a specific lambda parameter from being inlined, useful when you want to store the lambda in a field. Both are used with `inline fun` to fine-tune inlining behavior. Necessary when inline functions call other inline functions and you need to control which lambdas get inlined.
+
+### Q124. Explain pure functions and their benefits.
+
+Pure function: output depends only on inputs, no side effects (no mutation, I/O, time-dependent). Example: `fun add(a: Int, b: Int) = a + b` vs `fun add(a: Int, b: Int) { println("adding"); return a + b }` (side effect). Benefits: testable, composable, parallelizable, reasoned about. Functional programming encourages pure functions. Kotlin supports both (not purely functional like Haskell) — mix pure and effectful as needed. Mark pure functions explicitly or document them.
+
+### Q125. Explain immutability and its relationship to functional programming.
+
+Immutability: objects don't change after creation. `val` enforces this. Functional programming relies on immutability (no shared mutable state, easier parallelism). Kotlin encourages but doesn't enforce: `var` exists, mutable collections exist. Best practice: default to immutable (`val`, `List<T>`), use mutable only when necessary. Kotlin's syntax makes immutability ergonomic (`copy()` for updates, `map` chains instead of mutation).
+
+### Q126. Explain composition and why it's superior to inheritance in functional programming.
+
+Composition: build larger behavior from smaller functions (`f(g(x))`). Inheritance: share code through class hierarchy. Functional preference: composition (simpler, more flexible). Example: instead of `class LoggedRepository(val repo: Repository) : Repository by repo { override fun get() = { log(); repo.get() } }`, use `fun withLogging(repo: Repository) = Repository { log(); repo.get() }`. Composition is easier to test (less coupling), parallelize, and reason about. Functional languages heavily rely on composition.
+
+### Q127. Explain currying and partial application in Kotlin.
+
+Currying: transform function of N args into N functions of 1 arg each. Example: `fun add(a: Int, b: Int) = a + b` becomes `fun curried(a: Int) = { b: Int -> a + b }`. Partial application: call a multi-arg function with some args, get back a function of remaining args. Example: `fun multiply(a: Int, b: Int, c: Int) = a * b * c; fun multiplyBy2 = { b: Int, c: Int -> multiply(2, b, c) }`. Useful for: function composition, creating specialized functions. Kotlin doesn't have built-in support; you implement manually.
+
+### Q128. Explain monads and Maybe/Option pattern in Kotlin.
+
+Monad: a pattern for chaining computations that might fail/return nothing. `Maybe<T>` (also called `Option<T>`) wraps a value or nothing. Kotlin's `?.` and `?:` replicate this: `val result = obj?.method() ?: default`. Java Optional is similar: `Optional<T>`. Monadic pattern: `flatMap` chains operations, short-circuiting on None. Example: `Maybe.of(user).flatMap { getMaybeAge(it) }.flatMap { getCategory(it) }` — if any step returns nothing, the result is nothing. Kotlin's nullable types are a simplified monad.
 
 ---
 
@@ -315,7 +339,7 @@ The `to` infix function creates a `Pair`: `1 to "a"` is `Pair(1, "a")`. Use immu
 
 ---
 
-## Coroutines Intro
+## Coroutines
 
 ### Q48. What is a coroutine and how does it differ from a thread?
 
@@ -395,9 +419,83 @@ Flow operators transform the stream:
 
 `collect { ... }` is a suspend function — it collects all emissions, blocks until flow completes. Must be called from a coroutine. `launchIn(scope)` launches collection in a background coroutine within the scope — returns immediately. Example: `stateFlow.launchIn(viewModelScope)` starts collection without blocking; `flow.collect { ... }` inside a coroutine waits for all emissions. Use `launchIn` for side effects (observation); use `collect` when you need sequential processing or a value afterwards.
 
+### Q101. Explain the job hierarchy and structured concurrency.
+
+Structured concurrency: parent-child job relationships ensure orderly cancellation and error handling. When you `launch { ... }` in a scope, the created job becomes a child. If parent is cancelled, all children cancel. If a child fails, parent is notified (default: cancels all siblings). Example: `GlobalScope.launch { }` has no parent (bad); `viewModelScope.launch { }` has viewModelScope as parent (good). This prevents resource leaks and ensures cleanup. Jobs form a tree; cancellation/failure propagates upward and sideways.
+
+### Q102. What is Dispatchers.Main and why do you need it?
+
+`Dispatchers.Main` executes coroutines on the main/UI thread. Used for: UI updates, event handlers. Other dispatchers (IO, Default) execute on thread pools. You switch to Main via `withContext(Dispatchers.Main)` after background work. Example: `val data = withContext(Dispatchers.IO) { fetch() }; withContext(Dispatchers.Main) { ui.update(data) }`. `Dispatchers.Main` is platform-specific — Android provides it, JVM/desktop don't have a default. Not specifying a dispatcher uses the inherited one (context propagation).
+
+### Q103. Explain channels and their relationship to Flow.
+
+Channels (`Channel<T>`) are queues for coroutine communication — `send()` and `receive()` are suspend functions. Example: `val channel = Channel<Int>(); launch { channel.send(1) }; channel.receive()`. Hot by default (emit regardless of receivers). Flow is a Channel wrapper with operators (map, filter, etc.). Channels are lower-level; Flow is higher-level and easier to use. Channels useful for: actor models, complex coordination. Flow preferable for most cases.
+
+```kotlin
+val channel = Channel<Int>()
+launch { channel.send(1) }
+val x = channel.receive()
+```
+
+### Q104. Explain context preservation and CoroutineContext.
+
+`CoroutineContext` carries context across suspend points — job, dispatcher, exception handler, etc. When you `launch { }`, the context is inherited: same dispatcher, job parent, etc. You can override: `launch(Dispatchers.IO + exceptionHandler) { }` combines contexts. `withContext(dispatcher)` temporarily switches context, then restores. Context propagation ensures: cleanup works, exceptions are handled, dispatchers are respected. You rarely create context manually; Spring/Android/Ktor manage it.
+
+### Q105. Explain exception handling in coroutines (CoroutineExceptionHandler).
+
+By default, unhandled exceptions crash the coroutine and its scope. Use `CoroutineExceptionHandler` to customize: `val handler = CoroutineExceptionHandler { _, ex -> logger.error(ex) }`. Launch with handler: `launch(handler) { throw Exception() }`. The handler is called, exception doesn't crash. Caveat: handler only catches uncaught exceptions from `launch` (fire-and-forget); `async` stores exceptions in the result, you handle them on `await()`. Always handle exceptions in production code.
+
+### Q106. Explain the `runBlocking` function and when to use it.
+
+`runBlocking` blocks the current thread, running a coroutine to completion, then returns. Example: `runBlocking { delay(1000); println("done") }` — blocks for 1 second. Used in: main functions (to bridge suspend to blocking), integration tests, demonstrations. Avoid in production async code — blocking defeats the purpose of coroutines. Used in examples because `main` isn't suspend. For tests, use `runTest` (kotlinx-coroutines-test) instead.
+
+### Q107. What is the difference between `launch`, `async`, and `runBlocking`?
+
+- `launch`: fire-and-forget, returns `Job`, called from coroutine or suspension point, non-blocking
+- `async`: returns result via `await()`, called from coroutine, non-blocking, returns `Deferred<T>`
+- `runBlocking`: blocks current thread, creates a bridge for suspend code, not a true coroutine builder
+
+Use `launch` for side effects (logging, analytics). Use `async` for results you need to await. Use `runBlocking` only to bridge suspend to blocking code (main functions, tests). Mixing them: `launch { async { ... }.await() }` is valid but async's advantage is moot (you're not parallelizing).
+
+### Q134. Explain actor pattern with coroutines.
+
+Actor pattern: encapsulate mutable state and expose it via message passing (instead of shared mutable state). Kotlin: `actor<Message> { for (msg in channel) { when (msg) { ... } } }` creates an actor. Send messages: `actor.send(Message(...))`. Useful for: shared resources (database connections, caches), avoiding locks. Actors process messages serially (no concurrency within actor), making state updates safe. Actors scale better than threads because they're lightweight.
+
+```kotlin
+sealed class CounterMsg
+object IncMsg : CounterMsg()
+class GetMsg(val response: CompletableFuture<Int>) : CounterMsg()
+
+val counter = actor<CounterMsg> {
+  var count = 0
+  for (msg in channel) {
+    when (msg) {
+      is IncMsg -> count++
+      is GetMsg -> msg.response.complete(count)
+    }
+  }
+}
+```
+
+### Q135. Explain backpressure and how to handle it in coroutines.
+
+Backpressure: producer is faster than consumer, so messages pile up (memory issue). Solutions: buffer (bounded, slow producer when full), drop (drop old messages), suspend (producer waits for consumer). `Channel<T>(capacity)` sets buffer size. `Channel(UNLIMITED)` buffers everything (careful!), `Channel(RENDEZVOUS)` has no buffer (producer waits). `Flow` has built-in backpressure — it's cold, so producer doesn't emit until consumer collects. Hot flows (`SharedFlow`, `StateFlow`) with bounded buffers can handle backpressure via drop/buffer strategies.
+
+### Q136. Explain mutex and the difference from Java locks.
+
+Mutex: mutual exclusion lock for coroutines (non-blocking). `val lock = Mutex(); lock.withLock { ... }` ensures only one coroutine enters the block at a time. Other coroutines suspend, not block. Advantage over `synchronized`: doesn't block threads. Use `Mutex` in coroutine code; use `ReentrantLock` in blocking code. Kotlin also has `RwLock` (multiple readers, single writer). Avoid low-level locking; high-level patterns (actors, channels) are often better.
+
+### Q137. Explain supervisor jobs and error propagation.
+
+`SupervisorJob` changes error propagation: when a child fails, other children aren't cancelled (only the failed one). Regular job (default): child failure cancels all siblings. Example: `launch(SupervisorJob()) { launch { throw Ex() }; launch { ... } }` — second launch continues even if first throws. Useful for: independent tasks (one failure shouldn't stop others). Exception still isn't caught (must handle with try/catch or exception handler). Supervisor jobs require more thought (not a silver bullet).
+
+### Q138. Explain the `yield` function and cooperative cancellation.
+
+`yield()` is a suspension point: coroutine can be cancelled here. Also yields the thread to other work (scheduler point). Use in loops to allow cancellation: `while (isActive) { work(); yield() }` checks for cancellation and lets scheduler run other coroutines. Without `yield()`, a long-running coroutine blocks others (busy loop). Suspension functions like `delay()` and `suspendCancellableCoroutine` include yield implicitly. Manual yielding is a cooperative concurrency pattern — essential for large computations.
+
 ---
 
-## OOP in Kotlin
+## OOP, Operators & Delegation
 
 ### Q61. Explain delegation in Kotlin and the `by` keyword.
 
@@ -448,6 +546,28 @@ Composition: `class A { val b = B() }` — A owns a B. Inheritance: `class A : B
 ### Q69. Explain the template method pattern and how Kotlin simplifies it.
 
 Template method: define a skeleton in a parent, let children fill in details. Example: `abstract class Parser { fun parse() { validate(); process(); output() } }` with abstract `validate()`, `process()`, `output()`. Kotlin simplifies with default methods and functional composition. Often, a higher-order function is cleaner: `fun parse(onValidate: () -> Unit, onProcess: () -> Unit, ...)` eliminates inheritance. Use template method when you have a complex, reusable algorithm with pluggable steps; otherwise, composition is simpler.
+
+### Q115. Explain operator overloading and common operators.
+
+Operator overloading: implement operator methods. Example: `operator fun plus(other: Complex) = Complex(real + other.real, imag + other.imag)` lets `a + b` call `a.plus(b)`. Common: `+` (plus), `-` (minus), `*` (times), `/` (div), `%` (mod), `==` (equals), `<` (compareTo), `[]` (get/set), `()` (invoke), `..` (rangeTo). Useful for: DSLs, domain-specific values. Don't overload if it's confusing — `+` should mean addition, not something weird.
+
+```kotlin
+data class Complex(val real: Double, val imag: Double) {
+  operator fun plus(other: Complex) = Complex(real + other.real, imag + other.imag)
+}
+```
+
+### Q116. Explain the `invoke` operator and its use cases.
+
+`operator fun invoke(...)` lets you call an object like a function: `val adder = { a: Int, b: Int -> a + b }; adder(1, 2)`. More generally: `class Multiplier(val x: Int) { operator fun invoke(y: Int) = x * y }; val times3 = Multiplier(3); times3(5)` returns 15. Use cases: function-like objects, command pattern, strategy pattern. Less common than other operators but powerful for DSLs and functional programming.
+
+### Q117. Explain the `get` and `set` operators.
+
+`operator fun get(key: K): V` lets `obj[key]` return a value. `operator fun set(key: K, value: V)` lets `obj[key] = value` set a value. Example: `class Store { operator fun get(item: String) = prices[item]; operator fun set(item: String, price: Double) { prices[item] = price } }`. Turns objects into maps/arrays. Useful for: matrix libraries, caching, configuration maps. Works on any object; not limited to collections.
+
+### Q118. Explain destructuring with component functions.
+
+`operator fun componentN()` lets destructuring unpack objects: `data class Point(x: Int, y: Int)` auto-generates `component1()` (returns x), `component2()` (returns y). Then: `val (a, b) = point` unpacks. Custom: `class Custom { operator fun component1() = "first"; operator fun component2() = "second" }`. Destructuring combines `componentN()` functions. Limited to 5 components by convention. Useful for: returning multiple values, pattern matching.
 
 ---
 
@@ -508,7 +628,7 @@ Mocks replace real dependencies with fakes to isolate what you're testing. Examp
 
 ---
 
-## Common Idioms & Pitfalls
+## Common Idioms, Pitfalls & Spot-the-Bug
 
 ### Q81. Explain destructuring in for loops.
 
@@ -552,338 +672,6 @@ String templates: `"Hello $name"` interpolates the variable. Complex expressions
 ```kotlin
 val msg = "Hello $name, you are ${age + 1} next year"
 ```
-
----
-
-## Android & Platform Context
-
-### Q89. What is a ViewModel and how does Kotlin make it ergonomic?
-
-`ViewModel` survives configuration changes (screen rotation) and holds UI state. You extend `ViewModel` and pass data via `by lazy` or fields. Kotlin's conciseness shines: one-liner initialization vs Java's verbose null checks. Example: `val users: LiveData<List<User>> = MutableLiveData()`. Android's `viewModelScope` (Kotlin extension) simplifies coroutine launching: `viewModelScope.launch { fetch() }` — no explicit cancellation needed. Kotlin's property syntax and extension functions make ViewModels clean.
-
-### Q90. What is LiveData and when do you use it vs StateFlow?
-
-`LiveData<T>` is an observable data holder, lifecycle-aware (only notifies active observers). Used heavily pre-Kotlin Coroutines. `StateFlow<T>` is a coroutine-based hot flow, simpler API, no lifecycle awareness. LiveData is Android-specific; StateFlow is multiplatform. Modern choice: `StateFlow` + `lifecycleScope.launchWhenStarted` for lifecycle awareness. LiveData is still valid (widely supported) but being phased out. If starting a new Android project, prefer `StateFlow` + coroutines.
-
-### Q91. What is Compose and how does it differ from XML layouts?
-
-Jetpack Compose is a declarative UI framework (like React) for building UIs with pure Kotlin functions. Example: `@Composable fun UserCard(user: User) { Text(user.name) }`. Traditional XML layouts are imperative (imperatively update views). Compose: automatic recomposition (state changes trigger UI updates), no manual findViewById, type-safe. Drawback: only works on Android 5.0+; learning curve for imperative developers. Future of Android UI. If targeting modern Android, Compose is preferred; if supporting older API levels, stick with XML.
-
-### Q92. Explain Compose's recomposition and state.
-
-Recomposition: when state changes, Compose re-executes the composable function and updates the UI. `remember { mutableStateOf(value) }` stores state across recompositions. Example: `var count by remember { mutableStateOf(0) }` makes count observable — changing it triggers recomposition. Smart recomposition: only affected composables recompose (not the whole tree). Don't store mutable state outside `remember` — it will reset on recomposition. Compose's model is functional and predictable — state flows one direction (top-down).
-
-### Q93. What is an Intent in Android and how is it used?
-
-Intent is a message for starting activities, services, or broadcasts. Explicit: `Intent(context, TargetActivity::class.java).startActivity()` — starts a specific activity. Implicit: `Intent(ACTION_VIEW, Uri.parse("https://example.com"))` — let Android choose which app handles it. Pass data: `putExtra("key", value)`. Retrieve: `intent.getStringExtra("key")`. Modern Kotlin: use Activity Result APIs (`registerForActivityResult`) instead of `startActivityForResult` callbacks. Intents enable component communication and inter-app interaction.
-
-### Q94. Explain Kotlin's `by lazy` and its use in Android.
-
-`val x by lazy { expensive() }` computes x on first access, then caches the result. Thread-safe by default. Useful in Android: `val sharedPref by lazy { context.getSharedPreferences(...) }` — expensive access deferred. Combine with extensions: `val viewModel by lazy { ViewModelProvider(this).get(MyViewModel::class.java) }` (now simplified by androidx extensions). Lazy is a performance optimization and readability tool. Watch out: if accessed on different threads concurrently, it initializes once but may compute multiple times; this is acceptable.
-
-### Q95. What is a Fragment and how do Kotlin extensions help?
-
-Fragment is a reusable piece of UI (like a subsection of an activity). Fragments have lifecycles, backstack support, and args passing. Kotlin extensions `androidx.fragment:fragment-ktx` provide: `val args by navArgs()` (type-safe args), `viewLifecycleOwner` scope, `Fragment.viewBinding()` (no findViewById). Example: `val viewModel: MyViewModel by viewModels()` auto-injects a ViewModel. Kotlin makes Fragment boilerplate-heavy work clean. Modern Navigation Component (Kotlin-first) simplifies fragment management.
-
-### Q96. Explain shared preferences and how to access them in Kotlin.
-
-Shared Preferences store small key-value data (app settings). Access: `getSharedPreferences("name", MODE_PRIVATE).edit { putString("key", value); apply() }`. Kotlin shortcuts: `context.getSharedPreferences(...).edit { ... }` with apply block. Modern: `DataStore` (Kotlin-first replacement for SharedPrefs) using coroutines. `DataStore` is simpler, type-safe, and handles migrations. If starting new Android projects, use DataStore; SharedPrefs are legacy but still widely used.
-
----
-
-## Type System — Advanced
-
-### Q97. Explain contravariance in detail with an example.
-
-Contravariance (`in T`) means type parameter can only be consumed (input), never produced. `(in Int) -> Unit` is a function accepting Int. A function accepting `Number` can be passed where `(in Int) -> Unit` is expected (contravariance). Why? If you pass `Number`, the caller can pass an `Int` (number is-a int? no), but... actually, `(in Int)` means "I only read Int", so you can safely pass `(Number) -> Unit` — it handles Int as a Number. Use case: callbacks, consumers. Declaration-site: `interface Consumer<in T> { fun consume(t: T) }`. Interface can be invariant by default.
-
-### Q98. Explain declaration-site vs use-site variance.
-
-Declaration-site variance is declared on the interface/class: `interface Producer<out T> { fun produce(): T }`. Applies to all usages. Use-site variance is declared where used: `fun print(p: Producer<out Any>)`. Scope: just this function signature. Declaration-site is cleaner (declare once, use everywhere); use-site is flexible (different variance in different contexts). If you control the interface, prefer declaration-site. If using external interfaces, use-site variance lets you be flexible.
-
-### Q99. What are bounds and when do you use upper bounds vs lower bounds?
-
-Upper bounds (`<T : Number>`) restrict T to Number and subclasses — you can call Number methods on T. Lower bounds (`<T : in Number>`) restrict T to Number and supertypes (rare, used with contravariance). Upper bounds are common: `fun <T : Comparable<T>> sort(list: List<T>)` ensures T is comparable. Lower bounds are advanced: `<T : in Number>` means "I only pass Number or supertypes". Most code uses upper bounds; lower bounds are niche (advanced generic patterns).
-
-### Q100. Explain type erasure and how it affects Kotlin.
-
-Generic type information is erased at runtime — `List<Int>` and `List<String>` are indistinguishable at runtime (both are `List`). This is a JVM limitation inherited by Kotlin. Consequences: you cannot `is T` check (type is erased), cannot `T::class.java` in non-inline functions, cannot create `T()` instances. Reified type parameters (inline functions) preserve type info by substituting the actual type at compile time: `inline fun <reified T> parseAs(json: String) = gson.fromJson(json, T::class.java)`. Workaround: pass `Class<T>` explicitly or use inline + reified.
-
----
-
-## Coroutines — Deep Dive
-
-### Q101. Explain the job hierarchy and structured concurrency.
-
-Structured concurrency: parent-child job relationships ensure orderly cancellation and error handling. When you `launch { ... }` in a scope, the created job becomes a child. If parent is cancelled, all children cancel. If a child fails, parent is notified (default: cancels all siblings). Example: `GlobalScope.launch { }` has no parent (bad); `viewModelScope.launch { }` has viewModelScope as parent (good). This prevents resource leaks and ensures cleanup. Jobs form a tree; cancellation/failure propagates upward and sideways.
-
-### Q102. What is Dispatchers.Main and why do you need it?
-
-`Dispatchers.Main` executes coroutines on the main/UI thread. Used for: UI updates, event handlers. Other dispatchers (IO, Default) execute on thread pools. You switch to Main via `withContext(Dispatchers.Main)` after background work. Example: `val data = withContext(Dispatchers.IO) { fetch() }; withContext(Dispatchers.Main) { ui.update(data) }`. `Dispatchers.Main` is platform-specific — Android provides it, JVM/desktop don't have a default. Not specifying a dispatcher uses the inherited one (context propagation).
-
-### Q103. Explain channels and their relationship to Flow.
-
-Channels (`Channel<T>`) are queues for coroutine communication — `send()` and `receive()` are suspend functions. Example: `val channel = Channel<Int>(); launch { channel.send(1) }; channel.receive()`. Hot by default (emit regardless of receivers). Flow is a Channel wrapper with operators (map, filter, etc.). Channels are lower-level; Flow is higher-level and easier to use. Channels useful for: actor models, complex coordination. Flow preferable for most cases.
-
-```kotlin
-val channel = Channel<Int>()
-launch { channel.send(1) }
-val x = channel.receive()
-```
-
-### Q104. Explain context preservation and CoroutineContext.
-
-`CoroutineContext` carries context across suspend points — job, dispatcher, exception handler, etc. When you `launch { }`, the context is inherited: same dispatcher, job parent, etc. You can override: `launch(Dispatchers.IO + exceptionHandler) { }` combines contexts. `withContext(dispatcher)` temporarily switches context, then restores. Context propagation ensures: cleanup works, exceptions are handled, dispatchers are respected. You rarely create context manually; Spring/Android/Ktor manage it.
-
-### Q105. Explain exception handling in coroutines (CoroutineExceptionHandler).
-
-By default, unhandled exceptions crash the coroutine and its scope. Use `CoroutineExceptionHandler` to customize: `val handler = CoroutineExceptionHandler { _, ex -> logger.error(ex) }`. Launch with handler: `launch(handler) { throw Exception() }`. The handler is called, exception doesn't crash. Caveat: handler only catches uncaught exceptions from `launch` (fire-and-forget); `async` stores exceptions in the result, you handle them on `await()`. Always handle exceptions in production code.
-
-### Q106. Explain the `runBlocking` function and when to use it.
-
-`runBlocking` blocks the current thread, running a coroutine to completion, then returns. Example: `runBlocking { delay(1000); println("done") }` — blocks for 1 second. Used in: main functions (to bridge suspend to blocking), integration tests, demonstrations. Avoid in production async code — blocking defeats the purpose of coroutines. Used in examples because `main` isn't suspend. For tests, use `runTest` (kotlinx-coroutines-test) instead.
-
-### Q107. What is the difference between `launch`, `async`, and `runBlocking`?
-
-- `launch`: fire-and-forget, returns `Job`, called from coroutine or suspension point, non-blocking
-- `async`: returns result via `await()`, called from coroutine, non-blocking, returns `Deferred<T>`
-- `runBlocking`: blocks current thread, creates a bridge for suspend code, not a true coroutine builder
-
-Use `launch` for side effects (logging, analytics). Use `async` for results you need to await. Use `runBlocking` only to bridge suspend to blocking code (main functions, tests). Mixing them: `launch { async { ... }.await() }` is valid but async's advantage is moot (you're not parallelizing).
-
----
-
-## DSL Design & Building
-
-### Q108. Explain lambda receivers and DSL design patterns.
-
-Lambda with receiver (`String.() -> Int`) has implicit access to String methods: `val len = { length }` calls String.length implicitly. Used in DSLs to enable fluent, natural syntax. Example: `html { body { h1 { +"Hello" } } }` — each lambda receives its element implicitly. Without receivers: `html(body(h1(+"Hello")))` is nested and unreadable. Receivers make DSLs feel like language extensions. Gradle, Spring, HTML builders all use this pattern.
-
-### Q109. Explain the builder pattern in Kotlin with an example.
-
-Builder pattern: separate construction from representation. Kotlin simplifies with apply: `StringBuilder().apply { append("a"); append("b") }.toString()`. Even simpler with DSL: `buildString { append("a"); append("b") }`. The builder is implicit — you're inside `StringBuilder` context (`this`). Advantages: clean API, immutability (result is created and done), composability. Kotlin's DSLs are builders — you build up a structure (HTML, SQL, configuration) and finalize it.
-
-```kotlin
-val html = buildString {
-  append("<div>")
-  append("content")
-  append("</div>")
-}
-```
-
-### Q110. Explain the marker interface pattern in Kotlin DSLs.
-
-Marker interfaces restrict where lambdas can be nested: `@DslMarker annotation class HtmlMarker`. Annotate classes: `@HtmlMarker class Body { ... }`. Now, inside a `Body` lambda, `this` is Body, not Html. Accessing outer scope requires explicit `this@Html`. Prevents accidental nesting errors (e.g., putting a `<div>` in a `<head>`). Example: `html { body { html { } } }` — the inner `html { }` is caught at compile time because `this` is Body, not Html. Safety feature for DSLs.
-
-### Q111. Explain infix functions and their use in DSLs.
-
-Infix functions: `infix fun String.to(other: String) = Pair(this, other)`. Call without dot: `"a" to "b"` instead of `"a".to("b")`. Used in DSLs for: natural-looking syntax (`mapOf(1 to "a")` vs `mapOf(Pair(1, "a"))`), configuration (`should equal "value"`). Infix is syntactic sugar — less dot notation = more readable. Restrict to common operations (to, plus, times). Overuse makes code confusing.
-
----
-
-## Reflection & Metaprogramming
-
-### Q112. What is Kotlin reflection and how does it differ from Java reflection?
-
-Kotlin reflection is higher-level than Java reflection — works with Kotlin's type system directly. `MyClass::class` is a `KClass`, not `Class`. Advantages: KClass knows about properties (not just fields), supports extensions, handles nullable types. Example: `MyClass::class.members` lists all members; `MyClass::prop.get(obj)` accesses a property. You can also use Java reflection: `MyClass::class.java` bridges to Java. Kotlin reflection is cleaner but less mature (performance). Necessary for: serialization libraries, dependency injection, advanced type manipulation.
-
-### Q113. Explain serialization and why Kotlin makes it complex.
-
-Serialization (object -> bytes/JSON) requires accessing object state. Kotlin complicates this: null safety, immutability, generics. Two approaches: Java reflection (slow, verbose) or code generation (fast, clean). Kotlinx.serialization uses code generation: `@Serializable data class User(val name: String)` generates serialization code. Alternative: Jackson (Java), Moshi (Android). Kotlinx.serialization is Kotlin-first and recommended for new code. Downside: requires annotation, no dynamic serialization.
-
-### Q114. Explain inline reified with reflection.
-
-Combining `inline` + `reified` with reflection: `inline fun <reified T> getProperty(obj: Any, name: String) = obj::class.memberProperties.first { it.name == name }`. `reified` preserves type info, then `T::class` accesses class metadata. Use case: generic serialization, ORM mapping. This is advanced — most code uses libraries that handle it. Understanding it is interview material for senior roles.
-
----
-
-## Operator Overloading & Delegation
-
-### Q115. Explain operator overloading and common operators.
-
-Operator overloading: implement operator methods. Example: `operator fun plus(other: Complex) = Complex(real + other.real, imag + other.imag)` lets `a + b` call `a.plus(b)`. Common: `+` (plus), `-` (minus), `*` (times), `/` (div), `%` (mod), `==` (equals), `<` (compareTo), `[]` (get/set), `()` (invoke), `..` (rangeTo). Useful for: DSLs, domain-specific values. Don't overload if it's confusing — `+` should mean addition, not something weird.
-
-```kotlin
-data class Complex(val real: Double, val imag: Double) {
-  operator fun plus(other: Complex) = Complex(real + other.real, imag + other.imag)
-}
-```
-
-### Q116. Explain the `invoke` operator and its use cases.
-
-`operator fun invoke(...)` lets you call an object like a function: `val adder = { a: Int, b: Int -> a + b }; adder(1, 2)`. More generally: `class Multiplier(val x: Int) { operator fun invoke(y: Int) = x * y }; val times3 = Multiplier(3); times3(5)` returns 15. Use cases: function-like objects, command pattern, strategy pattern. Less common than other operators but powerful for DSLs and functional programming.
-
-### Q117. Explain the `get` and `set` operators.
-
-`operator fun get(key: K): V` lets `obj[key]` return a value. `operator fun set(key: K, value: V)` lets `obj[key] = value` set a value. Example: `class Store { operator fun get(item: String) = prices[item]; operator fun set(item: String, price: Double) { prices[item] = price } }`. Turns objects into maps/arrays. Useful for: matrix libraries, caching, configuration maps. Works on any object; not limited to collections.
-
-### Q118. Explain destructuring with component functions.
-
-`operator fun componentN()` lets destructuring unpack objects: `data class Point(x: Int, y: Int)` auto-generates `component1()` (returns x), `component2()` (returns y). Then: `val (a, b) = point` unpacks. Custom: `class Custom { operator fun component1() = "first"; operator fun component2() = "second" }`. Destructuring combines `componentN()` functions. Limited to 5 components by convention. Useful for: returning multiple values, pattern matching.
-
----
-
-## Performance & Optimization
-
-### Q119. Explain `inline` functions and their performance implications.
-
-`inline` functions are substituted at compile time (no function call overhead). Useful for: lambdas (avoids allocation), hot paths (small functions called frequently). Downsides: increases bytecode size (code duplication), non-local returns (break out of enclosing scope), cannot be recursive. Benchmark before inlining — the overhead of small functions is often negligible. Modern JITs (HotSpot) inline automatically; manual inlining is a micro-optimization. Use `inline` when: functions take lambdas (avoid allocation) or in frameworks (Kotlin stdlib does this).
-
-### Q120. Explain object allocation and garbage collection in Kotlin.
-
-Kotlin objects are allocated on the heap, garbage collected when unreachable. Collections (List, Map) allocate objects for each entry. Excessive allocation causes GC pressure, pauses. Optimization: reuse objects (e.g., object pools), use primitives (Int vs Integer via autoboxing), avoid intermediate collections (`sequence` instead of `list` chains). Kotlin standard library does this for you (`map { }.filter { }` chains use sequences internally for efficiency in some cases — not always). Profile before optimizing.
-
-### Q121. What are data classes and their performance characteristics?
-
-Data classes auto-generate `equals()`, `hashCode()`, `toString()`, `copy()`. Advantages: safe for sets/maps, readable error messages. Performance: these methods have overhead (equality checks fields, hashCode hashes fields). For huge datasets, avoid data classes in hot paths if these methods aren't needed. In practice, the overhead is minimal and readability wins. Profile if you suspect issues. Most Kotlin code favors data classes for safety/readability.
-
-### Q122. Explain sequence vs list performance tradeoffs.
-
-`Sequence` is lazy — intermediate operations don't create collections. `list.map { }.filter { }` creates two lists (intermediate); `sequence().map { }.filter { }` chains without allocation. Benefit: for large collections or many transformations, sequences are faster. Cost: some operations (size, sorting, random access) require materialization (toList()). Benchmark: sequences are faster for long chains, lists are faster for small collections or when you need multiple passes. Modern Kotlin often prefers sequences.
-
-### Q123. Explain string interning and identity vs equality.
-
-String interning: JVM caches string literals and identical strings. `"hello" === "hello"` is true (same reference). `String("hello") === "hello"` might be false (different object). Equality (`==` calls `equals()`) is safer: `"hello" == String("hello")` is true. Use `==` for comparison; `===` only when you specifically need identity. Interning is an optimization; don't rely on it in code. Kotlin uses `===` rarely (and `==` by default in equals implementations).
-
----
-
-## Functional Programming in Kotlin
-
-### Q124. Explain pure functions and their benefits.
-
-Pure function: output depends only on inputs, no side effects (no mutation, I/O, time-dependent). Example: `fun add(a: Int, b: Int) = a + b` vs `fun add(a: Int, b: Int) { println("adding"); return a + b }` (side effect). Benefits: testable, composable, parallelizable, reasoned about. Functional programming encourages pure functions. Kotlin supports both (not purely functional like Haskell) — mix pure and effectful as needed. Mark pure functions explicitly or document them.
-
-### Q125. Explain immutability and its relationship to functional programming.
-
-Immutability: objects don't change after creation. `val` enforces this. Functional programming relies on immutability (no shared mutable state, easier parallelism). Kotlin encourages but doesn't enforce: `var` exists, mutable collections exist. Best practice: default to immutable (`val`, `List<T>`), use mutable only when necessary. Kotlin's syntax makes immutability ergonomic (`copy()` for updates, `map` chains instead of mutation).
-
-### Q126. Explain composition and why it's superior to inheritance in functional programming.
-
-Composition: build larger behavior from smaller functions (`f(g(x))`). Inheritance: share code through class hierarchy. Functional preference: composition (simpler, more flexible). Example: instead of `class LoggedRepository(val repo: Repository) : Repository by repo { override fun get() = { log(); repo.get() } }`, use `fun withLogging(repo: Repository) = Repository { log(); repo.get() }`. Composition is easier to test (less coupling), parallelize, and reason about. Functional languages heavily rely on composition.
-
-### Q127. Explain currying and partial application in Kotlin.
-
-Currying: transform function of N args into N functions of 1 arg each. Example: `fun add(a: Int, b: Int) = a + b` becomes `fun curried(a: Int) = { b: Int -> a + b }`. Partial application: call a multi-arg function with some args, get back a function of remaining args. Example: `fun multiply(a: Int, b: Int, c: Int) = a * b * c; fun multiplyBy2 = { b: Int, c: Int -> multiply(2, b, c) }`. Useful for: function composition, creating specialized functions. Kotlin doesn't have built-in support; you implement manually.
-
-### Q128. Explain monads and Maybe/Option pattern in Kotlin.
-
-Monad: a pattern for chaining computations that might fail/return nothing. `Maybe<T>` (also called `Option<T>`) wraps a value or nothing. Kotlin's `?.` and `?:` replicate this: `val result = obj?.method() ?: default`. Java Optional is similar: `Optional<T>`. Monadic pattern: `flatMap` chains operations, short-circuiting on None. Example: `Maybe.of(user).flatMap { getMaybeAge(it) }.flatMap { getCategory(it) }` — if any step returns nothing, the result is nothing. Kotlin's nullable types are a simplified monad.
-
----
-
-## Java Interoperability
-
-### Q129. Explain platform types and null safety when calling Java.
-
-When you call Java methods from Kotlin, return types lack null info. A Java method `String getName()` could return null or not. Kotlin represents this as a platform type `String!` — "could be null or not". You must decide: treat as `String?` (nullable) or `String` (non-null). Platform types are unsafe — you lose compile-time null safety. Best practice: wrap Java code with Kotlin nullability: `fun getNameSafe(): String? = obj.getName()` documents the choice and makes it explicit.
-
-### Q130. Explain checked exceptions in Kotlin.
-
-Java has checked exceptions (must be caught or declared). Kotlin has no checked exceptions — all exceptions are unchecked. When you call Java code throwing checked exceptions, Kotlin ignores them. Example: `FileInputStream` throws `FileNotFoundException` (checked); Kotlin code doesn't force you to catch it. You can still catch it: `try { FileInputStream(...) } catch (e: FileNotFoundException)`. This is a design decision: Kotlin treats all exceptions as unchecked, simplifying error handling.
-
-### Q131. What is the difference between Java's `void` and Kotlin's `Unit`?
-
-Java `void` means "no return value". Kotlin `Unit` is an actual type representing "no value" (a singleton object). `fun foo(): Unit = Unit` is valid; `fun bar() { ... }` implicitly returns `Unit`. Benefits: composability (treat Unit as a value, pass it around), consistency (everything is a type). When calling Java methods returning void from Kotlin: they return `Unit`. When calling Kotlin functions returning Unit from Java: they return `void`. Functionally equivalent; Kotlin's model is more consistent.
-
-### Q132. Explain Kotlin's SAM conversion when calling Java.
-
-Java Single Abstract Method interfaces (like `Runnable`) can be implemented as lambdas in Kotlin (automatic SAM conversion): `thread(Runnable { println("hi") })` simplifies to `thread { println("hi") }`. Works only with one-method interfaces. Kotlin doesn't require SAM for its own interfaces — it has lambdas natively. SAM conversion is a convenience for Java libraries. Can be disabled with `@Suppress("FunctionName")` or `@JvmSuppressWildcards` on the interface.
-
-### Q133. What is `@JvmName` and when should you use it?
-
-`@JvmName("altName")` changes the name of a method/property seen from Java. Useful when Kotlin generates a name that Java doesn't like. Example: a Kotlin property `isEmpty` generates a Java method `isEmpty()`, but if you want the Java name to be different, use `@JvmName("empty")`. Less common case: top-level functions in a Kotlin file generate a class `FileKt`; `@JvmName` changes the class name. Use when: interoperability with Java is important, existing Java code expects certain names.
-
----
-
-## Advanced Coroutine Patterns
-
-### Q134. Explain actor pattern with coroutines.
-
-Actor pattern: encapsulate mutable state and expose it via message passing (instead of shared mutable state). Kotlin: `actor<Message> { for (msg in channel) { when (msg) { ... } } }` creates an actor. Send messages: `actor.send(Message(...))`. Useful for: shared resources (database connections, caches), avoiding locks. Actors process messages serially (no concurrency within actor), making state updates safe. Actors scale better than threads because they're lightweight.
-
-```kotlin
-sealed class CounterMsg
-object IncMsg : CounterMsg()
-class GetMsg(val response: CompletableFuture<Int>) : CounterMsg()
-
-val counter = actor<CounterMsg> {
-  var count = 0
-  for (msg in channel) {
-    when (msg) {
-      is IncMsg -> count++
-      is GetMsg -> msg.response.complete(count)
-    }
-  }
-}
-```
-
-### Q135. Explain backpressure and how to handle it in coroutines.
-
-Backpressure: producer is faster than consumer, so messages pile up (memory issue). Solutions: buffer (bounded, slow producer when full), drop (drop old messages), suspend (producer waits for consumer). `Channel<T>(capacity)` sets buffer size. `Channel(UNLIMITED)` buffers everything (careful!), `Channel(RENDEZVOUS)` has no buffer (producer waits). `Flow` has built-in backpressure — it's cold, so producer doesn't emit until consumer collects. Hot flows (`SharedFlow`, `StateFlow`) with bounded buffers can handle backpressure via drop/buffer strategies.
-
-### Q136. Explain mutex and the difference from Java locks.
-
-Mutex: mutual exclusion lock for coroutines (non-blocking). `val lock = Mutex(); lock.withLock { ... }` ensures only one coroutine enters the block at a time. Other coroutines suspend, not block. Advantage over `synchronized`: doesn't block threads. Use `Mutex` in coroutine code; use `ReentrantLock` in blocking code. Kotlin also has `RwLock` (multiple readers, single writer). Avoid low-level locking; high-level patterns (actors, channels) are often better.
-
-### Q137. Explain supervisor jobs and error propagation.
-
-`SupervisorJob` changes error propagation: when a child fails, other children aren't cancelled (only the failed one). Regular job (default): child failure cancels all siblings. Example: `launch(SupervisorJob()) { launch { throw Ex() }; launch { ... } }` — second launch continues even if first throws. Useful for: independent tasks (one failure shouldn't stop others). Exception still isn't caught (must handle with try/catch or exception handler). Supervisor jobs require more thought (not a silver bullet).
-
-### Q138. Explain the `yield` function and cooperative cancellation.
-
-`yield()` is a suspension point: coroutine can be cancelled here. Also yields the thread to other work (scheduler point). Use in loops to allow cancellation: `while (isActive) { work(); yield() }` checks for cancellation and lets scheduler run other coroutines. Without `yield()`, a long-running coroutine blocks others (busy loop). Suspension functions like `delay()` and `suspendCancellableCoroutine` include yield implicitly. Manual yielding is a cooperative concurrency pattern — essential for large computations.
-
----
-
-## Type-Safe DSLs
-
-### Q139. Explain HTML DSL and its type safety.
-
-HTML builders are type-safe DSLs: `html { body { h1 { +"Hello" } } }` — compiler ensures valid nesting (h1 is valid in body, not vice versa). Implemented with sealed classes and lambdas with receivers: each element type has restricted children. Benefits: invalid HTML is caught at compile time, IDE autocomplete, readable syntax. Example: Kotlin stdlib `html {}` builder or kotlinx.html library. Type safety prevents entire categories of bugs.
-
-### Q140. Explain SQL DSLs and the Exposed framework.
-
-Exposed provides two DSLs: DAO (ORM-like, object-oriented) and DSL (SQL-like, functional). DSL example: `Users.select().where { age > 18 }` is type-safe SQL. Type safety: column types are checked, joins are validated. Benefits over raw SQL: no string injection, compile-time checking, refactoring-safe. Exposed's DSL is more idiomatic for Kotlin than raw SQL. Less mature than Hibernate but cleaner and more Kotlin-like.
-
-```kotlin
-(Users select Users.name where { Users.age > 18 }).toList()
-```
-
----
-
-## Compiler Plugins & Code Generation
-
-### Q141. Explain compiler plugins and their use cases.
-
-Compiler plugins intercept compilation and modify the AST (abstract syntax tree) or generate code. Use cases: serialization libraries (kotlinx.serialization generates serializers), code generation (reducing boilerplate), DSL extensions. Plugins are advanced (require understanding Kotlin compiler internals). Example: `@Serializable` is handled by a plugin (code generation). Other examples: Jetpack Compose, Parcelize. Plugins are powerful but complex — use existing plugins (don't write custom unless necessary). Each Kotlin version requires plugin updates (maintenance burden).
-
-### Q142. Explain annotation processing and @Retention.
-
-Annotation processing runs during compilation, reading annotations and generating code. `@Retention(RUNTIME)` keeps annotation in runtime bytecode (reflection visible). `@Retention(SOURCE)` removes it after compilation (docs only). Processing happens in rounds: read annotations, generate files, repeat. Used in: Dagger DI (generates component implementations), Lombok (generates getters/setters), KAPT (Kotlin annotation processing). Kotlin-native approach: compiler plugins (better than Java's annotation processing). KAPT (Kotlin Annotation Processing Tool) allows Java annotation processors to work with Kotlin.
-
-### Q143. Explain Kotlin multiplatform and code generation.
-
-Kotlin Multiplatform (KMP) allows sharing code across JVM, JS, Native. Platform-specific code via `expect/actual`: `expect class File` (abstract), then `actual class File` (platform-specific implementation) in each platform. Useful for: libraries (share logic, native I/O per platform), business logic (shared algorithms). Code generation is per-platform. Modern approach: share as much as possible, platform-specific only where necessary (I/O, threading, graphics).
-
----
-
-## Memory & GC Considerations
-
-### Q144. Explain boxing and autoboxing.
-
-Primitives (Int, Long, Boolean) are unboxed (stack, efficient). Generics require objects, so `List<Int>` boxes ints into `Integer` objects. Each box allocation is memory overhead; unboxing back to primitive is CPU overhead. Kotlin can optimize: the compiler sometimes avoids boxing (primitive specialization in newer versions). Multiplatform Kotlin (Native, JS) handles this differently. For hot paths with millions of elements, be aware of boxing (use specialized collections, primitive arrays).
-
-### Q145. Explain weak references and their use cases.
-
-Weak references don't prevent garbage collection. `val ref = WeakReference(obj)` — if obj is unreachable otherwise, GC collects it despite the weak ref. Use cases: caches (cache entries shouldn't keep objects alive), observers (listeners shouldn't keep subjects alive). Example: Android's context leaks — listeners holding context refs prevent GC. Weak refs: `ref.get()` returns the object or null if collected. Java has `WeakHashMap` (uses weak keys). Kotlin: use with care (unexpected nulls) but useful for memory-efficient patterns.
-
-### Q146. Explain soft references.
-
-Soft references are like weak refs but hint to GC: "collect this if you need memory." `SoftReference(obj)` — GC prefers not to collect soft refs (but can if heap is low). Use: resource-intensive caches (images, parsers). More forgiving than weak refs — you get the object if GC hasn't been pressed for memory. Java has no soft ref collections in stdlib; use `java.util.SoftReference` manually. Less common than weak refs but useful for caching large objects.
-
----
-
-## Spot-the-Bug Scenarios
 
 ### Q147. Spot the bug: null safety
 
@@ -982,6 +770,170 @@ s.contains(p)  // May not find p (set uses old hash)
 
 ---
 
+## Android & Platform Context
+
+### Q89. What is a ViewModel and how does Kotlin make it ergonomic?
+
+`ViewModel` survives configuration changes (screen rotation) and holds UI state. You extend `ViewModel` and pass data via `by lazy` or fields. Kotlin's conciseness shines: one-liner initialization vs Java's verbose null checks. Example: `val users: LiveData<List<User>> = MutableLiveData()`. Android's `viewModelScope` (Kotlin extension) simplifies coroutine launching: `viewModelScope.launch { fetch() }` — no explicit cancellation needed. Kotlin's property syntax and extension functions make ViewModels clean.
+
+### Q90. What is LiveData and when do you use it vs StateFlow?
+
+`LiveData<T>` is an observable data holder, lifecycle-aware (only notifies active observers). Used heavily pre-Kotlin Coroutines. `StateFlow<T>` is a coroutine-based hot flow, simpler API, no lifecycle awareness. LiveData is Android-specific; StateFlow is multiplatform. Modern choice: `StateFlow` + `lifecycleScope.launchWhenStarted` for lifecycle awareness. LiveData is still valid (widely supported) but being phased out. If starting a new Android project, prefer `StateFlow` + coroutines.
+
+### Q91. What is Compose and how does it differ from XML layouts?
+
+Jetpack Compose is a declarative UI framework (like React) for building UIs with pure Kotlin functions. Example: `@Composable fun UserCard(user: User) { Text(user.name) }`. Traditional XML layouts are imperative (imperatively update views). Compose: automatic recomposition (state changes trigger UI updates), no manual findViewById, type-safe. Drawback: only works on Android 5.0+; learning curve for imperative developers. Future of Android UI. If targeting modern Android, Compose is preferred; if supporting older API levels, stick with XML.
+
+### Q92. Explain Compose's recomposition and state.
+
+Recomposition: when state changes, Compose re-executes the composable function and updates the UI. `remember { mutableStateOf(value) }` stores state across recompositions. Example: `var count by remember { mutableStateOf(0) }` makes count observable — changing it triggers recomposition. Smart recomposition: only affected composables recompose (not the whole tree). Don't store mutable state outside `remember` — it will reset on recomposition. Compose's model is functional and predictable — state flows one direction (top-down).
+
+### Q93. What is an Intent in Android and how is it used?
+
+Intent is a message for starting activities, services, or broadcasts. Explicit: `Intent(context, TargetActivity::class.java).startActivity()` — starts a specific activity. Implicit: `Intent(ACTION_VIEW, Uri.parse("https://example.com"))` — let Android choose which app handles it. Pass data: `putExtra("key", value)`. Retrieve: `intent.getStringExtra("key")`. Modern Kotlin: use Activity Result APIs (`registerForActivityResult`) instead of `startActivityForResult` callbacks. Intents enable component communication and inter-app interaction.
+
+### Q94. Explain Kotlin's `by lazy` and its use in Android.
+
+`val x by lazy { expensive() }` computes x on first access, then caches the result. Thread-safe by default. Useful in Android: `val sharedPref by lazy { context.getSharedPreferences(...) }` — expensive access deferred. Combine with extensions: `val viewModel by lazy { ViewModelProvider(this).get(MyViewModel::class.java) }` (now simplified by androidx extensions). Lazy is a performance optimization and readability tool. Watch out: if accessed on different threads concurrently, it initializes once but may compute multiple times; this is acceptable.
+
+### Q95. What is a Fragment and how do Kotlin extensions help?
+
+Fragment is a reusable piece of UI (like a subsection of an activity). Fragments have lifecycles, backstack support, and args passing. Kotlin extensions `androidx.fragment:fragment-ktx` provide: `val args by navArgs()` (type-safe args), `viewLifecycleOwner` scope, `Fragment.viewBinding()` (no findViewById). Example: `val viewModel: MyViewModel by viewModels()` auto-injects a ViewModel. Kotlin makes Fragment boilerplate-heavy work clean. Modern Navigation Component (Kotlin-first) simplifies fragment management.
+
+### Q96. Explain shared preferences and how to access them in Kotlin.
+
+Shared Preferences store small key-value data (app settings). Access: `getSharedPreferences("name", MODE_PRIVATE).edit { putString("key", value); apply() }`. Kotlin shortcuts: `context.getSharedPreferences(...).edit { ... }` with apply block. Modern: `DataStore` (Kotlin-first replacement for SharedPrefs) using coroutines. `DataStore` is simpler, type-safe, and handles migrations. If starting new Android projects, use DataStore; SharedPrefs are legacy but still widely used.
+
+---
+
+## DSL Design
+
+### Q108. Explain lambda receivers and DSL design patterns.
+
+Lambda with receiver (`String.() -> Int`) has implicit access to String methods: `val len = { length }` calls String.length implicitly. Used in DSLs to enable fluent, natural syntax. Example: `html { body { h1 { +"Hello" } } }` — each lambda receives its element implicitly. Without receivers: `html(body(h1(+"Hello")))` is nested and unreadable. Receivers make DSLs feel like language extensions. Gradle, Spring, HTML builders all use this pattern.
+
+### Q109. Explain the builder pattern in Kotlin with an example.
+
+Builder pattern: separate construction from representation. Kotlin simplifies with apply: `StringBuilder().apply { append("a"); append("b") }.toString()`. Even simpler with DSL: `buildString { append("a"); append("b") }`. The builder is implicit — you're inside `StringBuilder` context (`this`). Advantages: clean API, immutability (result is created and done), composability. Kotlin's DSLs are builders — you build up a structure (HTML, SQL, configuration) and finalize it.
+
+```kotlin
+val html = buildString {
+  append("<div>")
+  append("content")
+  append("</div>")
+}
+```
+
+### Q110. Explain the marker interface pattern in Kotlin DSLs.
+
+Marker interfaces restrict where lambdas can be nested: `@DslMarker annotation class HtmlMarker`. Annotate classes: `@HtmlMarker class Body { ... }`. Now, inside a `Body` lambda, `this` is Body, not Html. Accessing outer scope requires explicit `this@Html`. Prevents accidental nesting errors (e.g., putting a `<div>` in a `<head>`). Example: `html { body { html { } } }` — the inner `html { }` is caught at compile time because `this` is Body, not Html. Safety feature for DSLs.
+
+### Q111. Explain infix functions and their use in DSLs.
+
+Infix functions: `infix fun String.to(other: String) = Pair(this, other)`. Call without dot: `"a" to "b"` instead of `"a".to("b")`. Used in DSLs for: natural-looking syntax (`mapOf(1 to "a")` vs `mapOf(Pair(1, "a"))`), configuration (`should equal "value"`). Infix is syntactic sugar — less dot notation = more readable. Restrict to common operations (to, plus, times). Overuse makes code confusing.
+
+### Q139. Explain HTML DSL and its type safety.
+
+HTML builders are type-safe DSLs: `html { body { h1 { +"Hello" } } }` — compiler ensures valid nesting (h1 is valid in body, not vice versa). Implemented with sealed classes and lambdas with receivers: each element type has restricted children. Benefits: invalid HTML is caught at compile time, IDE autocomplete, readable syntax. Example: Kotlin stdlib `html {}` builder or kotlinx.html library. Type safety prevents entire categories of bugs.
+
+### Q140. Explain SQL DSLs and the Exposed framework.
+
+Exposed provides two DSLs: DAO (ORM-like, object-oriented) and DSL (SQL-like, functional). DSL example: `Users.select().where { age > 18 }` is type-safe SQL. Type safety: column types are checked, joins are validated. Benefits over raw SQL: no string injection, compile-time checking, refactoring-safe. Exposed's DSL is more idiomatic for Kotlin than raw SQL. Less mature than Hibernate but cleaner and more Kotlin-like.
+
+```kotlin
+(Users select Users.name where { Users.age > 18 }).toList()
+```
+
+---
+
+## Reflection, Metaprogramming & Compiler Plugins
+
+### Q112. What is Kotlin reflection and how does it differ from Java reflection?
+
+Kotlin reflection is higher-level than Java reflection — works with Kotlin's type system directly. `MyClass::class` is a `KClass`, not `Class`. Advantages: KClass knows about properties (not just fields), supports extensions, handles nullable types. Example: `MyClass::class.members` lists all members; `MyClass::prop.get(obj)` accesses a property. You can also use Java reflection: `MyClass::class.java` bridges to Java. Kotlin reflection is cleaner but less mature (performance). Necessary for: serialization libraries, dependency injection, advanced type manipulation.
+
+### Q113. Explain serialization and why Kotlin makes it complex.
+
+Serialization (object -> bytes/JSON) requires accessing object state. Kotlin complicates this: null safety, immutability, generics. Two approaches: Java reflection (slow, verbose) or code generation (fast, clean). Kotlinx.serialization uses code generation: `@Serializable data class User(val name: String)` generates serialization code. Alternative: Jackson (Java), Moshi (Android). Kotlinx.serialization is Kotlin-first and recommended for new code. Downside: requires annotation, no dynamic serialization.
+
+### Q114. Explain inline reified with reflection.
+
+Combining `inline` + `reified` with reflection: `inline fun <reified T> getProperty(obj: Any, name: String) = obj::class.memberProperties.first { it.name == name }`. `reified` preserves type info, then `T::class` accesses class metadata. Use case: generic serialization, ORM mapping. This is advanced — most code uses libraries that handle it. Understanding it is interview material for senior roles.
+
+### Q141. Explain compiler plugins and their use cases.
+
+Compiler plugins intercept compilation and modify the AST (abstract syntax tree) or generate code. Use cases: serialization libraries (kotlinx.serialization generates serializers), code generation (reducing boilerplate), DSL extensions. Plugins are advanced (require understanding Kotlin compiler internals). Example: `@Serializable` is handled by a plugin (code generation). Other examples: Jetpack Compose, Parcelize. Plugins are powerful but complex — use existing plugins (don't write custom unless necessary). Each Kotlin version requires plugin updates (maintenance burden).
+
+### Q142. Explain annotation processing and @Retention.
+
+Annotation processing runs during compilation, reading annotations and generating code. `@Retention(RUNTIME)` keeps annotation in runtime bytecode (reflection visible). `@Retention(SOURCE)` removes it after compilation (docs only). Processing happens in rounds: read annotations, generate files, repeat. Used in: Dagger DI (generates component implementations), Lombok (generates getters/setters), KAPT (Kotlin annotation processing). Kotlin-native approach: compiler plugins (better than Java's annotation processing). KAPT (Kotlin Annotation Processing Tool) allows Java annotation processors to work with Kotlin.
+
+### Q143. Explain Kotlin multiplatform and code generation.
+
+Kotlin Multiplatform (KMP) allows sharing code across JVM, JS, Native. Platform-specific code via `expect/actual`: `expect class File` (abstract), then `actual class File` (platform-specific implementation) in each platform. Useful for: libraries (share logic, native I/O per platform), business logic (shared algorithms). Code generation is per-platform. Modern approach: share as much as possible, platform-specific only where necessary (I/O, threading, graphics).
+
+---
+
+## Performance, Memory & GC
+
+### Q119. Explain `inline` functions and their performance implications.
+
+`inline` functions are substituted at compile time (no function call overhead). Useful for: lambdas (avoids allocation), hot paths (small functions called frequently). Downsides: increases bytecode size (code duplication), non-local returns (break out of enclosing scope), cannot be recursive. Benchmark before inlining — the overhead of small functions is often negligible. Modern JITs (HotSpot) inline automatically; manual inlining is a micro-optimization. Use `inline` when: functions take lambdas (avoid allocation) or in frameworks (Kotlin stdlib does this).
+
+### Q120. Explain object allocation and garbage collection in Kotlin.
+
+Kotlin objects are allocated on the heap, garbage collected when unreachable. Collections (List, Map) allocate objects for each entry. Excessive allocation causes GC pressure, pauses. Optimization: reuse objects (e.g., object pools), use primitives (Int vs Integer via autoboxing), avoid intermediate collections (`sequence` instead of `list` chains). Kotlin standard library does this for you (`map { }.filter { }` chains use sequences internally for efficiency in some cases — not always). Profile before optimizing.
+
+### Q121. What are data classes and their performance characteristics?
+
+Data classes auto-generate `equals()`, `hashCode()`, `toString()`, `copy()`. Advantages: safe for sets/maps, readable error messages. Performance: these methods have overhead (equality checks fields, hashCode hashes fields). For huge datasets, avoid data classes in hot paths if these methods aren't needed. In practice, the overhead is minimal and readability wins. Profile if you suspect issues. Most Kotlin code favors data classes for safety/readability.
+
+### Q122. Explain sequence vs list performance tradeoffs.
+
+`Sequence` is lazy — intermediate operations don't create collections. `list.map { }.filter { }` creates two lists (intermediate); `sequence().map { }.filter { }` chains without allocation. Benefit: for large collections or many transformations, sequences are faster. Cost: some operations (size, sorting, random access) require materialization (toList()). Benchmark: sequences are faster for long chains, lists are faster for small collections or when you need multiple passes. Modern Kotlin often prefers sequences.
+
+### Q123. Explain string interning and identity vs equality.
+
+String interning: JVM caches string literals and identical strings. `"hello" === "hello"` is true (same reference). `String("hello") === "hello"` might be false (different object). Equality (`==` calls `equals()`) is safer: `"hello" == String("hello")` is true. Use `==` for comparison; `===` only when you specifically need identity. Interning is an optimization; don't rely on it in code. Kotlin uses `===` rarely (and `==` by default in equals implementations).
+
+### Q144. Explain boxing and autoboxing.
+
+Primitives (Int, Long, Boolean) are unboxed (stack, efficient). Generics require objects, so `List<Int>` boxes ints into `Integer` objects. Each box allocation is memory overhead; unboxing back to primitive is CPU overhead. Kotlin can optimize: the compiler sometimes avoids boxing (primitive specialization in newer versions). Multiplatform Kotlin (Native, JS) handles this differently. For hot paths with millions of elements, be aware of boxing (use specialized collections, primitive arrays).
+
+### Q145. Explain weak references and their use cases.
+
+Weak references don't prevent garbage collection. `val ref = WeakReference(obj)` — if obj is unreachable otherwise, GC collects it despite the weak ref. Use cases: caches (cache entries shouldn't keep objects alive), observers (listeners shouldn't keep subjects alive). Example: Android's context leaks — listeners holding context refs prevent GC. Weak refs: `ref.get()` returns the object or null if collected. Java has `WeakHashMap` (uses weak keys). Kotlin: use with care (unexpected nulls) but useful for memory-efficient patterns.
+
+### Q146. Explain soft references.
+
+Soft references are like weak refs but hint to GC: "collect this if you need memory." `SoftReference(obj)` — GC prefers not to collect soft refs (but can if heap is low). Use: resource-intensive caches (images, parsers). More forgiving than weak refs — you get the object if GC hasn't been pressed for memory. Java has no soft ref collections in stdlib; use `java.util.SoftReference` manually. Less common than weak refs but useful for caching large objects.
+
+---
+
+## Java Interoperability
+
+### Q129. Explain platform types and null safety when calling Java.
+
+When you call Java methods from Kotlin, return types lack null info. A Java method `String getName()` could return null or not. Kotlin represents this as a platform type `String!` — "could be null or not". You must decide: treat as `String?` (nullable) or `String` (non-null). Platform types are unsafe — you lose compile-time null safety. Best practice: wrap Java code with Kotlin nullability: `fun getNameSafe(): String? = obj.getName()` documents the choice and makes it explicit.
+
+### Q130. Explain checked exceptions in Kotlin.
+
+Java has checked exceptions (must be caught or declared). Kotlin has no checked exceptions — all exceptions are unchecked. When you call Java code throwing checked exceptions, Kotlin ignores them. Example: `FileInputStream` throws `FileNotFoundException` (checked); Kotlin code doesn't force you to catch it. You can still catch it: `try { FileInputStream(...) } catch (e: FileNotFoundException)`. This is a design decision: Kotlin treats all exceptions as unchecked, simplifying error handling.
+
+### Q131. What is the difference between Java's `void` and Kotlin's `Unit`?
+
+Java `void` means "no return value". Kotlin `Unit` is an actual type representing "no value" (a singleton object). `fun foo(): Unit = Unit` is valid; `fun bar() { ... }` implicitly returns `Unit`. Benefits: composability (treat Unit as a value, pass it around), consistency (everything is a type). When calling Java methods returning void from Kotlin: they return `Unit`. When calling Kotlin functions returning Unit from Java: they return `void`. Functionally equivalent; Kotlin's model is more consistent.
+
+### Q132. Explain Kotlin's SAM conversion when calling Java.
+
+Java Single Abstract Method interfaces (like `Runnable`) can be implemented as lambdas in Kotlin (automatic SAM conversion): `thread(Runnable { println("hi") })` simplifies to `thread { println("hi") }`. Works only with one-method interfaces. Kotlin doesn't require SAM for its own interfaces — it has lambdas natively. SAM conversion is a convenience for Java libraries. Can be disabled with `@Suppress("FunctionName")` or `@JvmSuppressWildcards` on the interface.
+
+### Q133. What is `@JvmName` and when should you use it?
+
+`@JvmName("altName")` changes the name of a method/property seen from Java. Useful when Kotlin generates a name that Java doesn't like. Example: a Kotlin property `isEmpty` generates a Java method `isEmpty()`, but if you want the Java name to be different, use `@JvmName("empty")`. Less common case: top-level functions in a Kotlin file generate a class `FileKt`; `@JvmName` changes the class name. Use when: interoperability with Java is important, existing Java code expects certain names.
+
+---
+
 ## Advanced Concepts & Miscellaneous
 
 ### Q156. Explain tail call optimization and tailrec.
@@ -1048,7 +1000,7 @@ Coroutine context (`CoroutineContext`) is a set of elements: job, dispatcher, ex
 
 ## Closure
 
-This primer covers Kotlin essentials for interviews across three tiers. Master the basics (Tier 1) for entry-level roles, Tier 2 for mid-level, Tier 3 for senior positions. Kotlin's conciseness and safety make it increasingly popular in startups and established tech shops. Coroutines, null safety, and extension functions are the language's defining features — understand these deeply.
+This primer covers Kotlin essentials for interviews. Kotlin's conciseness and safety make it increasingly popular in startups and established tech shops. Coroutines, null safety, and extension functions are the language's defining features — understand these deeply.
 
 **Key takeaways:**
 - Null safety is Kotlin's killer feature — deeply understand `?`, `?.`, `?:`, `!!`.
