@@ -10,9 +10,35 @@ import {
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useManifest } from "../lib/manifest";
+import type { SourceConfig } from "../lib/parser";
 import { useTheme, type Palette } from "../lib/theme";
 import { SourceCard } from "./SourceCard";
 import { RefreshAllButton } from "./RefreshAllButton";
+
+/**
+ * Group manifest sources by their `category` field, preserving manifest
+ * order within each group. Sources without a category fall under "Other".
+ * Returns an ordered array of (category, sources) so the home library
+ * can render category headers + nested cards in a single pass.
+ */
+function groupByCategory(
+  sources: SourceConfig[],
+): Array<{ category: string; sources: SourceConfig[] }> {
+  const order: string[] = [];
+  const buckets = new Map<string, SourceConfig[]>();
+  for (const s of sources) {
+    const cat = s.category?.trim() || "Other";
+    if (!buckets.has(cat)) {
+      order.push(cat);
+      buckets.set(cat, []);
+    }
+    buckets.get(cat)!.push(s);
+  }
+  return order.map((category) => ({
+    category,
+    sources: buckets.get(category)!,
+  }));
+}
 
 /**
  * Home screen — vertical list of source cards. Replaces the bottom chip
@@ -25,6 +51,7 @@ export function SourceLibrary() {
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const { sources, refresh } = useManifest();
+  const grouped = useMemo(() => groupByCategory(sources), [sources]);
   const [refreshing, setRefreshing] = useState(false);
 
   const onRefresh = useCallback(async () => {
@@ -72,12 +99,17 @@ export function SourceLibrary() {
         </View>
       </View>
 
-      {sources.map((s) => (
-        <SourceCard
-          key={s.id}
-          source={s}
-          onPress={() => router.push(`/source/${s.id}`)}
-        />
+      {grouped.map(({ category, sources: groupSources }) => (
+        <View key={category} style={styles.group}>
+          <Text style={styles.groupHeader}>{category}</Text>
+          {groupSources.map((s) => (
+            <SourceCard
+              key={s.id}
+              source={s}
+              onPress={() => router.push(`/source/${s.id}`)}
+            />
+          ))}
+        </View>
       ))}
 
       <View style={styles.footer} />
@@ -125,6 +157,19 @@ function makeStyles(p: Palette) {
     cogText: {
       color: p.textMuted,
       fontSize: 22,
+    },
+    group: {
+      marginTop: 12,
+    },
+    groupHeader: {
+      color: p.textMuted,
+      fontSize: 11,
+      fontWeight: "600",
+      letterSpacing: 1.5,
+      textTransform: "uppercase",
+      paddingHorizontal: 16,
+      paddingBottom: 6,
+      paddingTop: 12,
     },
     footer: { height: 32 },
   });

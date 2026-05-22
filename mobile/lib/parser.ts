@@ -27,6 +27,13 @@ export interface SourceConfig {
   sectionOrder: string[];
   defaultRevealedSections: string[];
   storagePrefix: string;
+  /**
+   * Top-level grouping for the home library / web sidebar. Sources sharing
+   * a category render under one heading. Free-form string ("Languages",
+   * "System Design", "DSA", "Behavioural", …). Sources without a category
+   * fall under "Other".
+   */
+  category?: string;
   /** Markdown heading level for items. Default 3 (### N. Title). */
   itemHeadingLevel?: number;
   /** Markdown heading level for sections. Default 4 (#### Section). */
