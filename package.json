@@ -8,8 +8,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "bun run --cwd web dev",
-    "build:web": "bun run --cwd web build",
+    "dev:web": "bun run --cwd mobile expo start --web",
+    "build:web": "bash scripts/build-web.sh",
+    "dev:web-legacy": "bun run --cwd web dev",
+    "build:web-legacy": "bun run --cwd web build",
     "dev:mobile": "bun run --cwd mobile start",
     "sync-content": "bash scripts/sync-content.sh"
   }
