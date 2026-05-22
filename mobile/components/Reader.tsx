@@ -7,7 +7,7 @@ import {
   ScrollView,
   Pressable,
 } from "react-native";
-import PagerView from "react-native-pager-view";
+import { PagerView, type PagerViewRef } from "./NativePager";
 import * as Haptics from "expo-haptics";
 import Markdown from "react-native-markdown-display";
 import { useRouter } from "expo-router";
@@ -128,7 +128,7 @@ function PagedBody({
   const insets = useSafeAreaInsets();
   const settings = useSettings();
   const [currentPage, setCurrentPage] = useState(0);
-  const pagerRef = useRef<PagerView>(null);
+  const pagerRef = useRef<PagerViewRef>(null);
   const initialPageLoaded = useRef(false);
 
   // Restore last-read page on mount

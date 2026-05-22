@@ -17,6 +17,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.mjrjh.drilly"
     },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    },
     "android": {
       "package": "com.mjrjh.drilly",
       "versionCode": 1,
