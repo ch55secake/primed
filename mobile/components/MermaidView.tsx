@@ -1,35 +1,100 @@
 import { useMemo, useState } from "react";
-import { View, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { WebView } from "react-native-webview";
 import type { Palette } from "../lib/theme";
+import { useSettings } from "../lib/settings";
+import { MermaidModal } from "./MermaidModal";
 
 interface Props {
   /** Raw mermaid diagram source (no surrounding ```mermaid fences). */
   source: string;
-  /** App theme — drives mermaid's colour palette. */
+  /** App theme — drives mermaid's colour palette on the screen profile. */
   scheme: "dark" | "light";
   /** Surface colour from the app palette so the SVG blends in. */
   palette: Palette;
 }
 
+export interface BuildHtmlOptions {
+  source: string;
+  palette: Palette;
+  scheme: "dark" | "light";
+  /**
+   * "eink": fit-to-width, pure black-on-white palette, no horizontal scroll,
+   *         thicker strokes for e-ink legibility.
+   * "screen": native size, theme-aware palette, horizontal scroll on overflow.
+   */
+  profile: "eink" | "screen";
+  /**
+   * When true the viewport meta + WebView setSupportZoom let the user
+   * pinch-zoom the diagram (used by the fullscreen modal only).
+   */
+  allowZoom: boolean;
+}
+
 /**
- * Mermaid renderer. Drops the diagram source into a self-contained
- * WebView HTML page that loads `mermaid` from a CDN, renders, and posts
- * its rendered SVG height back so we can size the WebView to fit.
+ * Build the HTML page hosted inside the mermaid WebView. Shared by the
+ * inline `<MermaidView>` and the fullscreen `<MermaidModal>` so the two
+ * render paths can't drift.
  *
- * Why not the Expo `'use dom'` directive: in dev mode Metro serves the
- * DOM-component bundle with `Content-Type: application/json`, which
- * Chromium's strict MIME check rejects — the WebView renderer crashes
- * before mermaid ever runs. A direct WebView with inline HTML side-
- * steps the dev-server entirely and works the same way in production.
+ * Why a WebView at all (not Expo's `'use dom'`): Metro's dev server hands
+ * the DOM-component bundle back with Content-Type: application/json,
+ * Chromium's strict MIME check refuses to execute it, the renderer
+ * crashes before mermaid ever runs. Inline HTML side-steps Metro and
+ * works identically in dev and production.
  */
-function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): string {
-  // Mermaid CDN — pinned major to avoid surprise upgrades.
+export function buildHtml({
+  source,
+  palette,
+  scheme,
+  profile,
+  allowZoom,
+}: BuildHtmlOptions): string {
   const cdn = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
-  const theme = scheme === "dark" ? "dark" : "default";
-  // HTML-escape the source. Mermaid syntax includes `<-->` and `<-` arrows
-  // that the browser would otherwise parse as malformed HTML tags. Mermaid
-  // reads `textContent`, which decodes the entities back to real chars.
+
+  // E-ink ignores app theme and pins everything to high-contrast b/w.
+  // Screen profile follows the theme so dark mode gets the dark mermaid theme.
+  const themeName =
+    profile === "eink" ? "base" : scheme === "dark" ? "dark" : "default";
+  const themeVarsLiteral =
+    profile === "eink"
+      ? `, themeVariables: {
+          background: "#ffffff",
+          primaryColor: "#ffffff",
+          primaryBorderColor: "#000000",
+          primaryTextColor: "#000000",
+          secondaryColor: "#ffffff",
+          tertiaryColor: "#ffffff",
+          lineColor: "#000000",
+          textColor: "#000000",
+          edgeLabelBackground: "#ffffff",
+          fontSize: "14px"
+        }`
+      : "";
+
+  const useMaxWidth = profile === "eink";
+  const bgColor = profile === "eink" ? "#ffffff" : palette.codeBg;
+  const overflowX = profile === "eink" ? "hidden" : "auto";
+  const svgMaxWidthRule =
+    profile === "eink"
+      ? `#wrap svg { max-width: 100%; height: auto; }`
+      : `#wrap svg { max-width: none !important; height: auto; }`;
+  const eInkStrokeRule =
+    profile === "eink"
+      ? `#wrap svg path, #wrap svg line, #wrap svg polyline {
+            stroke-width: 2px !important;
+          }
+          #wrap svg .node rect, #wrap svg .node polygon, #wrap svg .node circle {
+            stroke-width: 2px !important;
+          }`
+      : "";
+
+  const viewportMeta = allowZoom
+    ? `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4, user-scalable=yes" />`
+    : `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />`;
+
+  // HTML-escape the mermaid source. Mermaid syntax includes `<-->` and
+  // `<-` arrows that the browser would otherwise parse as malformed tags.
+  // Mermaid reads `textContent`, which decodes the entities back to chars.
   const safe = source
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -39,29 +104,24 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4, user-scalable=yes" />
+  ${viewportMeta}
   <style>
     html, body {
       margin: 0;
       padding: 0;
-      background: ${palette.codeBg};
-      color: ${palette.text};
+      background: ${bgColor};
+      color: ${profile === "eink" ? "#000" : palette.text};
       font-family: system-ui, -apple-system, sans-serif;
     }
-    /* The wrapper is horizontally scrollable when the diagram is wider
-       than the viewport. Vertical scroll is owned by the surrounding
-       Reader page so the WebView itself reports its full natural height. */
     #wrap {
       padding: 12px;
-      overflow-x: auto;
+      overflow-x: ${overflowX};
       overflow-y: hidden;
       box-sizing: border-box;
       -webkit-overflow-scrolling: touch;
     }
-    /* Render the SVG at its native intrinsic size — no horizontal scaling.
-       Mermaid emits width/height in pixels via its <svg> attributes;
-       we strip max-width so wide diagrams scroll instead of squashing. */
-    #wrap svg { max-width: none !important; height: auto; }
+    ${svgMaxWidthRule}
+    ${eInkStrokeRule}
     .err {
       color: ${scheme === "dark" ? "#f8b3b3" : "#b00020"};
       font-family: Courier, monospace;
@@ -77,11 +137,8 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
   <script>
     (function () {
       function reportHeight() {
-        // Use the rendered SVG's bounding box rather than documentElement
-        // .scrollHeight, which over-reports because of the wrap padding
-        // and intrinsic body height.
         var svg = document.querySelector("#wrap svg");
-        var pad = 24; // 12px top + 12px bottom in #wrap
+        var pad = 24;
         var h;
         if (svg) {
           var rect = svg.getBoundingClientRect();
@@ -101,19 +158,16 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
       try {
         mermaid.initialize({
           startOnLoad: false,
-          theme: ${JSON.stringify(theme)},
+          theme: ${JSON.stringify(themeName)},
           securityLevel: "loose",
-          flowchart: { htmlLabels: true, useMaxWidth: false },
-          sequence: { useMaxWidth: false },
+          flowchart: { htmlLabels: true, useMaxWidth: ${useMaxWidth} },
+          sequence: { useMaxWidth: ${useMaxWidth} }${themeVarsLiteral}
         });
         var el = document.getElementById("diagram");
         var src = el.textContent;
         mermaid.render("m" + Math.random().toString(36).slice(2, 10), src)
           .then(function (out) {
             el.innerHTML = out.svg;
-            // Two delayed reports: one quick (immediate after layout) and
-            // one a beat later to catch the final SVG bbox once mermaid's
-            // font measurement settles.
             setTimeout(reportHeight, 30);
             setTimeout(reportHeight, 200);
           })
@@ -127,33 +181,45 @@ function buildHtml(source: string, palette: Palette, scheme: "dark" | "light"): 
 </html>`;
 }
 
+/**
+ * Inline mermaid renderer. E-ink mode forces shrink-to-fit + monochrome.
+ * Screen mode renders at native size; tapping opens a fullscreen modal
+ * with pinch-zoom + pan so wide flowcharts are properly readable.
+ */
 export default function MermaidView({ source, scheme, palette }: Props) {
-  const html = useMemo(() => buildHtml(source, palette, scheme), [source, palette, scheme]);
+  const { eInkMode } = useSettings();
+  const html = useMemo(
+    () =>
+      buildHtml({
+        source,
+        palette,
+        scheme,
+        profile: eInkMode ? "eink" : "screen",
+        allowZoom: false,
+      }),
+    [source, palette, scheme, eInkMode],
+  );
   const [height, setHeight] = useState(360);
-  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const styles = useMemo(() => makeStyles(palette, eInkMode), [palette, eInkMode]);
 
-  return (
+  const body = (
     <View style={[styles.container, { height }]}>
       <WebView
         originWhitelist={["*"]}
         source={{ html, baseUrl: "https://cdn.jsdelivr.net/" }}
         style={styles.web}
-        // Horizontal-scroll is owned by the WebView so wide flowcharts
-        // stay readable instead of being squashed to fit. Vertical scroll
-        // is owned by the surrounding Reader page so this WebView reports
-        // its full natural height back via postMessage.
-        scrollEnabled
-        nestedScrollEnabled
+        // E-ink: scroll disabled (ghosting). Screen: keep horizontal scroll
+        // so the inline view stays useful while the modal handles zoom.
+        scrollEnabled={!eInkMode}
+        nestedScrollEnabled={!eInkMode}
         javaScriptEnabled
         domStorageEnabled
-        // Some hosts return strict MIME types on the CDN — accept all.
         setSupportMultipleWindows={false}
         onMessage={(e) => {
           try {
             const msg = JSON.parse(e.nativeEvent.data);
             if (msg?.type === "height" && typeof msg.value === "number") {
-              // Clamp to a reasonable range; tiny SVGs shouldn't collapse
-              // the frame and giant ones don't get cut off.
               const next = Math.min(2400, Math.max(120, Math.ceil(msg.value)));
               setHeight(next);
             }
@@ -164,14 +230,55 @@ export default function MermaidView({ source, scheme, palette }: Props) {
       />
     </View>
   );
+
+  // E-ink: plain render, no tap-to-zoom (modal animation ghosts on e-ink).
+  if (eInkMode) return body;
+
+  // Screen: wrap in a Pressable that pops the fullscreen modal. The "↗"
+  // badge in the top-right hints at the interaction.
+  return (
+    <>
+      <Pressable onPress={() => setModalOpen(true)} style={styles.pressable}>
+        {body}
+        <View style={styles.zoomBadge} pointerEvents="none">
+          <Text style={styles.zoomGlyph}>↗</Text>
+        </View>
+      </Pressable>
+      <MermaidModal
+        visible={modalOpen}
+        onClose={() => setModalOpen(false)}
+        source={source}
+        palette={palette}
+        scheme={scheme}
+      />
+    </>
+  );
 }
 
-function makeStyles(p: Palette) {
+function makeStyles(p: Palette, eInk: boolean) {
   return StyleSheet.create({
     container: {
-      backgroundColor: p.codeBg,
+      backgroundColor: eInk ? "#ffffff" : p.codeBg,
       width: "100%",
     },
-    web: { flex: 1, backgroundColor: p.codeBg },
+    web: { flex: 1, backgroundColor: eInk ? "#ffffff" : p.codeBg },
+    pressable: { position: "relative" },
+    zoomBadge: {
+      position: "absolute",
+      top: 6,
+      right: 6,
+      width: 24,
+      height: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 12,
+      backgroundColor: p.surfacePressed,
+      opacity: 0.85,
+    },
+    zoomGlyph: {
+      color: p.textMuted,
+      fontSize: 14,
+      lineHeight: 14,
+    },
   });
 }

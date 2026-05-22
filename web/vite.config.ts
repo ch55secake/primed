@@ -8,6 +8,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    allowedHosts: ['sdflash.local', 'localhost'],
+    allowedHosts: ['sdflash.local', 'drilly.local', 'localhost'],
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 5173,
+    allowedHosts: ['sdflash.local', 'drilly.local', 'localhost'],
   },
 })
