@@ -1,10 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "sources": [
     {
       "id": "patterns",
       "file": "/patterns.md",
-      "title": "System Design",
+      "title": "Patterns",
+      "category": "System Design",
       "itemLabel": "Pattern",
       "itemsPlural": "interview patterns",
       "storagePrefix": "sdf:patterns",
@@ -33,6 +34,7 @@
       "id": "neetcode",
       "file": "/neetcode-150.md",
       "title": "NeetCode 150",
+      "category": "DSA",
       "itemLabel": "Problem",
       "itemsPlural": "interview problems",
       "storagePrefix": "sdf:neetcode",
@@ -43,6 +45,7 @@
       "id": "java",
       "file": "/java-interview-primer.md",
       "title": "Java",
+      "category": "Languages",
       "itemLabel": "Topic",
       "itemsPlural": "Java topics",
       "storagePrefix": "ip:java",
@@ -56,6 +59,7 @@
       "id": "kotlin",
       "file": "/kotlin-interview-primer.md",
       "title": "Kotlin",
+      "category": "Languages",
       "itemLabel": "Topic",
       "itemsPlural": "Kotlin topics",
       "storagePrefix": "ip:kotlin",
