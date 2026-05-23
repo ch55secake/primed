@@ -68,6 +68,20 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "postgres",
+      "file": "/postgres-interview-primer.md",
+      "title": "Postgres",
+      "category": "Databases",
+      "itemLabel": "Topic",
+      "itemsPlural": "Postgres topics",
+      "storagePrefix": "ip:postgres",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }

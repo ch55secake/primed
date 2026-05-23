@@ -14,6 +14,7 @@
 #   mobile/dist/neetcode-150.md
 #   mobile/dist/java-interview-primer.md
 #   mobile/dist/kotlin-interview-primer.md
+#   mobile/dist/postgres-interview-primer.md
 #
 # The mobile app fetches the markdown + manifest from the same Vercel
 # URL via mobile/lib/content.ts:REMOTE_BASE, so keeping `manifest.json`
@@ -31,7 +32,7 @@ cd "$MOBILE"
 bunx expo export --platform web --clear
 
 echo "→ Mirroring web/public/* (manifest + markdown) into $OUT"
-for f in manifest.json patterns.md neetcode-150.md java-interview-primer.md kotlin-interview-primer.md; do
+for f in manifest.json patterns.md neetcode-150.md java-interview-primer.md kotlin-interview-primer.md postgres-interview-primer.md; do
   if [ -f "$WEB_PUBLIC/$f" ]; then
     cp "$WEB_PUBLIC/$f" "$OUT/$f"
     echo "   ✓ $f"
