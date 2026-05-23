@@ -64,6 +64,14 @@ export function DesktopSidebar() {
   const [busy, setBusy] = useState(false);
   const [refreshedLabel, setRefreshedLabel] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  /**
+   * Collapsed category names. Start empty (everything expanded) so a fresh
+   * visit shows the full tree; the user collapses what they don't care
+   * about.
+   */
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   // Hydrate the "Updated …" label.
   useEffect(() => {
@@ -102,6 +110,15 @@ export function DesktopSidebar() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleCategory = useCallback((category: string) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
       return next;
     });
   }, []);
@@ -162,22 +179,36 @@ export function DesktopSidebar() {
       </View>
 
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyInner}>
-        {grouped.map(({ category, sources: groupSources }) => (
-          <View key={category} style={styles.group}>
-            <Text style={styles.groupHeader}>{category}</Text>
-            {groupSources.map((s) => (
-              <SourceTreeNode
-                key={s.id}
-                source={s}
-                expanded={expanded.has(s.id)}
-                onToggle={() => toggleSource(s.id)}
-                activeSourceId={activeSourceId}
-                activeItemId={activeItemId}
-                palette={palette}
-              />
-            ))}
-          </View>
-        ))}
+        {grouped.map(({ category, sources: groupSources }) => {
+          const collapsed = collapsedCategories.has(category);
+          return (
+            <View key={category} style={styles.group}>
+              <Pressable
+                onPress={() => toggleCategory(category)}
+                style={({ pressed }) => [
+                  styles.groupHeaderRow,
+                  pressed && styles.sourceRowPressed,
+                ]}
+                accessibilityLabel={`${collapsed ? "Expand" : "Collapse"} ${category}`}
+              >
+                <Text style={styles.groupToggle}>{collapsed ? "▸" : "▾"}</Text>
+                <Text style={styles.groupHeader}>{category}</Text>
+              </Pressable>
+              {!collapsed &&
+                groupSources.map((s) => (
+                  <SourceTreeNode
+                    key={s.id}
+                    source={s}
+                    expanded={expanded.has(s.id)}
+                    onToggle={() => toggleSource(s.id)}
+                    activeSourceId={activeSourceId}
+                    activeItemId={activeItemId}
+                    palette={palette}
+                  />
+                ))}
+            </View>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -318,16 +349,26 @@ function makeStyles(p: Palette) {
     },
     body: { flex: 1 },
     bodyInner: { paddingVertical: 8 },
-    group: { paddingTop: 8, paddingBottom: 4 },
+    group: { paddingTop: 4, paddingBottom: 4 },
+    groupHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 4,
+    },
+    groupToggle: {
+      color: p.textMuted,
+      fontSize: 10,
+      width: 12,
+    },
     groupHeader: {
       color: p.textMuted,
       fontSize: 10,
       fontWeight: "700",
       letterSpacing: 1.4,
       textTransform: "uppercase",
-      paddingHorizontal: 16,
-      paddingTop: 8,
-      paddingBottom: 4,
+      marginLeft: 2,
     },
     sourceRow: {
       flexDirection: "row",
