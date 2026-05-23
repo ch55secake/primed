@@ -44,9 +44,9 @@ bun run sync-content
 
 ## Mobile (Android)
 
-Expo SDK 54 app. Offline-first: bundled markdown ships with the APK; pull-to-refresh fetches latest from the live web URL.
+Expo SDK 54 app. Offline-first: bundled markdown ships with the APK for Java / Kotlin / NeetCode / Patterns; pull-to-refresh fetches the latest from the live web URL. Postgres / C# / System Design Patterns are remote-only.
 
-E-reader mode: each item paginated into viewport-fitting pages, swipe horizontally to advance, haptic tick on page change. Resumes at last-read page per item.
+Reader UX matches the web: tap-to-reveal section cards, per-item revealed state persisted in AsyncStorage. No pagination, no haptics. Mermaid diagrams render inline at native size; tap to open a fullscreen modal with pinch-zoom + pan.
 
 **Build a sideload APK:**
 ```bash
