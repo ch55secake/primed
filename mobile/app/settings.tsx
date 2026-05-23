@@ -1,12 +1,15 @@
 import { useMemo } from "react";
 import {
+  Platform,
   ScrollView,
   View,
   Text,
   Pressable,
   Switch,
   StyleSheet,
+  useWindowDimensions,
 } from "react-native";
+import { router } from "expo-router";
 import {
   useSettings,
   useUpdateSettings,
@@ -19,12 +22,29 @@ export default function SettingsScreen() {
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const settings = useSettings();
   const update = useUpdateSettings();
+  const { width } = useWindowDimensions();
+  const showOwnHeader = !(Platform.OS === "web" && width >= 900);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-    >
+    <View style={styles.root}>
+      {showOwnHeader && (
+        <View style={styles.header}>
+          <Pressable
+            onPress={() => router.push("/")}
+            style={styles.backButton}
+            accessibilityLabel="Back to library"
+          >
+            <Text style={styles.backArrow}>‹</Text>
+          </Pressable>
+          <View style={styles.headerTitleBlock}>
+            <Text style={styles.headerTitle}>Settings</Text>
+          </View>
+        </View>
+      )}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+      >
       <Section title="Theme" palette={palette}>
         <Segmented<ThemeMode>
           value={settings.themeMode}
@@ -69,7 +89,8 @@ export default function SettingsScreen() {
           />
         </View>
       </Section>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -141,8 +162,27 @@ function Segmented<T extends string | number>({
 
 function makeStyles(p: Palette) {
   return StyleSheet.create({
+    root: { flex: 1, backgroundColor: p.bg },
     container: { flex: 1, backgroundColor: p.bg },
     content: { paddingBottom: 32 },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      height: 56,
+      paddingHorizontal: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: p.border,
+      backgroundColor: p.surface,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    backArrow: { color: p.accent, fontSize: 28, lineHeight: 28 },
+    headerTitleBlock: { flex: 1, marginLeft: 4 },
+    headerTitle: { color: p.textStrong, fontSize: 17, fontWeight: "600" },
     section: {
       paddingHorizontal: 16,
       paddingVertical: 16,

@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
+  Platform,
   ScrollView,
   RefreshControl,
   Pressable,
   Text,
   View,
   StyleSheet,
+  useWindowDimensions,
 } from "react-native";
 import { router } from "expo-router";
 import { parseContent, type SourceConfig, type Pattern } from "../lib/parser";
@@ -27,6 +29,13 @@ export function ItemList({ source }: Props) {
   const palette = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const { refresh: refreshManifest } = useManifest();
+  const { width } = useWindowDimensions();
+  // On native and narrow-web the Stack header is missing a back arrow on
+  // web (react-native-web doesn't render expo-router's gesture-based
+  // back). Show our own header chrome so the user can always navigate
+  // up; suppress it on desktop web where the sidebar already provides
+  // lateral navigation.
+  const showOwnHeader = !(Platform.OS === "web" && width >= 900);
 
   const [items, setItems] = useState<Pattern[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -80,17 +89,34 @@ export function ItemList({ source }: Props) {
   }, [source, updateRefreshLabel, refreshManifest]);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={palette.accent}
-        />
-      }
-    >
+    <View style={styles.container}>
+      {showOwnHeader && (
+        <View style={styles.header}>
+          <Pressable
+            onPress={() => router.push("/")}
+            style={styles.backButton}
+            accessibilityLabel="Back to library"
+          >
+            <Text style={styles.backArrow}>‹</Text>
+          </Pressable>
+          <View style={styles.headerTitleBlock}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {source.title}
+            </Text>
+          </View>
+        </View>
+      )}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={palette.accent}
+          />
+        }
+      >
       <View style={styles.metaRow}>
         <Text style={styles.metaText}>
           {items.length} {source.itemsPlural}
@@ -120,15 +146,39 @@ export function ItemList({ source }: Props) {
         </Pressable>
       ))}
 
-      <View style={styles.footer} />
-    </ScrollView>
+        <View style={styles.footer} />
+      </ScrollView>
+    </View>
   );
 }
 
 function makeStyles(p: Palette) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: p.bg },
+    scroll: { flex: 1 },
     content: { paddingBottom: 24 },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      height: 56,
+      paddingHorizontal: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: p.border,
+      backgroundColor: p.surface,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    backArrow: { color: p.accent, fontSize: 28, lineHeight: 28 },
+    headerTitleBlock: { flex: 1, marginLeft: 4 },
+    headerTitle: {
+      color: p.textStrong,
+      fontSize: 17,
+      fontWeight: "600",
+    },
     metaRow: {
       paddingHorizontal: 16,
       paddingTop: 12,

@@ -57,20 +57,17 @@ function ThemedRoot() {
       <Stack.Screen
         name="source/[id]"
         options={{
-          // On desktop the sidebar already shows where we are — no header
-          // back arrow needed (no "back to library" since the sidebar IS
-          // the library).
-          headerShown: !isDesktop,
-          headerBackTitle: "Library",
+          // ItemList renders its own header chrome on mobile / narrow web
+          // and the desktop sidebar covers desktop — so the Stack header
+          // never adds anything useful here.
+          headerShown: false,
           animation: anim,
         }}
       />
       <Stack.Screen
         name="settings"
         options={{
-          headerShown: !isDesktop,
-          title: "Settings",
-          headerBackTitle: "Library",
+          headerShown: false,
           animation: anim,
         }}
       />
