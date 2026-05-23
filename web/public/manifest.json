@@ -2,6 +2,20 @@
   "version": 2,
   "sources": [
     {
+      "id": "sd-patterns",
+      "file": "/system-design-patterns-primer.md",
+      "title": "Patterns",
+      "category": "System Design",
+      "itemLabel": "Topic",
+      "itemsPlural": "system design patterns",
+      "storagePrefix": "ip:sd-patterns",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
+    },
+    {
       "id": "patterns",
       "file": "/patterns.md",
       "title": "Example Questions",
