@@ -33,6 +33,47 @@ Senior backend interview prep for **.NET 10 LTS** (shipped Nov 11 2025, supporte
 
 ## CLR Internals & Runtime
 
+### Summary
+
+**What this topic covers**
+
+How .NET actually executes your code — the layer between your C# source and the CPU instructions that run. Three concern areas: (1) the **execution model** — stack vs heap, value vs reference, the JIT pipeline (Tier 0, dynamic PGO, Tier 1, OSR), Native AOT as the alternative; (2) the **garbage collector** — Workstation vs Server, generations, LOH/POH, regions vs segments, DATAS, finalizers, the Dispose pattern, SafeHandle; (3) the **loader and isolation model** — `AssemblyLoadContext` (the post-AppDomain story), collectible ALCs for plugins and hot-reload. The 11 questions in this section are the surface; underneath sit the runtime mechanics that every later topic (Memory Management, Concurrency, ASP.NET Core under load, Native AOT) silently depends on. Get the CLR mental model right and topics like "p99 latency tripled after a deploy" stop being mysterious.
+
+**Mental model**
+
+Think of .NET in three layers. (1) **Source → IL**: `csc` (or Roslyn in modern toolchains) compiles `.cs` files into platform-independent IL inside assemblies. (2) **IL → native**: at runtime, the CLR loads assemblies via an `AssemblyLoadContext`, verifies IL, and the **tiered JIT** compiles methods — Tier 0 for fast startup, then Tier 1 with **dynamic PGO** for hot code. .NET 10's JIT pushes escape analysis, devirtualization, and inlining further so more allocations stay on the stack and more virtual calls collapse to direct ones. (3) **The GC** owns the managed heap — Server GC by default in ASP.NET Core, regions (not segments) since .NET 7, DATAS adapting heap count to actual workload size. The alternative branch is **Native AOT** — compile to native at publish time, no JIT, no IL at runtime, closed world. The other big mental shift is **value types live where they're declared**: a struct local sits on the stack; a struct field of a class lives on the heap inside that object. "Structs are stack-allocated" is the textbook lie that breaks the moment escape analysis or boxing enters the picture.
+
+**Key terms**
+
+- **JIT tiering** — Tier 0 (fast compile, unoptimised) → instrumented with **dynamic PGO** → Tier 1 (optimised, devirtualised, inlined). **OSR** swaps the running frame mid-loop.
+- **Boxing** — wrapping a value type in a heap `object`; one Gen 0 allocation per box, fixed by generic constraints.
+- **Escape analysis** — JIT optimisation that promotes provably-local heap allocations to the stack.
+- **Generations** — Gen 0 (fresh), Gen 1 (survived once), Gen 2 (long-lived). **LOH** (≥85 KB) bypasses Gen 0/1 and collects only on full Gen 2.
+- **Workstation vs Server GC** — single GC thread vs one per logical core; Server is default for ASP.NET Core.
+- **Regions vs segments** — .NET 7+ uses 4 MB regions instead of 256 MB segments; returns memory to the OS properly.
+- **DATAS** — .NET 8+ Server GC mode that adapts heap count to working set; critical for containers.
+- **Dispose pattern** — `IDisposable` + optional finalizer + `GC.SuppressFinalize(this)`; prefer `SafeHandle` for native resources.
+- **AssemblyLoadContext** — post-AppDomain isolation primitive; **collectible** ALCs unload for plugins and hot-reload.
+- **Native AOT** — closed-world ahead-of-time compile; no JIT, no `Assembly.LoadFrom`, severely restricted reflection.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Mechanical sympathy** — does the candidate know what *actually happens* when their code runs? Boxing, generations, JIT tiering — these aren't trivia, they explain why a hot path allocates, why p99 spikes after a Gen 2 collection, why a "tiny refactor" tanked throughput. (2) **Production diagnostic skill** — Q8 ("p99 tripled, isolate GC vs JIT vs locks") separates candidates who profile with `dotnet-counters` / `dotnet-trace` / `dotnet-gcdump` from candidates who guess. The discipline of "never guess, always measure" is the senior tell. (3) **.NET 10 currency** — DATAS, regions, post-.NET 8 PGO, .NET 10 escape analysis improvements — knowing what changed across .NET 6 → 10 separates candidates who've shipped current code from candidates who learned .NET on .NET Framework and stopped tracking.
+
+**Common confusions**
+
+- "Structs are stack-allocated" — only when they're locals. Struct fields of a class live on the heap inside the enclosing object; escape analysis can also stack-allocate small heap allocations.
+- "Boxing is rare" — it's everywhere a value type meets an `object` parameter, a non-generic collection, or an interface call without devirtualization. `[MemoryDiagnoser]` reveals it.
+- "Workstation GC is fine for our server" — wrong default; ASP.NET Core wants Server GC. Two-to-three-times throughput cost on the wrong setting.
+- "LOH is just for big arrays" — and it's not compacted by default. Fragmentation = growing RSS with stable working set, the classic "memory leak that isn't a leak" symptom.
+- "AppDomains exist in .NET Core" — they don't. `AssemblyLoadContext` is the replacement; collectible ALCs do what unloadable AppDomains used to.
+- "Finalizers are good cleanup" — they're a last-resort safety net. `IDisposable` + `using` is the real pattern, with `SafeHandle` for native resources.
+- "Native AOT just makes startup faster" — it also closes the world, breaks most reflection-based libraries, and forbids runtime IL emit. It's a different deployment model, not a free switch.
+
+**What follows from this topic**
+
+Every later topic builds on these primitives. Memory Management (`Span<T>`, `stackalloc`, `ArrayPool`) is the optimisation toolkit you reach for *because* you understand boxing and Gen 0 pressure. Concurrency & Async builds the async state-machine model that allocates only on suspension — directly downstream of the heap/stack story. Native AOT & Trimming weaponises the closed-world model from this section. Observability questions assume you can read a GC trace. If CLR fundamentals feel shaky, fix them first — drilling further topics on top of a vague runtime model doesn't compound.
+
 ### Q1. What lives on the stack vs the heap in .NET — and what's the catch?
 
 Value types live where they're declared: a `struct` local sits on the stack; a `struct` field of a class lives **on the heap** as part of the enclosing object. Reference types always allocate on the heap; the reference itself sits wherever it's declared. The catch: the JIT can promote heap allocations to the stack via **escape analysis** (when an object provably doesn't outlive the method), and `Span<T>` can wrap stack memory directly. So "structs are stack-allocated" is the textbook lie — accurate enough until someone asks why `new T()` inside a tight loop doesn't allocate.
@@ -81,6 +122,47 @@ Per Stephen Toub's *Performance Improvements in .NET 10*: (1) **better escape an
 
 ## Memory Management & High-Performance Code
 
+### Summary
+
+**What this topic covers**
+
+The toolkit modern C# gives you to write low-allocation, high-throughput code without dropping to `unsafe`. Three concern areas: (1) the **span family** — `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>`, `ref struct` semantics, `stackalloc`, the C# 13 `allows ref struct` constraint; (2) the **allocation-avoidance toolkit** — `ArrayPool<T>.Shared`, `CollectionsMarshal`, `string.Create`, source-generated serialisers, `FrozenDictionary`, `ValueTask`; (3) the **measurement discipline** — BenchmarkDotNet with `[MemoryDiagnoser]` + `[DisassemblyDiagnoser]`, the `System.IO.Pipelines` pattern for zero-allocation parsing, `[LibraryImport]` for AOT-friendly P/Invoke. The 8 questions in this section cover what every hot-path engineer reaches for: not "make this faster" but "make this allocate less so the GC doesn't spike p99". This is the toolkit Stephen Toub's *Performance Improvements in .NET* posts have been quietly handing the .NET community since 2017.
+
+**Mental model**
+
+There are three tiers of optimisation in .NET. (1) **Algorithmic** — pick the right data structure, the right query shape, the right caching layer. (2) **Allocation reduction** — use `Span<T>` slices instead of substring copies, `ArrayPool<T>` instead of `new byte[]`, source-generated serialisers instead of reflection, `ValueTask` for synchronous fast paths. (3) **Memory-layout-aware** — pinning, `stackalloc`, blittable structs, P/Invoke with `LibraryImport`. The middle tier is where most senior C# work happens — you stay in safe code, the compiler keeps you honest with `ref struct` rules, and the GC stops being the bottleneck. The mental shift versus textbook C# is that **a hot path is not measured in CPU cycles, it's measured in allocations per request**. A method that does the same work but allocates 2 KB per call will dominate any algorithmic win on a 10k-RPS endpoint because Gen 0 pressure builds → Gen 1 promotions → eventual Gen 2 collection → p99 spike. `Span<T>` and friends exist so you can write straightforward code that simply doesn't allocate. The other shift: `ref struct` is a *compile-time* enforcement — the compiler refuses to let `Span<T>` escape its stack frame, so memory safety is preserved without runtime checks.
+
+**Key terms**
+
+- **`Span<T>`** — stack-only `ref struct` wrapping arbitrary contiguous memory (array, string, `stackalloc`, native); zero-copy slicing.
+- **`Memory<T>`** — heap-friendly counterpart that can cross await boundaries; `.Span` materialises a synchronous slice.
+- **`ref struct`** — type constraint that lives on the stack only; can't be boxed, captured by a lambda, or held in a heap field. C# 13's **`allows ref struct`** opens generics to ref structs.
+- **`stackalloc`** — allocate on the current stack frame; free on method return; bounded by ~1 MB stack size — guard against user-controlled sizes.
+- **`ArrayPool<T>.Shared`** — rent/return bounded-scope buffers; `clearArray: true` when returning user data to prevent leakage.
+- **`CollectionsMarshal`** — unsafe-but-safe accessors: `AsSpan(list)`, `GetValueRefOrAddDefault(dict, key)` — single-lookup upserts.
+- **`ValueTask<T>`** — struct-wrapped task for often-synchronous methods; rules: await once, never `.Result`, never store in a field.
+- **BenchmarkDotNet** — the only valid micro-benchmarking tool; `[MemoryDiagnoser]` + `[DisassemblyDiagnoser]` mandatory.
+- **`[LibraryImport]`** — source-generated P/Invoke (.NET 7+); AOT-friendly, faster, replaces `[DllImport]` in new code.
+- **`System.IO.Pipelines`** — zero-copy buffered I/O abstraction; the foundation of Kestrel; enables zero-allocation-per-line parsing.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Have you written a real hot path?** Anyone who's profiled an ASP.NET Core endpoint at scale has reached for `Span<T>`, `ArrayPool`, or `[MemoryDiagnoser]`. Candidates who can't talk about these have written CRUD with EF only. (2) **Do you measure?** Q16 ("how do you benchmark .NET code?") and the implicit pattern across this section is the same — name the tool (BenchmarkDotNet), name the attributes, name the disassembly check. The senior tell is "I always check the emitted assembly because the JIT may not have vectorised what I expected." (3) **Closed-world fluency** — `ref struct` rules, `allows ref struct`, why `Span<T>` can't cross async — these test whether the candidate can reason about compile-time lifetime constraints. The interview filter: can you walk through Q18 (parse 1 GB of UTF-8 with zero allocation per line) end-to-end without prompting?
+
+**Common confusions**
+
+- "`Span<T>` is always faster" — only on the hot path. The allocation savings dominate at scale, but a one-time call doesn't care.
+- "`Span<T>` can cross async" — no. It's a `ref struct`; the async state machine would have to heap-box it, which is forbidden by definition. Use `Memory<T>` across awaits.
+- "`stackalloc` is unsafe" — not since C# 7.2 when assigned to `Span<T>`. It's bounded by stack size, which is the real risk.
+- "`ArrayPool` is faster than `new`" — only for sizes the pool actually keeps. For tiny arrays (<64 bytes) it's often slower; for 4-32 KB buffers it's a clear win.
+- "`ValueTask` is just a faster `Task`" — it's a constrained `Task` with strict usage rules. Break the rules and you get silent corruption. Default to `Task` unless the method *often* completes synchronously.
+- "I'll just use `unsafe`" — modern C# rarely needs `unsafe`. `Span<T>` + `CollectionsMarshal` + `[LibraryImport]` cover almost every previously-unsafe scenario with compile-time safety.
+- "BenchmarkDotNet results are the truth" — they're truth *for that micro-benchmark*. Always validate with an end-to-end load test; micro-benchmarks miss cache effects, GC pressure across a workload, and contention.
+
+**What follows from this topic**
+
+This is the toolkit you reach into for every later perf-sensitive topic. LINQ & Functional (Q39, Q41b) uses these techniques internally — .NET 9/10 LINQ got faster precisely because the BCL adopted `Span<T>` paths and SIMD. Strings & Text leans on `ReadOnlySpan<char>` for substring-free parsing. ASP.NET Core's middleware and Kestrel are built on `System.IO.Pipelines`. Native AOT & Trimming requires `[LibraryImport]` and source-gen everywhere — direct extension of this section. If you can't profile an allocation and pick the right tool to remove it, the rest of the senior-level performance conversation will stall.
+
 ### Q11. What is `Span<T>` and why can't it live in async methods or class fields?
 
 `Span<T>` is a **ref struct** — a stack-only type that can wrap arrays, strings, native memory, or `stackalloc` regions, providing zero-copy slicing and indexing. It can't be a field of a heap object or a local in an async method because async methods box their state machine onto the heap when they suspend, and a `Span<T>` on the heap could outlive the stack frame it points into — instant memory safety violation. Use `Memory<T>` (heap-friendly) across await boundaries, then call `.Span` to get a slice for synchronous work.
@@ -116,6 +198,48 @@ Open `FileStream` with `FileOptions.SequentialScan`, read into a pooled `byte[]`
 ---
 
 ## Concurrency & Async
+
+### Summary
+
+**What this topic covers**
+
+How modern C# expresses concurrent and asynchronous work — and how to avoid the classic ways it goes wrong. Three concern areas: (1) the **async machinery** — what the compiler does to an `async` method, `Task` vs `ValueTask`, `ConfigureAwait`, `IAsyncEnumerable<T>`, `CancellationToken` discipline, the state-machine cost model; (2) the **primitives** — `lock` (and C# 13's `System.Threading.Lock`), `SemaphoreSlim`, `Monitor`, `Mutex`, `System.Threading.Channels`, `ConcurrentDictionary`, `Task.WhenAll/WhenAny/WhenEach`; (3) the **production patterns** — bounded concurrency with `Parallel.ForEachAsync`, linked `CancellationTokenSource`, the cancellation-flows-everywhere discipline, deadlock avoidance. The 13 questions in this section are the day-to-day reality of any ASP.NET Core service: every request handler is async, every downstream call is awaited, every background worker is a `BackgroundService` with a `CancellationToken`. Get the mental model right and senior interviewers stop probing; get it wrong and they'll find a `.Result` somewhere in your code.
+
+**Mental model**
+
+`async/await` is **cooperative multitasking on top of the thread pool**. The compiler rewrites an `async` method into a state machine; each `await` is a potential suspension point. If the awaited operation has already completed (cache hit, channel with buffered data), execution continues synchronously with **zero allocations**. If it hasn't, the state machine hoists to the heap (one allocation), the continuation is registered with the awaited source, and the method returns its `Task`/`ValueTask` to the caller. When the source completes, the continuation reschedules — on the captured `SynchronizationContext` if there is one, otherwise on the thread pool. This explains every async behaviour: why `ConfigureAwait(false)` matters in libraries (avoids capturing a UI context), why `.Result` deadlocks under a captured context (resume needs the thread holding the wait), why `ValueTask` exists (eliminate the allocation on synchronous fast paths), why `IAsyncEnumerable<T>` works (the iterator is itself an async state machine yielding values lazily). The second mental shift is **cancellation is a first-class concern, not an optional parameter**. Every async method that can take meaningful time accepts a `CancellationToken` and passes it down. ASP.NET Core wires `HttpContext.RequestAborted` automatically — when the client disconnects, every downstream call unwinds. Skip the token and your server burns CPU on dead requests.
+
+**Key terms**
+
+- **Async state machine** — compiler-generated struct/class implementing `IAsyncStateMachine`; sync fast path is zero-allocation, async path heap-boxes once.
+- **`Task` vs `ValueTask`** — reference vs struct task; `ValueTask` for often-synchronous methods, with strict usage rules.
+- **`ConfigureAwait(false)`** — don't capture the current `SynchronizationContext`. Matters in libraries; irrelevant in ASP.NET Core (no SyncContext).
+- **`System.Threading.Lock`** — C# 13 dedicated lock type; faster than locking on arbitrary objects, explicit semantics.
+- **`SemaphoreSlim`** — only in-process primitive with `WaitAsync`; use for async critical sections or bounded concurrency.
+- **`System.Threading.Channels`** — modern producer/consumer primitive; bounded or unbounded; native async; replaces `BlockingCollection`.
+- **`Task.WhenAll/WhenAny/WhenEach`** — parallel composition; `WhenEach` (.NET 9+) streams completion order.
+- **`IAsyncEnumerable<T>`** — async sequence; `await foreach`; annotate `CancellationToken` with `[EnumeratorCancellation]`.
+- **`ConcurrentDictionary.GetOrAdd`** — not atomic at the factory level; wrap with `Lazy<T>` if the factory has side effects.
+- **Linked `CancellationTokenSource`** — combine request token with timeouts; first failure cancels the rest.
+- **Deadlock pattern** — `.Result` on async code under a captured `SynchronizationContext`; never block on async.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Do you understand what async actually does?** Q19 ("what does the compiler do?") sorts candidates instantly — junior answers say "creates a thread"; senior answers walk through the state machine, the sync fast path, the hoist-to-heap on suspension. (2) **Have you debugged production async bugs?** The `GetOrAdd` factory-twice trap (Q22), the captive `.Result` deadlock (Q26), the missing `[EnumeratorCancellation]` (Q28), the `WhenAll` exception swallowing (Q28c) — these are all things you only know because you've shipped or fixed them. (3) **Cancellation discipline** — Q28b is the production-readiness question. Candidates who flow `CancellationToken` through every layer and know why never to `Cancel()` from inside a chain awaiting the same token are operating at a senior level. The interview filter: can you explain why `await Task.WhenAll(tasks)` only rethrows the first exception, and how to see them all?
+
+**Common confusions**
+
+- "Async creates a thread" — it doesn't. Async releases the current thread back to the pool; resumption uses a (possibly different) pool thread, or the captured context.
+- "`ConfigureAwait(false)` always helps" — irrelevant in ASP.NET Core (no SyncContext). Mandatory in library code that might be called from WPF/WinForms/MAUI.
+- "`ValueTask` is always faster" — only when the method often completes synchronously. Break the usage rules (await twice, store in field) and you corrupt state.
+- "`lock` is fine for async" — no. `lock` blocks; async methods that need critical sections use `SemaphoreSlim.WaitAsync`. Locking around `await` deadlocks.
+- "`ConcurrentDictionary` is atomic" — its reads/writes are, but `GetOrAdd(key, factory)` can call `factory` multiple times under contention. Use `Lazy<T>` for side-effecting factories.
+- "Cancellation is optional" — it's the difference between cancelling dead work in 10ms and burning a thread for 30 seconds. Production-grade code threads tokens everywhere.
+- "Just `Task.Run` everything" — `Task.Run` on an already-async method is wasteful; on a CPU-bound method inside an async handler it can help, but only if the caller actually wants to offload.
+
+**What follows from this topic**
+
+Concurrency primitives recur everywhere. ASP.NET Core (Q72 `BackgroundService`, Q70 `HybridCache` stampede protection) builds directly on these patterns. Entity Framework Core (Q74 — `DbContext` not thread-safe) explains why `IDbContextFactory` exists in concurrent scenarios. Observability (Q93 — propagating trace context into a `Channel<T>` worker) requires you to understand `ExecutionContext` flow. Architecture Patterns (Q99 MassTransit, Q100f event sourcing) build whole systems on async messaging. If async semantics feel shaky, fix them first — every later topic assumes them.
 
 ### Q19. What does the C# compiler actually do to an `async` method?
 
@@ -169,6 +293,48 @@ If three downstream HTTP calls are independent, `var (a, b, c) = await (CallA(ct
 
 ## Modern C# Language Features
 
+### Summary
+
+**What this topic covers**
+
+The C# language has moved fast since C# 8 in 2019 — records, pattern matching, nullable reference types, required members, collection expressions, static abstract members, generic math, source generators, and now C# 14's extension everything. Three concern areas: (1) the **immutability + equality shift** — records (class and struct), `with`-expressions, value-equality semantics, required members and `init` setters; (2) the **expressive control flow** — pattern matching (property, positional, list, relational, type patterns), switch expressions, NRT flow analysis; (3) the **type-system frontier** — static abstract interface members, generic math via `INumber<T>`, source generators replacing reflection, C# 14's extension members ("extension everything"), `field` keyword, null-conditional assignment. The 8 questions in this section are how modern C# looks in 2026 — DTOs are `record` types, value objects are `readonly record struct`, validation is pattern matching on a switch expression, JSON serialisation is source-generated, and the compiler tracks nullability across the codebase. Knowing these features separates "I learned C# in 2018" from "I ship C# 14 daily".
+
+**Mental model**
+
+Modern C# has two design directions pulling in the same direction. (1) **Make immutable data ergonomic**: records collapse the boilerplate that made immutable DTOs miserable — auto-generated equality, `with`-expressions for non-destructive updates, deconstruction, `ToString` — and `readonly record struct` makes value objects (Money, OrderId, Coordinates) a one-liner. The 12-parameter constructor disappears under `required` + `init`. (2) **Push more validity into the compiler**: NRT turns "NullReferenceException at runtime" into a build error; static abstract members let `Sum<T>(IEnumerable<T>) where T : INumber<T>` work for `int`, `decimal`, `Money`, all without boxing; source generators replace reflection with compile-time-emitted code that's AOT-safe and 30-50% faster. Pattern matching ties these together: a switch expression on a discriminated union of records, with exhaustiveness analysis, replaces the visitor pattern in ~6 lines. The mental shift versus "Java with semicolons" is that C# 14 expects you to lean on the compiler for correctness — NRT, required, switch exhaustiveness, source generators — rather than tests and runtime checks.
+
+**Key terms**
+
+- **`record` (class)** — reference type with value-equality, `with`-expressions, auto-`ToString`; DTOs and immutable models.
+- **`readonly record struct`** — immutable value type with value-equality; DDD value objects (<16 bytes).
+- **`required` modifier** — must be set in the object initialiser; replaces 12-parameter constructors; plays well with NRT.
+- **`init` setters** — settable only during initialisation; "immutable after construction".
+- **Pattern matching** — property patterns (`{ Status: "active" }`), positional, list (`[1, _, .., var last]`), relational (`> 0 and < 100`), type combinators.
+- **NRT** — `string` vs `string?`; flow analysis; `[NotNullWhen]`, `[MemberNotNull]`, `!` null-forgiving operator.
+- **Collection expressions** — `[1, 2, 3]` target-typed; works for arrays, `List<T>`, `Span<T>`, `ImmutableArray<T>`; spread with `..`.
+- **Static abstract members** — interface members implementers provide statically; enables `INumber<T>` generic math.
+- **Source generators** — Roslyn analyzers emitting source at build; replace reflection for JSON, regex, logging, MVVM, mediators.
+- **Extension everything (C# 14)** — `extension(Receiver) { … }` blocks declaring extension properties, static methods, operators.
+- **`field` keyword (C# 14)** — auto-backing-field access inside getters/setters without declaring `_foo`.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Currency** — Q34 ("what does C# 14 add?") and the C# 13 questions (`Lock`, `allows ref struct`, list patterns) directly test whether the candidate has read release notes since 2023. The .NET 10 / C# 14 cycle (Nov 2025) is fresh; senior interviews expect awareness. (2) **Modelling fluency** — Q29 (records) and Q30 (pattern matching) test whether the candidate uses these features to *model the domain*, not just to write fewer lines. `readonly record struct Money(decimal Amount, string Currency)` + a switch expression dispatching on `Result<T, E>` is the senior C# idiom; the junior idiom is a plain class with mutable getters and `if/else` chains. (3) **AOT readiness** — source generators (Q36) replace reflection, which is the precondition for Native AOT. Candidates who reflexively reach for `[JsonSerializable]` and `[LoggerMessage]` are already AOT-ready; candidates who reach for runtime reflection aren't.
+
+**Common confusions**
+
+- "Records are immutable" — `record class` allows mutable properties unless you mark them `init`. The immutability is *opt-in via syntax*, not automatic.
+- "`record` is just a class with equality" — also `with`-expressions, auto-`ToString`, deconstruction, primary constructors. The bundle is the point.
+- "NRT prevents null at runtime" — no, it's compile-time analysis. The runtime still allows `null` to slip through (reflection, `default`, library boundaries without annotations). Treat warnings as errors.
+- "Pattern matching is just nicer `if`" — list patterns + exhaustiveness analysis enable whole-program correctness checks that `if` cannot.
+- "Source generators are magic" — they're Roslyn analyzers emitting plain C# source at build time. You can read the emitted code; debugging is normal.
+- "Extension everything replaces extension methods" — old `this`-parameter extension methods still work. C# 14's syntax is the new way for *new* code; existing extensions don't need rewriting.
+- "Required is just `[Required]`" — `[Required]` is a runtime validation attribute; `required` is a compiler-enforced initialisation constraint. Different things, same word.
+
+**What follows from this topic**
+
+These features cascade everywhere. LINQ & Functional uses pattern matching and records for `Result<T, E>` style return types. Generics & Type System (Q42-45) builds on static abstract members and `allows ref struct`. Collections & Data Structures uses collection expressions ergonomically. Serialization (Q63) uses source generators for AOT-safe JSON. Architecture Patterns (Q100 DDD) maps value objects to `readonly record struct` directly. Native AOT & Trimming requires source generators throughout. If modern C# feels foreign, this section is the prerequisite for everything that follows.
+
 ### Q29. Records — class vs struct, and when do you use each?
 
 `record class` (or just `record`): reference type with value-based equality, `with`-expressions for non-destructive mutation, auto-generated `ToString`. `record struct`: value type with the same equality + `with` semantics. **`readonly record struct`**: immutable value type — first choice for value objects in DDD (`Money`, `OrderId`, `Coordinates`). Records can inherit from records only; the equality contract requires it. Use `record class` for transferred data (DTOs, immutable models), `readonly record struct` for small (<16 byte) value objects, plain `class` when you need inheritance hierarchies that don't fit the equality model.
@@ -205,6 +371,48 @@ A source generator is a Roslyn analyzer that emits C# source into the build befo
 
 ## LINQ & Functional
 
+### Summary
+
+**What this topic covers**
+
+LINQ is the query language at the heart of every .NET codebase — and a place where senior engineers separate themselves by knowing not just the syntax but the *semantics, performance, and translation rules*. Three concern areas: (1) the **execution model** — deferred vs immediate, `IEnumerable<T>` vs `IQueryable<T>`, expression trees, client vs server evaluation; (2) the **modern operator vocabulary** — `MaxBy`/`MinBy`, `DistinctBy` family, `Chunk`, `Index`, `CountBy`/`AggregateBy`, separating senior C# from junior; (3) the **performance reality post-.NET 9/10** — Stephen Toub's perf passes, internal `Span<T>` adoption, fast paths for arrays and `List<T>`, SIMD vectorisation. The 6 questions in this section cover what every LINQ-using engineer must know in 2026: when to `ToList`, why the EF query exploded into client-side evaluation, why .NET 10 makes "rewrite this LINQ as a `for` loop" obsolete for most cases. LINQ is also the bridge into expression trees — the foundation of EF Core, AutoMapper, FluentValidation, and any library that introspects lambdas.
+
+**Mental model**
+
+LINQ has two universes. (1) **LINQ to Objects** — extension methods on `IEnumerable<T>` that compile to plain delegate calls; `Where`/`Select` build a lazy pipeline; nothing executes until a terminal operator (`ToList`, `Count`, `First`, `foreach`). The whole thing is just in-process function composition. (2) **LINQ to Providers** (EF Core, Linq2DB, MongoDB driver) — methods on `IQueryable<T>` that build an **expression tree** the provider translates to its native query language (SQL, MQL, etc.). The provider sees `x => x.Status == "active"` not as a delegate but as an AST it can walk and rewrite. The bug magnet is the boundary: when the provider encounters something it can't translate (a custom helper method, an instance call on a non-mapped property), older EF silently fell back to **client evaluation** — pull the whole table into memory and run the rest in-process. EF Core 3.0+ throws by default. The other mental shift since .NET 9 is that **LINQ is no longer slow**. Toub's perf work added internal `Span<T>` paths, SIMD vectorisation, fast paths for `T[]` / `List<T>` sources, and short-circuits for empty enumerables. .NET 10 pushed it further — `AddRange`, `CopyTo`, `Contains` got 65%+ improvements. The 2020 reflex "rewrite this LINQ to `for`" is now usually wrong; measure first.
+
+**Key terms**
+
+- **Deferred execution** — lazy pipeline; nothing runs until a terminal operator pulls.
+- **Immediate execution** — `ToList`, `ToArray`, `Count`, `First`, `Sum` — terminal operators.
+- **`IEnumerable<T>` vs `IQueryable<T>`** — in-process delegates vs expression trees translated by a provider.
+- **Expression trees** — `Expression<Func<T, bool>>`; AST of a lambda; visit, build, transform, compile; foundation of EF, Moq, AutoMapper.
+- **Client vs server evaluation** — if the provider can't translate a node, it (historically) materialised the source and continued in-process; modern EF throws.
+- **`MaxBy` / `MinBy`** — .NET 6+; no manual `OrderByDescending().First()`.
+- **`DistinctBy` / `UnionBy` / `IntersectBy` / `ExceptBy`** — .NET 6+; set ops with a key selector.
+- **`Chunk(size)`** — .NET 6+; batch into arrays; replaces `GroupBy(i => i / size)`.
+- **`Index()`** — .NET 9+; yields `(index, value)` tuples.
+- **`CountBy` / `AggregateBy`** — .NET 9+; group-and-aggregate without materialising groups.
+- **.NET 9 LINQ perf** — internal `Span<T>` adoption, fast paths for arrays/`List<T>`, ~10× on common operators.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Production debug skill** — Q37 (deferred execution biting a stateful source) and Q38 (LINQ-to-SQL falling back to in-process) are the two classic LINQ production bugs every senior engineer has shipped or hunted. Naming them shows real exposure. (2) **Modern operator awareness** — Q40 sorts candidates instantly: a junior reaches for `OrderByDescending().First()`, a senior reaches for `MaxBy`. The same senior knows .NET 9 added `CountBy`/`Index`/`AggregateBy`. (3) **Performance currency** — Q39 and Q41b test whether the candidate knows the BCL has been doing the perf work for them. The right 2026 answer to "should I rewrite this hot LINQ in `for`?" is "measure on .NET 10 first" — many former rewrites are no longer wins. Candidates who still default to "LINQ is slow" are running on 2018 mental models.
+
+**Common confusions**
+
+- "LINQ always allocates" — not in .NET 9/10. Many operators use internal `Span<T>` paths and short-circuit. Verify with `[MemoryDiagnoser]`.
+- "Deferred and lazy are different" — they're the same here. Each `.Where`/`.Select` builds an iterator; terminal operators pull.
+- "`IQueryable` and `IEnumerable` are interchangeable" — assigning `IQueryable` to `IEnumerable` *materialises the query* at that point (client evaluation begins). A subtle perf cliff.
+- "Expression trees are just lambdas" — a lambda assigned to a delegate compiles to IL; assigned to `Expression<>` it compiles to an AST. The compiler chooses based on the target type.
+- "EF client evaluation is fine for small tables" — fine until production has 50M rows and someone calls `.Where(x => MyHelper(x.Name))`. Throw-on-fallback is the safe default.
+- "`Chunk` is the same as `GroupBy`" — `Chunk(size)` is much faster, doesn't allocate intermediate groups, and preserves order.
+- "I should rewrite all LINQ as `for` loops" — measure first. On .NET 10 the rewrite often loses to BCL's vectorised path.
+
+**What follows from this topic**
+
+LINQ semantics flow into Entity Framework Core (Q74-80 — `IQueryable` translation, N+1, projections, `AsNoTracking`) where the rubber meets SQL. Expression trees underpin most metaprogramming libraries you'll touch (Q98 mediator alternatives like Mediator and Wolverine, Q100 DDD specifications). Pattern matching in switch expressions composes with LINQ in functional pipelines. If LINQ feels like opaque magic, you'll struggle with the EF section especially — fix LINQ first.
+
 ### Q37. Deferred vs immediate execution — what bug does this cause?
 
 `Where`/`Select`/`OrderBy` return lazy enumerables; nothing executes until a terminal operator (`ToList`, `Count`, `First`, `foreach`). Classic bug: a method returns `IEnumerable<T>` built from a deferred chain over a stateful source (a stream, a `DbContext` that's about to be disposed, a generator with side effects); the caller enumerates after the source is gone or sees inconsistent state. The fix: materialise (`ToList`) before crossing a lifetime boundary, OR document return type as `IReadOnlyList<T>` to signal materialised.
@@ -233,6 +441,49 @@ Per Toub's post: collection operations (`AddRange`, `CopyTo`, `Contains` on `Lis
 
 ## Generics & Type System
 
+### Summary
+
+**What this topic covers**
+
+C# generics, unlike Java's type-erased generics, are **reified** — they exist at runtime, and the CLR generates specialised code per value-type instantiation. This section probes the consequences: how variance works, how constraints shape what you can do with a `T`, how generic specialisation differs between value types and reference types, and how reflection-heavy generics break under Native AOT. Three concern areas: (1) **variance** — `in` (contravariant input position), `out` (covariant output position), and the invariance default; (2) **constraints** — `where T : class/struct/unmanaged/notnull/new()/Enum/Delegate`, interface constraints, and C# 13's `allows ref struct` enabling generics over `Span<T>`; (3) **runtime mechanics** — per-value-type code generation vs the shared `__Canon` body for reference types, and the AOT compatibility story for reflection-based generic patterns. The 4 questions in this section are foundational — they don't show up as standalone interview topics often, but they underpin every senior conversation about LINQ, collections, performance, and AOT.
+
+**Mental model**
+
+Generics in C# are **a contract between you, the compiler, and the JIT**. (1) The **compiler** uses constraints to know what operations are legal on a `T` — without `where T : INumber<T>`, the compiler refuses `a + b`; with it, the addition compiles and works for `int`, `decimal`, `BigInteger`, your `Money` type. (2) The **CLR** specialises at JIT time. For value types — `List<int>`, `List<long>`, `List<Money>` — each gets its own JITted method body with the int/long/struct inlined; no boxing, full layout optimisation. For reference types, all instantiations share a single body (`__Canon`) because every reference is pointer-sized — the methods only manipulate references. This explains the perf characteristics: generic value types are fast but bloat code; generic reference types are slim but pay the indirection cost of pointer-equality checks. (3) **Variance** is the type-system permission slip for substituting subtypes. `IEnumerable<out T>` says `T` only appears in *output* position, so `IEnumerable<string>` is safely substitutable for `IEnumerable<object>` — the consumer reads, never writes. `Action<in T>` says `T` only appears in *input* position, so `Action<object>` is safely substitutable for `Action<string>` — the consumer writes, never reads back. Variance applies only to reference types; `IEnumerable<int>` is not `IEnumerable<object>` because boxing every int would change runtime semantics. The fourth mental shift: **AOT closes the world**. Reflection-driven generic patterns (`Activator.CreateInstance(typeof(T))`, runtime `MakeGenericType` calls) require annotations or break entirely.
+
+**Key terms**
+
+- **Reified generics** — type arguments exist at runtime; `typeof(T)` works; no Java-style erasure.
+- **Covariance (`out`)** — output-only position; `IEnumerable<string>` → `IEnumerable<object>`.
+- **Contravariance (`in`)** — input-only position; `Action<object>` → `Action<string>`.
+- **Invariance** — default; `IList<T>` is invariant because `T` is in both input and output positions.
+- **`where T : class`** — reference type constraint.
+- **`where T : struct`** — value type constraint; non-nullable.
+- **`where T : unmanaged`** — blittable value type; useful for P/Invoke generic helpers.
+- **`where T : notnull`** — NRT-aware non-null constraint.
+- **`where T : new()`** — has a public parameterless constructor.
+- **`allows ref struct`** — C# 13+; generic can accept `Span<T>`, `ReadOnlySpan<T>`, other ref structs.
+- **`__Canon`** — internal CLR token for the shared body of reference-type generic instantiations.
+- **Static abstract members** — enable `INumber<T>`-style generic math without runtime dispatch overhead.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Type-system fluency** — Q42 (variance) is a tradition in C# interviews; the right answer ("`out` is covariant for output position, `in` is contravariant for input position, invariant when both") is fast and confident, the wrong answer is hand-wavy. (2) **Performance reasoning** — Q44 (per-value-type specialisation) sorts candidates who understand *why* `List<int>` is fast from candidates who just know it is. The "code bloat in AOT" implication is the senior follow-up. (3) **AOT readiness** — Q45 ties this section to Native AOT & Trimming. A candidate who automatically reaches for `[DynamicallyAccessedMembers]` when generics meet reflection has worked through the AOT transition; a candidate who's never seen a trim warning hasn't. (4) Bonus signal: Q43's `allows ref struct` shows whether the candidate has read C# 13 release notes — generic algorithms over `Span<T>` is a recent capability with real implications.
+
+**Common confusions**
+
+- "Variance applies to all generics" — only to interfaces and delegates, and only on reference types in the relevant position. `List<T>` is not covariant for safety.
+- "`IEnumerable<int>` is `IEnumerable<object>`" — no. Covariance only works for reference types; boxing each int would be a runtime semantic change.
+- "Generics are like templates" — C++ templates expand at compile time per use; C# generics specialise at JIT time per value type but share code for reference types. Different model.
+- "Type erasure" — that's Java. C# has reified generics; `typeof(T)` works at runtime.
+- "`where T : struct` allows nullable" — it doesn't. `where T : struct` excludes nullable value types; use `where T : struct?` (rare) or design around it.
+- "Reflection-based factories work under AOT" — only if you annotate with `[DynamicallyAccessedMembers]` to tell the trimmer to keep the constructor. Otherwise the type's members get trimmed and the factory throws at runtime.
+- "`allows ref struct` is a niche feature" — it unblocks generic algorithms over `Span<T>` (e.g. `Sort<T>(Span<T> data) where T : IComparable<T>, allows ref struct`), which previously forced you to write non-generic overloads.
+
+**What follows from this topic**
+
+Generics underpin Collections & Data Structures (Q46-50 — `Dictionary<TKey, TValue>`, `FrozenDictionary`, `ImmutableArray<T>`), LINQ (every operator is generic), Concurrency (`Task<T>`, `ValueTask<T>`, `Channel<T>`), and Modern Language Features (`INumber<T>` generic math). Native AOT & Trimming (Q101-103) builds directly on the reflection-vs-generics interplay here. If variance and constraints feel hand-wavy, expect senior interviews to keep probing — they're load-bearing for most of the rest of the conversation.
+
 ### Q42. Explain variance: `in` vs `out`.
 
 **Covariance (`out`)**: a type parameter used only in *output* position can be substituted for a subtype. `IEnumerable<string>` is assignable to `IEnumerable<object>` because `IEnumerable<out T>` declares `T` covariant. **Contravariance (`in`)**: only used in *input* position, allows substituting for a supertype. `Action<object>` is assignable to `Action<string>` — give it any object including a string. Reference types only: `IEnumerable<int>` is **not** `IEnumerable<object>` because that would require boxing each int. `IList<T>` is invariant because it has T in both input (`Add`) and output (`this[i]`) positions.
@@ -252,6 +503,48 @@ Reflection breaks because AOT compiles a closed world — only types/members rea
 ---
 
 ## Collections & Data Structures
+
+### Summary
+
+**What this topic covers**
+
+The data structures every .NET engineer uses daily, and the specialised ones that separate seniors from juniors. Three concern areas: (1) the **workhorses and how they work** — `Dictionary<TKey, TValue>` internals (open addressing with chaining, Marvin hash for string keys, load factor 1.0 doubling), and the `CollectionsMarshal` accessors that let you avoid double-lookups; (2) the **read-optimised specialists** — `FrozenDictionary` / `FrozenSet` (perfect-hash-internal layouts, expensive build, fastest reads), `ImmutableArray<T>` (O(1) read, O(n) "mutate") vs `ImmutableList<T>` (AVL tree, structural sharing, O(log n) versioned mutations); (3) the **niche tools** — `PriorityQueue<TElement, TPriority>` (.NET 6+ min-heap with no priority-update support), `ConcurrentBag<T>` (thread-affine and surprisingly slow cross-thread). The 5 questions in this section probe whether the candidate has *read* the BCL and *measured* alternatives, not just defaulted to `Dictionary` and `List` for everything. Modern .NET added a meaningful collection vocabulary post-.NET 6 — knowing it is a senior signal.
+
+**Mental model**
+
+Pick a collection by access pattern, not by familiarity. (1) **Mutable, growing, random-access by key** — `Dictionary<TKey, TValue>`. Internally an array of buckets prime-sized for hash distribution; each bucket chains entries storing `(hashCode, key, value, next)`. Strings hash via Marvin (since .NET Core 2.1) to prevent hash-flood attacks. Grow at load factor 1.0, doubling capacity. The senior trick: `CollectionsMarshal.GetValueRefOrAddDefault` gives you a `ref` to the slot in one lookup — replaces "TryGetValue then Add". (2) **Read-only after build, accessed millions of times** — `FrozenDictionary` / `FrozenSet`. The `.ToFrozenDictionary()` call is slow (it picks an optimal internal layout — perfect hash for small key sets, integer-keyed specialisations), but reads are the fastest in .NET. Config tables, lookup tables, route maps loaded at startup. (3) **Immutable with versioning** — `ImmutableArray<T>` for small collections you read often (thin wrapper around `T[]`, O(1) reads, O(n) on "modify"), `ImmutableList<T>` for large collections with frequent versioning (AVL tree with structural sharing — the new list shares most of its tree with the old, O(log n) for both reads and "mutations"). (4) **Niche** — `PriorityQueue` for Dijkstra and scheduled events (no priority-update; workaround is the "stale entry" pattern). `ConcurrentBag` only when producers consume what they pushed on the same thread.
+
+**Key terms**
+
+- **`Dictionary<TKey, TValue>`** — open addressing with chaining; Marvin hash for strings; load factor 1.0; doubling growth.
+- **`CollectionsMarshal.GetValueRefOrAddDefault`** — single-lookup upsert returning `ref`; replaces TryGetValue+Add.
+- **`CollectionsMarshal.AsSpan(list)`** — view a `List<T>`'s backing array as `Span<T>` for zero-allocation iteration.
+- **`FrozenDictionary` / `FrozenSet`** — .NET 8+; read-only; expensive build, fastest reads; for startup-built lookup tables.
+- **`ImmutableArray<T>`** — thin readonly array wrapper; O(1) reads, O(n) versioned mutations.
+- **`ImmutableList<T>`** — AVL tree with structural sharing; O(log n) reads and versioned mutations; large collections with many versions.
+- **`PriorityQueue<TElement, TPriority>`** — .NET 6+ min-heap; no `Update`/`Remove`; workaround via stale-entry pattern.
+- **`ConcurrentBag<T>`** — thread-affine local stacks; fast same-thread, slow cross-thread; niche tool.
+- **`ConcurrentQueue<T>`** — lock-free FIFO; general-purpose producer/consumer when ordered.
+- **`ConcurrentDictionary<TKey, TValue>`** — lock striping for parallel updates; `GetOrAdd` is not atomic at the factory level.
+- **Marvin hash** — randomized string hash; mitigates algorithmic-complexity attacks where malicious keys cause O(n) chains.
+
+**Why interviewers ask this**
+
+Three signals. (1) **BCL fluency** — Q47 (`FrozenDictionary`) and Q49 (`PriorityQueue` quirks) test whether the candidate has actually read about post-.NET 6 collection additions. The senior tell is reaching for `FrozenDictionary` when describing a startup-loaded lookup table without prompting. (2) **Internals understanding** — Q46 (Dictionary internals) probes whether the candidate can reason about hash collisions, the difference between hash-flood mitigation and a deterministic hash, and why `GetValueRefOrAddDefault` is faster than the naive two-call pattern. (3) **Avoiding the obvious wrong defaults** — Q50 (`ConcurrentBag`) is a trap question; junior candidates reach for it because the name sounds right, senior candidates know it's thread-affine and reach for `ConcurrentQueue` or `Channel<T>` instead. (4) **Tradeoff vocabulary** — Q48 (`ImmutableList` vs `ImmutableArray`) tests whether the candidate can pick based on read/write profile rather than name similarity.
+
+**Common confusions**
+
+- "`ConcurrentBag` is the obvious choice for thread-safe collections" — it's thread-affine. Use `ConcurrentQueue<T>` or `Channel<T>` for general producer/consumer.
+- "`ImmutableArray` and `ImmutableList` are interchangeable" — completely different internals; pick by read/versioning profile.
+- "`FrozenDictionary` is always faster" — only after construction. Building it is slower than a regular `Dictionary`. Use only when the build cost amortises.
+- "Dictionary is O(1) always" — amortised, with a good hash. Pathological key sets without Marvin would degrade to O(n) chains; Marvin prevents adversarial inputs.
+- "`PriorityQueue` supports priority updates" — it doesn't. Implementations need the stale-entry pattern or a custom heap with decrease-key.
+- "Use `ImmutableList` for thread safety" — it gives you snapshot-immutability, not concurrent updates. For shared mutable state, you want `ConcurrentDictionary` or `Channel<T>`.
+- "`List<T>` iteration is allocation-free" — `foreach` on a `List<T>` allocates a struct enumerator (not heap) but `CollectionsMarshal.AsSpan(list)` + `for` is cleaner on a hot path.
+
+**What follows from this topic**
+
+Collections sit under almost every later topic. EF Core (Q76 — N+1, projections, `AsSplitQuery`) ultimately materialises into collections. ASP.NET Core uses `FrozenDictionary` internally for route tables. Concurrency (Q23 — Channels) is the modern replacement for several `Concurrent*` collections. Performance-sensitive code (Q17 — avoid allocations on hot paths) reaches for `CollectionsMarshal.AsSpan` and `FrozenDictionary` as core moves. If you default to `List` and `Dictionary` for everything, expect senior interviewers to ask why you didn't reach for the specialised tool.
 
 ### Q46. How does `Dictionary<TKey, TValue>` work internally?
 
@@ -277,6 +570,49 @@ It's **thread-affine** — each thread has its own local stack, and `TryTake` st
 
 ## Strings & Text
 
+### Summary
+
+**What this topic covers**
+
+String handling is where well-meaning code meets the messy reality of Unicode, locale, performance, and security. Four concern areas in this short section: (1) **culture and comparison** — why `StringComparison` is non-optional; the Turkish-i trap; ordinal vs culture-aware semantics; (2) **regex modernisation** — source-generated regex via `[GeneratedRegex]` replacing runtime-compiled `Regex(..., RegexOptions.Compiled)`, with AOT and cold-path advantages; (3) **JSON migration** — `System.Text.Json` vs Newtonsoft.Json semantic differences (case sensitivity, polymorphism, dictionary keys, missing-member handling), source-generated mode; (4) **Unicode literacy** — `Rune` for code points, `StringInfo` for grapheme clusters, why `string.Length` lies about emoji and combining characters. The 4 questions in this section are small but high-signal — they catch candidates who copy-paste `Regex` calls without considering AOT, who never thought about Turkish locale, who think `"👨‍👩‍👧".Length` is 1.
+
+**Mental model**
+
+Strings in C# are **UTF-16 sequences of `char` (16-bit code units)**, not characters. Three layers of "character" abstraction matter. (1) **`char`** — a single UTF-16 code unit. Iterating `string` with `foreach` yields `char`s, which means surrogate-pair characters (anything in the astral planes — most emoji) are *split* into two `char`s. (2) **`Rune`** — a Unicode scalar value (a code point). `string.EnumerateRunes()` yields proper code points, handling surrogate pairs. (3) **Grapheme cluster** — a user-perceived character, which may consist of multiple code points (emoji with skin tone modifier, combining accents, ZWJ-joined family emoji). `StringInfo.GetTextElementEnumerator` yields graphemes. `"👨‍👩‍👧".Length == 8` because it's 8 UTF-16 code units; the rune count is 5; the grapheme count is 1. Knowing which abstraction your code needs is the senior signal. The second mental shift is **always specify `StringComparison`**. The default `string.Equals`/`Contains`/`StartsWith` (without overload) uses `CurrentCulture` — a Turkish locale will treat `"i".Equals("I", StringComparison.CurrentCulture)` as **false** because Turkish has dotted and dotless i's as separate letters. Locale-dependent bugs are the worst kind: green on developer machines, fail on user devices. The CA1310 analyzer flags missing comparisons — enable it as an error. The third mental shift is **regex is a build-time concern in modern C#** — `[GeneratedRegex(...)]` produces a `partial` method with the matching code emitted at compile time, AOT-compatible, faster cold start than `RegexOptions.Compiled`.
+
+**Key terms**
+
+- **`StringComparison.Ordinal`** — byte-exact comparison; fastest; no locale awareness.
+- **`StringComparison.OrdinalIgnoreCase`** — byte-exact, case-folded via Unicode tables; safe and fast for code-internal comparisons.
+- **`StringComparison.CurrentCulture` / `InvariantCulture`** — locale-aware sort order; for user-facing comparisons (display sort).
+- **Turkish-i trap** — `"i".Equals("I", CurrentCulture)` is false in Turkish locale.
+- **CA1310** — analyzer flagging missing `StringComparison`; enable as error.
+- **`[GeneratedRegex("...")]`** — .NET 7+; source-generated regex; AOT-compatible; faster cold path.
+- **`RegexOptions.Compiled`** — runtime IL emit; faster than interpreted but not AOT-compatible.
+- **`System.Text.Json`** — case-sensitive default, AOT-friendly, source-gen mode via `[JsonSerializable]`; standard since .NET Core 3.
+- **`JsonUnmappedMemberHandling`** — STJ equivalent of Newtonsoft's `MissingMemberHandling`.
+- **`Rune`** — Unicode scalar value (code point); `string.EnumerateRunes()` handles surrogate pairs.
+- **`StringInfo.GetTextElementEnumerator`** — grapheme cluster iteration; for user-perceived character counts.
+- **UTF-16 code unit vs code point vs grapheme** — three layers; `string.Length` is code units, not characters.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Defensive coding** — Q51 (`StringComparison`) tests whether the candidate's reflex on every comparison is "which `StringComparison` is right here?" Junior candidates write `s.Contains("foo")`; senior candidates write `s.Contains("foo", StringComparison.OrdinalIgnoreCase)`. The CA1310 mention is a bonus senior signal. (2) **AOT awareness** — Q52 (source-gen regex) ties into the broader source-generator story. A candidate who reaches for `[GeneratedRegex]` without prompting has internalised the "no runtime IL emit" rule for AOT. (3) **Migration scars** — Q53 (System.Text.Json vs Newtonsoft) probes whether the candidate has actually done a real migration. The right answer lists the *semantic differences* — case sensitivity, polymorphism opt-in, dictionary key restrictions — not just "STJ is faster". (4) **Unicode literacy** — Q54 (`Rune` and grapheme clusters) is a senior filter; it catches candidates who've never thought about emoji and combining marks, which matters the moment your product ships internationally.
+
+**Common confusions**
+
+- "Default `string.Equals` is ordinal" — no, it's `CurrentCulture` without an overload. The trap question.
+- "`string.Length` is the character count" — it's UTF-16 code unit count. Emoji and astral characters count as 2.
+- "`RegexOptions.Compiled` is the fastest" — only after JIT warmup, and not AOT-compatible. `[GeneratedRegex]` wins on cold start and AOT.
+- "`System.Text.Json` is a drop-in for Newtonsoft" — it isn't. Case sensitivity, polymorphism, comments, dictionary keys, missing members all differ.
+- "`Rune` is just `char`" — `char` is 16 bits (one UTF-16 code unit); `Rune` is a code point (up to 21 bits) that handles surrogate pairs.
+- "Grapheme clusters are the same as code points" — no. `"👨‍👩‍👧"` is one grapheme but 5 code points and 8 UTF-16 code units.
+- "Use `string.IndexOf` for substring search" — fine, but pass `StringComparison.Ordinal` (or `OrdinalIgnoreCase`) explicitly. The implicit overload is a locale trap.
+
+**What follows from this topic**
+
+String handling shows up everywhere downstream. Serialization (Q62-64) builds on the System.Text.Json migration story. ASP.NET Core (Q73d — built-in OpenAPI) relies on STJ defaults. Security (Q96 — common mistakes) calls out string interpolation in raw SQL and Razor as XSS/SQLi vectors. Performance topics (Q17 — `string.Create`, interpolated string handlers) extend the string-allocation discussion. Internationalisation work — currency formatting, sort order, search — depends on understanding the three layers of "character".
+
 ### Q51. Why must you always specify `StringComparison`?
 
 Default `string.Equals`/`Contains`/`StartsWith` (without overload) uses `StringComparison.CurrentCulture` — a Turkish locale will treat `"i".Equals("I")` as **false** because Turkish has separate dotted/dotless i's. Locale-dependent bugs are the worst kind: green on developer machines, fail on user devices. Always pass `StringComparison.Ordinal` (byte-exact, fastest) or `OrdinalIgnoreCase` (byte-exact, case-folded). The CA1310 analyzer flags missing comparisons — enable it as an error.
@@ -297,6 +633,47 @@ A `Rune` is a Unicode scalar value (a code point, surrogate-pair-aware). Iterati
 
 ## Exceptions
 
+### Summary
+
+**What this topic covers**
+
+Exception handling in C# is straightforward at the surface — `try`/`catch`/`finally` — and surprisingly nuanced underneath. Three concern areas in this short section: (1) **exception filters** — `catch (Exception ex) when (predicate)` running in the first pass before stack unwinding, with logging and selective-catch use cases; (2) **the perf cost of throw/catch** — why exceptions used to be 10-100× slower than function returns, what .NET 9's overhaul changed (Native AOT alignment, ~50% faster throw/catch), and why "don't use exceptions for control flow" remains the rule; (3) **`ExceptionDispatchInfo`** — capturing and rethrowing exceptions across thread/frame boundaries without losing the original stack trace, and why async/await uses it internally. The 3 questions in this section are tight but cover the senior interview territory: knowing exception filters exist (not standard library code), knowing the .NET 9 perf delta (currency check), and knowing that `throw ex;` is the wrong rethrow pattern.
+
+**Mental model**
+
+Exceptions in .NET are **structured exception handling on top of a two-pass model**. (1) **First pass**: when an exception is thrown, the runtime walks the stack looking for a matching `catch`. **Exception filters** (`when (condition)`) run during this pass — *before* the stack unwinds. If a filter returns false, the search continues up the call stack as if the catch wasn't there. This means a filter can inspect the exception, log it, and decline to catch — keeping the original stack trace intact. (2) **Second pass**: the runtime unwinds the stack to the chosen handler, running `finally` blocks along the way. The perf cost lives in the first pass — walking frames, resolving PDB metadata for the stack trace, crossing managed/native boundaries. .NET 9 aligned the exception model with Native AOT and removed legacy overhead, roughly halving throw/catch cost. But "don't use exceptions for control flow" is still the rule — even at half the cost, exceptions are dramatically slower than a `Result<T, E>` return. The third mental shift is **`throw;` vs `throw ex;`**. `throw;` rethrows the current exception preserving its stack; `throw ex;` is treated as a new throw and overwrites the stack trace at the rethrow site, losing diagnostic information. For cross-thread/cross-frame rethrows, `ExceptionDispatchInfo.Capture(ex).Throw()` is the correct pattern — it preserves the original stack across the boundary. This is exactly what `async/await` does internally: when an awaited task fails, the awaiter sees the *original* exception with the *original* stack, not a new exception originating from the await machinery.
+
+**Key terms**
+
+- **Exception filter** — `catch (Exception ex) when (predicate)`; runs in the first pass, before stack unwinding; if false, search continues.
+- **First-pass vs second-pass** — first pass finds the handler; second pass unwinds the stack to it, running `finally` blocks.
+- **Stack trace capture** — happens on throw; walks frames and resolves PDB metadata; the main perf cost.
+- **`throw;`** — rethrow preserving the stack trace.
+- **`throw ex;`** — treated as a new throw, *overwrites* the stack trace at the rethrow point. Anti-pattern.
+- **`ExceptionDispatchInfo.Capture(ex)`** — snapshot the exception's state; `.Throw()` rethrows preserving the original stack across thread/frame boundaries.
+- **`.NET 9 exception perf`** — alignment with Native AOT model; ~50% faster throw/catch.
+- **`Result<T, E>` pattern** — OneOf, ErrorOr, FluentResults; expected-failure return types; alternative when exceptions are too expensive.
+- **`AggregateException`** — wraps multiple inner exceptions; produced by `Task.WhenAll` and parallel APIs.
+- **`AppDomain.UnhandledException` / `TaskScheduler.UnobservedTaskException`** — last-resort hooks for unhandled exception logging.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Exception filters as a senior signal** — Q55 catches whether the candidate has read C# 6 release notes (filters were added in C# 6, 2015). The "log everything matching a predicate without actually handling" pattern is a senior diagnostic trick — `catch (Exception ex) when (LogAndReturn(ex, false))` lets you observe exceptions in flight without changing their propagation. (2) **Currency check** — Q56 (.NET 9 throw/catch improvement) is a recency probe. Candidates who know about the .NET 9 perf delta have read Toub's posts or release notes; candidates who say "exceptions are always 100× slower" are running on old mental models. The senior answer ends with "but `Result<T, E>` is still the right pattern when failure is expected, not exceptional." (3) **`ExceptionDispatchInfo` as a thread-bridging tool** — Q57 sorts candidates who've written async infrastructure code from candidates who've only consumed it. The connection to async/await internals ("this is what the await machinery uses") is the senior follow-up. (4) Bonus signal: the candidate's reflex on rethrow — `throw;` vs `throw ex;` — separates engineers who care about stack traces from engineers who copy-paste without thinking.
+
+**Common confusions**
+
+- "`throw ex;` and `throw;` are equivalent" — they're not. `throw ex;` overwrites the stack; `throw;` preserves it. Always use `throw;` for rethrow.
+- "Exception filters are just `if` inside catch" — an `if` inside catch runs *after* the stack has unwound; a filter runs *before*, so declining a filter keeps the original frame on the stack.
+- "Exceptions are always 100× slower than normal returns" — pre-.NET 9, yes. Post-.NET 9, roughly 50× and improving. Still don't use them for control flow.
+- "Catching `Exception` is fine" — fine for top-level handlers (logging, returning a 500); harmful inside library code (swallows everything, makes debugging impossible).
+- "`AggregateException` is what `Task.WhenAll` rethrows" — `await Task.WhenAll(tasks)` rethrows only the *first* exception; access `.Exception` on the returned task for the full `AggregateException`.
+- "Finally always runs" — almost always. Process-level termination (`Environment.FailFast`, stack overflow, OOM in some scenarios) can skip `finally`. Don't put critical cleanup *only* in `finally`.
+- "Filters can have side effects" — they can, but they run in the first pass *before* the unwind. Side effects in filters are tricky: they may run during exception search for handlers higher up the stack.
+
+**What follows from this topic**
+
+Exception handling threads through every other topic. Concurrency (Q24, Q28c — `Task.WhenAll` and partial failure) builds on `AggregateException` semantics. Observability (Q89-93 — structured logging) requires capturing exceptions in a way that preserves their context. ASP.NET Core (Q73 — Problem Details) is the standardised way to translate exceptions to HTTP responses. Resilience (Q61 — Polly retries) needs to know which exceptions are retriable. If exception semantics feel hand-wavy — especially the rethrow pattern — fix this section first.
+
 ### Q55. What's an exception filter and when do you use it?
 
 `catch (Exception ex) when (someCondition)` — the filter expression runs in the **first pass** of exception handling, *before* the stack unwinds. If it returns false, the catch is skipped and the search continues up the call stack. Use case: log everything matching a predicate without actually handling: `catch (Exception ex) when (LogAndReturn(ex, false))`. Also useful for "catch only ExceptionType when SubProperty matches" without the overhead of catching, rethrowing, and losing the original stack.
@@ -312,6 +689,49 @@ When you catch an exception on one thread and want to rethrow it on another (or 
 ---
 
 ## I/O, Streams & Networking
+
+### Summary
+
+**What this topic covers**
+
+Modern .NET I/O is built around three primitives — `Stream`, `System.IO.Pipelines`, and `HttpClient` — plus a resilience layer (Polly) for handling failure. Four concern areas: (1) **HTTP client lifecycle** — why `new HttpClient()` per request leaks sockets, why a static singleton leaks DNS, why `IHttpClientFactory` (and typed clients) is the right answer; (2) **high-throughput stream processing** — `System.IO.Pipelines` as zero-copy backpressure-aware buffer, contrasted with `Stream` for parsing-heavy workloads; (3) **async file I/O** — `FileOptions.Asynchronous` (without it, "async" reads block a thread-pool thread), `RandomAccess` for hot-loop scatter/gather; (4) **resilience patterns** — Polly v8 resilience pipelines, `Microsoft.Extensions.Resilience`, and the senior knowledge of *when not to retry*. The 4 questions in this section are foundational for any networked .NET service in production — the wrong `HttpClient` lifecycle has caused more outages than almost any other anti-pattern.
+
+**Mental model**
+
+Three patterns frame this section. (1) **Connection pool ownership**: every `HttpClient` instance owns a `SocketsHttpHandler` and its connection pool. Creating one per request leaks sockets into TIME_WAIT (4 minutes on most kernels), and a high-throughput service exhausts ephemeral ports — the canonical "1 hour of healthy traffic, then 500s start" outage. A single static `HttpClient` for the app lifetime fixes the leak but caches DNS forever — stale records persist after DNS changes (failover, blue/green deploys). `IHttpClientFactory` solves both by rotating the underlying `HttpMessageHandler` periodically (default 2 minutes via `SetHandlerLifetime`), pooling handlers across requests, and integrating with DI. Typed clients (`services.AddHttpClient<MyApi>()`) give you a class with `HttpClient` injected and DI-managed lifetime. (2) **Zero-copy pipelines**: `System.IO.Pipelines` is Kestrel's internal buffer abstraction made public. Producer writes into a `Memory<byte>` provided by the pipe; consumer reads `ReadOnlySequence<byte>` (possibly non-contiguous), consumes a portion, advances. The pipe manages buffer allocation, slicing, and recycling. Beats `Stream` for parsing — you don't allocate per-read buffers, you don't copy between layers, you slice and parse in-place. (3) **Async file I/O is opt-in**: without `useAsync: true` or `FileOptions.Asynchronous`, "async" file reads block a thread-pool thread on the synchronous kernel call. The flag is non-negotiable for high-throughput file processing. (4) **Retries are dangerous when wrong**: Polly v8 makes retries, circuit breakers, timeouts, bulkheads, and fallbacks declarative. The senior discipline is *not* "retry everything" — never retry non-idempotent POSTs, never retry 4xx client errors, never retry into a downstream that's already overloaded (retry storm = cascading failure).
+
+**Key terms**
+
+- **`HttpClient`** — owns a connection pool via `SocketsHttpHandler`; creating per request leaks sockets.
+- **`SocketsHttpHandler`** — the modern HTTP message handler; replaces legacy `HttpClientHandler`; rich configuration.
+- **`IHttpClientFactory`** — rotates handlers, pools across requests, DI-integrated; the right `HttpClient` lifecycle.
+- **Typed clients** — `services.AddHttpClient<MyApi>()`; class with `HttpClient` injected and lifetime managed.
+- **`SetHandlerLifetime`** — default 2 minutes; how often the factory rotates handlers to refresh DNS.
+- **`System.IO.Pipelines`** — `Pipe` / `PipeReader` / `PipeWriter`; zero-copy backpressure-aware buffer; foundation of Kestrel and SignalR.
+- **`ReadOnlySequence<byte>`** — possibly non-contiguous read view; the pipeline read primitive.
+- **`FileOptions.Asynchronous`** — opt-in async file I/O; without it, "async" file reads block a thread-pool thread.
+- **`RandomAccess`** — .NET 6+; static scatter/gather file helpers on `SafeFileHandle`; no `FileStream` construction.
+- **Polly v8 resilience pipelines** — declarative `.AddRetry/.AddCircuitBreaker/.AddTimeout/.AddBulkhead/.AddFallback`.
+- **`Microsoft.Extensions.Resilience`** — Polly v8 + MEC integration; wraps `IHttpClientFactory` cleanly.
+- **Retry storm** — naive retries amplifying downstream load during partial failure; cascading failure pattern.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Production scars** — Q58 (`HttpClient` lifecycle) is the single most common .NET production outage. A candidate who can explain both failure modes (per-request socket leak, singleton DNS cache) and the `IHttpClientFactory` fix without prompting has either shipped a service at scale or read the right blog post. The "typed clients" follow-up is the senior signal. (2) **Performance ceiling** — Q59 (`Pipelines`) sorts candidates who've written high-throughput parsing code from candidates who've only used `StreamReader`. The right context is "Kestrel uses it internally" — Pipelines isn't exotic, it's the modern primitive. (3) **Resilience maturity** — Q61 (Polly v8) tests whether the candidate has built circuit breakers in anger. The crucial follow-up is *when not to retry* — non-idempotent POSTs, 4xx errors, downstreams already overloaded. Candidates who say "always retry 3 times" haven't been on call during a retry storm. (4) Bonus: Q60 (async file I/O) catches candidates who don't know `useAsync: true` is the magic flag.
+
+**Common confusions**
+
+- "One static `HttpClient` is the right pattern" — only if you accept stale DNS. `IHttpClientFactory` is the right answer.
+- "`IHttpClientFactory` creates a new `HttpClient` per request" — it pools handlers; the `HttpClient` is cheap, the handler is what matters.
+- "`Stream` and `PipeReader` are interchangeable" — different models. `Stream` is sequential bytes; `PipeReader` is buffered, zero-copy, backpressure-aware.
+- "Async file I/O is automatic" — only with `FileOptions.Asynchronous` or `useAsync: true`. Without the flag, "async" reads block a pool thread.
+- "Retry everything 3 times" — never retry non-idempotent POSTs, 4xx client errors, or downstreams already overloaded. Retry storms are real.
+- "Circuit breakers are optional" — for any service with downstream dependencies, they're the difference between graceful degradation and cascading failure.
+- "`HttpClient.SendAsync` is thread-safe" — yes, but configuration (headers, base address) isn't. Use typed clients to avoid cross-thread config races.
+
+**What follows from this topic**
+
+I/O patterns underpin almost every networked topic. ASP.NET Core (Q65 middleware pipeline, Q70 `HybridCache`) builds on the same primitives. Observability (Q91 — propagating trace context across HTTP boundaries) requires understanding the `HttpClient` instrumentation flow. Security (Q97b — JWT token revocation) interacts with the resilience layer (cache lookups on every request). Performance (Q18 — parse 1 GB of UTF-8 zero-allocation) is essentially "use Pipelines correctly". If `IHttpClientFactory` and the right async file I/O setup aren't reflexes, expect senior interviewers to keep probing.
 
 ### Q58. Why is `new HttpClient()` per request dangerous, and what does `IHttpClientFactory` solve?
 
@@ -333,6 +753,48 @@ Polly v8 introduced **resilience pipelines**: declarative `.AddRetry`, `.AddCirc
 
 ## Serialization
 
+### Summary
+
+**What this topic covers**
+
+JSON serialisation is the universal API contract format, and in .NET 2026 it lives in `System.Text.Json`. Three concern areas in this short section: (1) **polymorphism** — how `System.Text.Json` handles inheritance hierarchies via `[JsonDerivedType]` and discriminator properties, replacing Newtonsoft's vulnerability-prone `TypeNameHandling`; (2) **source-generated JSON** — `[JsonSerializable]` partial contexts producing compile-time serialisers, AOT-compatible, 30-50% faster, mandatory for Native AOT; (3) **the `BinaryFormatter` removal** — why .NET 9 removed it entirely (years of deserialisation gadget vulnerabilities), what to migrate to (`System.Text.Json` for text, MessagePack for compact binary). The 3 questions in this section are short because the modern answer is consistent: `System.Text.Json` with source generators for almost everything, MessagePack when you need compact binary, and *never* `BinaryFormatter` again.
+
+**Mental model**
+
+Two design pressures shape modern .NET serialisation. (1) **Performance + AOT** — runtime reflection over types is slow (it walks the type graph, resolves properties, allocates) and incompatible with Native AOT (the trimmer removes "unused" type information). The source-generator path solves both: at build time, you annotate a partial class with `[JsonSerializable(typeof(MyDto))]`, and the generator emits dedicated `JsonTypeInfo<MyDto>` with hard-coded property access, hard-coded converters, and no reflection. Wire it via `JsonSerializerOptions.TypeInfoResolver = MyJsonContext.Default;`. Wins: 30-50% faster, smaller binary, AOT-compatible, compile-time validation of the type graph. (2) **Security** — Newtonsoft's `TypeNameHandling` (auto-emit `$type` discriminators for arbitrary types) was the vector for many deserialisation gadget chains: an attacker crafts a payload that, when deserialised, instantiates a chain of `IDeserializationCallback` handlers executing arbitrary code. `BinaryFormatter` had the same problem in worse form — its design *requires* type instantiation by name during deserialisation, which made it impossible to fix without abandoning the format. Microsoft tried hardening it, deprecated it, and finally **removed it entirely in .NET 9**. `System.Text.Json` polymorphism takes the opposite approach: you must enumerate the closed set of derived types with `[JsonDerivedType(typeof(Dog), "dog")]`, and the discriminator is a property name you control. An attacker can't trick the deserialiser into instantiating an arbitrary type because the deserialiser only knows the types you declared. The senior mental model: **serialisation is an attack surface**; closed-world by default, source-gen for perf and AOT, never trust arbitrary type names from the wire.
+
+**Key terms**
+
+- **`System.Text.Json` (STJ)** — the modern JSON serialiser; case-sensitive default, strict, AOT-friendly.
+- **`[JsonSerializable(typeof(T))]`** — declares a type for source generation; sits on a partial `JsonSerializerContext`.
+- **`JsonSerializerContext`** — the source-generated context; pass via `JsonSerializerOptions.TypeInfoResolver`.
+- **`[JsonDerivedType(typeof(Sub), "discriminator")]`** — polymorphism declaration on the base type.
+- **`[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]`** — configure the discriminator property name.
+- **`JsonUnmappedMemberHandling`** — STJ's equivalent of Newtonsoft's `MissingMemberHandling`.
+- **`BinaryFormatter`** — legacy `IFormatter` for binary serialisation; removed in .NET 9 due to deserialisation gadgets.
+- **Deserialisation gadget** — attack pattern where deserialising untrusted input instantiates a chain of objects whose constructors/callbacks execute arbitrary code.
+- **`TypeNameHandling`** — Newtonsoft setting auto-emitting `$type`; security hole, do not enable.
+- **MessagePack / MemoryPack** — compact binary alternatives; AOT-friendly, schema-evolution support.
+- **Source-generated converter** — emitted at build time, hard-coded property access, no runtime reflection.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Migration competence** — Q62 (polymorphism) and Q63 (source-gen) test whether the candidate has actually migrated from Newtonsoft to STJ. The right answer covers the *semantic gaps*: case sensitivity, `TypeNameHandling` → `[JsonDerivedType]`, `MissingMemberHandling` → `JsonUnmappedMemberHandling`, polymorphic deserialisation is opt-in and closed-set. (2) **Security literacy** — Q64 (`BinaryFormatter` removal) is a senior security question disguised as a serialisation question. The candidate who can explain *why* it was removed (gadget chains), what it implies for any "legacy binary serialiser" patterns elsewhere, and the modern alternatives (`System.Text.Json` for text, MessagePack/MemoryPack for binary), is operating at a senior level. The wrong answer is "they just wanted to clean up the framework." (3) **AOT readiness** — Q63 (source-gen JSON) ties into the broader source-generator story. A candidate who reaches for `[JsonSerializable]` reflexively, without prompting, has internalised the no-runtime-reflection rule for AOT. (4) Bonus signal: knowing that `System.Text.Json` polymorphism still doesn't handle *arbitrary open* type sets — you must enumerate derived types — separates candidates who've tried it from candidates who've only read about it.
+
+**Common confusions**
+
+- "STJ is a drop-in for Newtonsoft" — it isn't. Case-sensitive default, comments off by default, polymorphism opt-in, no `DataContract` attributes, stricter null handling.
+- "Source-gen JSON is optional" — for AOT it's mandatory. For non-AOT it's optional but recommended for any high-throughput endpoint.
+- "Polymorphic deserialisation just works" — only with explicit `[JsonDerivedType]` declarations. STJ does not auto-resolve arbitrary type names — that's the security win.
+- "MessagePack is faster than STJ for everything" — for compact binary payloads yes; for JSON-over-HTTP no (your client probably wants JSON anyway).
+- "BinaryFormatter is fine for trusted internal data" — Microsoft disagrees enough to remove it. Even "trusted" sources get compromised; the format has no defence in depth.
+- "STJ doesn't support dictionary keys other than string" — fixed in .NET 7+. `Dictionary<int, T>` and other primitive keys now serialise.
+- "Source generators slow down builds" — incremental generators (`IIncrementalGenerator`) cache aggressively; rebuild impact is usually negligible.
+
+**What follows from this topic**
+
+Serialisation feeds ASP.NET Core (Q68 — Minimal APIs default to STJ), OpenAPI generation (Q73d — STJ types drive schema), and Native AOT (Q103 — STJ source-gen is non-negotiable). Security (Q96 — common mistakes) overlaps with the deserialisation gadget topic. Performance (Q17 — avoid allocations) lists STJ source-gen as a core technique. If `[JsonSerializable]` and `[JsonDerivedType]` aren't muscle memory, expect senior interviewers to push on AOT readiness.
+
 ### Q62. JSON polymorphism in `System.Text.Json` — how does it work?
 
 .NET 7+. Annotate the base type: `[JsonDerivedType(typeof(Dog), typeDiscriminator: "dog")] [JsonDerivedType(typeof(Cat), typeDiscriminator: "cat")] abstract class Animal {}`. Serialise emits `{ "$type": "dog", … }`; deserialise reads the discriminator to instantiate the right subtype. Configurable discriminator property name via `JsonPolymorphicAttribute`. Replaces the Newtonsoft `TypeNameHandling` pattern (which had deserialisation gadget vulnerabilities). Doesn't work for arbitrary types — must enumerate the closed set.
@@ -348,6 +810,54 @@ Years of accumulated **deserialisation gadget** vulnerabilities — attackers cr
 ---
 
 ## ASP.NET Core
+
+### Summary
+
+**What this topic covers**
+
+ASP.NET Core is the framework most senior .NET interviews probe deepest — it's where production .NET lives. The 14 questions in this section span almost everything you'll be asked about a real service. Four concern areas: (1) the **pipeline and DI** — middleware vs endpoint filters, request lifecycle, `Singleton`/`Scoped`/`Transient` with the captive-dependency trap, the `IOptions<T>`/`IOptionsSnapshot<T>`/`IOptionsMonitor<T>` triad; (2) the **API surface** — Minimal APIs vs MVC, `TypedResults` for OpenAPI, built-in OpenAPI replacing Swashbuckle, Problem Details (RFC 7807), CORS gotchas, `ForwardedHeaders` behind a reverse proxy; (3) the **production-readiness layer** — rate limiting, `HybridCache` with stampede protection, `BackgroundService` for hosted workers, health checks split into liveness vs readiness, ASP.NET Core Identity choices; (4) the **.NET 10 currency** — deprecations (`WithOpenApi`, `WebHostBuilder`, `IActionContextAccessor`), SSE helpers, new OpenAPI defaults. The 14 questions cover the day-to-day reality of building, deploying, and operating a .NET 10 service in 2026.
+
+**Mental model**
+
+ASP.NET Core is **a pipeline of `RequestDelegate`s sitting on top of Kestrel and the generic host**. Each request flows through middleware (cross-cutting concerns: exception handling, HSTS, HTTPS redirect, static files, routing, CORS, auth, authorization) and lands at an endpoint — either a Minimal API handler or an MVC controller action. Order matters: exception handler first, then security, then routing, then auth, then authorization, then the endpoint. A misplaced `UseAuthentication` after `UseAuthorization` means the authorize check sees an unauthenticated user. The DI container manages object lifetimes — Singleton (one per app), Scoped (one per request via `IServiceScope`), Transient (new every resolve) — and the captive-dependency trap (Singleton holding a Scoped) is the single most common DI bug. Enable `ValidateScopes` and `ValidateOnBuild` to catch it at startup, not at 3am. The configuration layer has three flavours of `IOptions`: plain `IOptions<T>` (singleton, captured at start), `IOptionsSnapshot<T>` (scoped, refreshes between requests — for file-watched config), `IOptionsMonitor<T>` (singleton with `OnChange` callbacks — for singletons reacting to changes). Always pair with `.ValidateDataAnnotations().ValidateOnStart()` so misconfiguration fails at boot, not at first use. The 2026 default for new APIs is **Minimal APIs** with `TypedResults` returning union types (`Results<Ok<T>, NotFound, BadRequest<ProblemDetails>>`) — better source generators, more AOT-friendly, OpenAPI auto-documented. The production stack adds `HybridCache` (L1+L2 with per-key stampede protection), `BackgroundService` for long-running work, `MapHealthChecks` split into liveness (`/health/live` — restart pod) and readiness (`/health/ready` — remove from LB), rate limiting per endpoint, and `ForwardedHeaders` configured before anything reads `RemoteIpAddress`.
+
+**Key terms**
+
+- **Middleware pipeline** — linear `RequestDelegate` chain; `app.Use(...)` / `UseMiddleware<T>` / `Map`; order matters.
+- **Endpoint filters** — per-endpoint `AddEndpointFilter(...)`; typed parameter access; runs after model binding.
+- **Singleton / Scoped / Transient** — DI lifetimes; captive dependency = Singleton holds Scoped, defeats per-request semantics.
+- **`ValidateScopes` / `ValidateOnBuild`** — catch captive dependencies at startup.
+- **`IOptions<T>` / `IOptionsSnapshot<T>` / `IOptionsMonitor<T>`** — static, per-request, change-callback; pick by refresh semantics.
+- **Minimal APIs** — `app.MapGet(...)`; less ceremony, AOT-friendly, source-gen friendly; default for new APIs.
+- **MVC controllers** — model binding attributes, action filters, `[Authorize]`; still first-class.
+- **`TypedResults`** — typed result builders; OpenAPI infers shape; pair with `Results<Ok<T>, NotFound, …>` union returns.
+- **`Microsoft.AspNetCore.OpenApi`** — .NET 9+ replacement for Swashbuckle; framework-owned; no UI bundled.
+- **`HybridCache`** — .NET 9+ L1+L2 cache with per-key stampede protection; replaces hand-rolled two-tier caches.
+- **`BackgroundService`** — base class for long-running hosted services; `ExecuteAsync(stoppingToken)`.
+- **Liveness vs readiness** — "is the process alive" (restart on fail) vs "can it serve traffic now" (remove from LB).
+- **Rate limiter** — .NET 7+; fixed window, sliding window, token bucket, concurrency; per-endpoint via `RequireRateLimiting`.
+- **Problem Details (RFC 7807)** — uniform error contract; `AddProblemDetails()` + `UseExceptionHandler(...)`.
+- **`ForwardedHeaders`** — behind a reverse proxy, configures real client IP / scheme; must be called before anything reads `RemoteIpAddress`.
+- **CORS credentialed restriction** — `AllowAnyOrigin()` + `AllowCredentials()` is rejected by the spec.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Production maturity** — every question in this section maps to a real production concern. The captive-dependency trap (Q66), the `IOptions` triad (Q67), liveness vs readiness (Q73g), `ForwardedHeaders` (Q73e), the credentialed-CORS spec restriction (Q73f) — these are 3am-pager-call topics. Candidates who answer fluently have operated the framework; candidates who hedge have only built dev-loop apps. (2) **API design taste** — Q68 (Minimal APIs vs MVC), Q73c (`TypedResults` vs `Results`), Q73 (Problem Details) test whether the candidate has opinions about what makes a clean API surface. The senior answer is "Minimal APIs with `TypedResults` for greenfield, MVC when you need filters / conventions / model state, Problem Details everywhere for errors." (3) **Currency** — Q71 (.NET 10 deprecations), Q73d (OpenAPI replacing Swashbuckle), Q70 (`HybridCache`), Q73h (IdentityServer4 → Duende commercial, OpenIddict as the OSS replacement) test whether the candidate has tracked the framework across the last three releases. The senior tell is volunteering "and `WithOpenApi` is deprecated in .NET 10" without prompting.
+
+**Common confusions**
+
+- "Middleware order doesn't matter much" — it controls correctness. `UseRouting` before `UseAuthentication` matters; `UseAuthentication` before `UseAuthorization` matters.
+- "Scoped is always per-HTTP-request" — it's per `IServiceScope`. ASP.NET Core creates one per request; manual scopes (e.g. background workers) create their own.
+- "`IOptions<T>` reloads on config change" — it doesn't; it's singleton-captured. Use `IOptionsSnapshot` or `IOptionsMonitor` for reload semantics.
+- "`Results.Ok` and `TypedResults.Ok` are interchangeable" — for the runtime yes; for OpenAPI inference no. Use `TypedResults` to auto-document response shape.
+- "Liveness and readiness are the same" — they're not. Liveness failure restarts the pod; readiness failure removes it from the LB. Mixing them causes cascading restarts.
+- "`HybridCache` is just two-tier MemoryCache + Redis" — and per-key stampede protection. The stampede protection is the actual feature.
+- "Captive dependencies only matter in dev" — they fail silently in prod (Singleton holds DbContext forever, "intermittent stale data" tickets). Enable `ValidateScopes` everywhere.
+- "Configure middleware then add it once" — `UseForwardedHeaders` specifically must come *before* anything that reads `RemoteIpAddress` or builds absolute URLs.
+
+**What follows from this topic**
+
+ASP.NET Core ties together almost every other section. Concurrency (Q72 `BackgroundService`, Q70 stampede protection) builds on async primitives. Entity Framework Core (Q74 `DbContext` is Scoped by design) maps to the DI lifetimes here. Observability (Q91-93 — tracing across HTTP boundaries) plugs into the middleware pipeline. Security (Q94-97c) is mostly ASP.NET Core configuration. Architecture Patterns (Q100b vertical slice vs clean) is about how you organise the endpoints this section defines. If ASP.NET Core fundamentals are shaky, half the senior interview will be a recovery operation.
 
 ### Q65. Walk me through the middleware pipeline.
 
@@ -417,6 +927,54 @@ For B2C apps with self-managed users: **ASP.NET Core Identity** (built-in, free,
 
 ## Entity Framework Core
 
+### Summary
+
+**What this topic covers**
+
+EF Core is the .NET ORM senior interviews probe most aggressively — because it's the layer where ORM convenience meets database reality, and where most performance / correctness disasters live. The 10 questions in this section cover the senior territory. Four concern areas: (1) the **lifetime model** — `DbContext` is not thread-safe; Scoped by design; `IDbContextFactory<TContext>` for concurrent scenarios; (2) **query and tracking** — `AsNoTracking` for reads, the N+1 problem and its three fixes (`Include`, `AsSplitQuery`, project to DTO), Cartesian explosion, compiled queries, the identity-map gotcha where queries return entities that "don't exist"; (3) **bulk and bulkless operations** — `ExecuteUpdateAsync`/`ExecuteDeleteAsync` for set-based mass updates without change tracking; (4) **production-hardening** — optimistic concurrency via `[Timestamp]`, multi-instance migration safety (run as a separate CI step, not on app start), cursor-based pagination for deep lists, EF Core 10 additions (SQL Server 2025 vector type, native JSON, full-text via LINQ). The 10 questions are the day-to-day reality of a senior .NET engineer working against a relational DB.
+
+**Mental model**
+
+EF Core is **a change tracker, a query translator, and a unit of work, bundled into `DbContext`**. (1) The **change tracker** observes every entity returned by a tracking query and detects mutations on `SaveChanges`. Tracking overhead is 3-10× slower per row than `AsNoTracking()` — for read-only queries going straight to a controller or DTO, always disable tracking. (2) The **query translator** walks the `IQueryable<T>` expression tree and emits SQL. Three failure modes: client evaluation (a method the provider can't translate falls back to in-process — EF Core 3.0+ throws by default), Cartesian explosion (large `Include` chains produce one massive joined result), and inefficient SQL from poorly shaped LINQ. The three fixes for N+1 are `Include` (joins, may explode), `AsSplitQuery` (separate queries per `Include`, EF stitches in memory — usually faster on wide aggregates), and projection to DTO (`Select(o => new OrderDto { ... })` — translates fully to SQL, never materialises entities). (3) The **unit of work** is `DbContext` itself — `DbSet<T>` *is* a repository. Wrapping it in `IGenericRepository<T>` is usually leaky abstraction; domain-specific repositories with business-shaped methods (`IOrderRepository.GetActiveByCustomer(id)`) are the senior compromise. The fourth mental shift is **production hardening lives outside the ORM**: optimistic concurrency via `RowVersion`, migration runs as a separate CI/CD step before deploy rollout (never on app start — race condition), cursor-based pagination over offset for any list that grows past a few thousand rows. EF Core 10 closes long-standing gaps — vector columns for embeddings, native JSON, full AOT compatibility for most providers.
+
+**Key terms**
+
+- **`DbContext`** — change tracker + query translator + unit of work; **not thread-safe**; Scoped by design.
+- **`IDbContextFactory<TContext>`** — for parallel / background work; produces fresh short-lived contexts.
+- **`AsNoTracking`** — read-only queries; no change tracking; 3-10× faster.
+- **`AsNoTrackingWithIdentityResolution`** — no tracking, but deduplicate references to the same row in one result.
+- **N+1** — one parent query plus N child queries; fix with `Include`, `AsSplitQuery`, or projection.
+- **`Include`** — eager-load related entities via JOIN; can cause Cartesian explosion on wide aggregates.
+- **`AsSplitQuery`** — separate queries per `Include`; EF stitches in memory; safer for wide aggregates.
+- **Projection to DTO** — `Select(o => new OrderDto { … })`; full SQL translation, no entity materialisation.
+- **`ExecuteUpdateAsync` / `ExecuteDeleteAsync`** — set-based SQL; no tracking; single round-trip; .NET 10 has new delegate form.
+- **Compiled queries** — `EF.CompileAsyncQuery(...)`; ~10-30% on hot queries by skipping query-build.
+- **Identity map** — `DbContext` caches loaded entities; queries can return cached entities including `Deleted`/`Added` not yet persisted.
+- **Optimistic concurrency** — `[Timestamp] byte[] RowVersion` (SQL Server) or `[ConcurrencyCheck]`; `DbUpdateConcurrencyException` on conflict.
+- **Multi-instance migration race** — two app instances calling `MigrateAsync()` simultaneously; fix: run as separate CI step.
+- **Expand-then-contract migrations** — add nullable columns, deploy reading both, drop old in second migration; zero-downtime.
+- **Cursor pagination** — `WHERE id < lastSeen ORDER BY id DESC LIMIT N`; O(log N + M) on indexed sort key; stable under inserts.
+- **EF Core 10** — SQL Server 2025 vector type, native JSON, full-text via LINQ, improved `ExecuteUpdate`, full AOT.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Production scars** — Q74 (`DbContext` thread safety), Q76 (N+1 + Cartesian explosion), Q80 (entities that don't exist from the identity map), Q80c (multi-instance migration race) are all questions a senior has been bitten by. Naming the symptom and the fix without prompting is the senior tell. (2) **Modern EF currency** — Q77 (`ExecuteUpdateAsync`), Q79 (EF Core 10 vector type, native JSON), Q80b (optimistic concurrency), Q80d (cursor pagination) test whether the candidate tracks EF Core releases. Many production EF codebases still pre-load and mutate entities for bulk updates — knowing the set-based API is the senior signal. (3) **Architectural taste** — Q75 (`AsNoTracking` tradeoff) and Q76 (which fix for N+1) probe whether the candidate picks based on the data shape, not on a default reflex. The right answers depend on read/write profile, aggregate width, and how the entities flow to the caller.
+
+**Common confusions**
+
+- "`DbContext` is thread-safe if I only read" — it isn't. The change tracker maintains per-instance state regardless of read/write.
+- "`Include` always fixes N+1" — and may cause Cartesian explosion. For wide aggregates, `AsSplitQuery` or projection often wins.
+- "`AsNoTracking` is always faster" — for tracked-then-`SaveChanges` flows you actually need tracking. Use it only for read-only queries.
+- "Compiled queries are obsolete now that EF caches plans" — EF caches the SQL string; compiled queries skip the entire query-build step. Still wins on hot paths.
+- "Run migrations on app startup" — race condition in multi-instance deploys. Run as a separate CI step against the DB before the rollout.
+- "Optimistic concurrency is automatic" — only with `RowVersion` or `[ConcurrencyCheck]` declared. Otherwise concurrent edits silently overwrite.
+- "Offset pagination scales fine" — past a few thousand rows it degrades badly because the DB scans-and-skips. Use cursor pagination for deep lists.
+- "Repository pattern is always good practice" — over EF Core it's often a leaky abstraction. Domain-specific repositories yes; generic CRUD wrappers no.
+
+**What follows from this topic**
+
+EF Core ties into ASP.NET Core (Scoped lifetime per request), Concurrency (`IDbContextFactory` for parallel work), Architecture Patterns (Q100c — repository pattern over EF), Native AOT (Q103 — EF Core 10 fully AOT), Observability (EF instrumentation via OpenTelemetry), and Performance (compiled queries, projections). If query semantics and the identity map feel opaque, expect senior interviewers to keep pulling on the thread.
+
 ### Q74. Why is `DbContext` not thread-safe, and what's the workaround?
 
 `DbContext` holds a connection (during a query), a change tracker, and per-instance state — concurrent use from multiple threads corrupts the change tracker. Designed as **scoped** (one per request) — fine for ASP.NET Core. For multi-threaded scenarios (parallel queries, Blazor Server with overlapping renders, background services that spawn parallel work), inject **`IDbContextFactory<TContext>`** and create a fresh context per unit of work: `using var ctx = factory.CreateDbContext();`. Each factory-produced context is short-lived and not shared.
@@ -461,6 +1019,51 @@ Offset (`Skip(N).Take(M)`) is easy but performs terribly past a few thousand row
 
 ## Testing
 
+### Summary
+
+**What this topic covers**
+
+The .NET testing ecosystem in 2026 looks different from 2020 — sponsorship drama hit Moq, FluentAssertions went commercial, and the modern stack has converged. The 5 questions in this section cover the converged stack. Four concern areas: (1) **the test framework** — xUnit as the dominant choice, modern test class shape with `IClassFixture<T>`, `ICollectionFixture<T>`, `IAsyncLifetime`, `[Theory]` data sources; (2) **mocking choices** — NSubstitute as the post-Moq pragmatic default, FakeItEasy as alternative, why teams moved off Moq; (3) **integration testing** — `WebApplicationFactory<TEntryPoint>` for in-process ASP.NET Core testing, Testcontainers for .NET for real-database integration; (4) **assertions and property-based** — FluentAssertions v8 going commercial and the AwesomeAssertions / Shouldly forks; FsCheck for property-based testing when invariants matter more than examples. The 5 questions cover the senior territory: knowing the licensing landscape, knowing why `WebApplicationFactory<T>` + Testcontainers is the gold standard, and knowing when to reach beyond example-based tests.
+
+**Mental model**
+
+Testing in .NET 2026 has three layers. (1) **Unit tests** — xUnit with `[Fact]` and `[Theory]`, NSubstitute for mocks, run fast, run on every commit. The modern test class shape uses `IClassFixture<T>` for expensive shared setup (one fixture instance per class), `ICollectionFixture<T>` for cross-class sharing via `[Collection]`, and `IAsyncLifetime` for async setup/teardown. Tests in the same class don't share state beyond fixtures because xUnit parallelises across classes by default. (2) **Integration tests** — `WebApplicationFactory<TEntryPoint>` boots the real ASP.NET Core pipeline in-process, lets you override specific services (swap the DB to in-memory or a Testcontainer), and gives you a `HttpClient` to hit. Routing, model binding, filters, middleware, auth — all exercised end-to-end without a process boundary. Pair with **Testcontainers for .NET** (`Testcontainers.PostgreSql`, `Testcontainers.MsSql`) for real database integration: spin up a container per test fixture, run migrations, run the test, tear down. This is the gold standard for "does it work end-to-end" — the EF-Core-with-real-SQL question that in-memory providers can't answer (different SQL dialect, no real constraint enforcement, no concurrency). (3) **Property-based tests** — FsCheck generates random inputs to verify *invariants* rather than specific examples. The classic: "a sorted list is sorted" — 1000 random lists, assert `sort(input)` is sorted. Catches edge cases (empty, duplicates, max-int) you'd never hand-write. Worth the learning curve on parsers (roundtrip property: `parse(format(x)) == x`), state machines, and mathematical functions. Doesn't replace example-based tests — augments them. The 2025 ecosystem shifts: **Moq** had a telemetry sponsorship incident (phoned home on each test run) and many teams moved to **NSubstitute**. **FluentAssertions v8** went commercial; the community forked v7 as **AwesomeAssertions** under Apache; **Shouldly** is the other clean option. Plain xUnit assertions are also fine.
+
+**Key terms**
+
+- **xUnit** — dominant .NET test framework; `[Fact]`, `[Theory] + [InlineData]`, `[MemberData]`, `[ClassData]`.
+- **`IClassFixture<TFixture>`** — one fixture instance per test class; for expensive shared setup.
+- **`ICollectionFixture<TFixture>`** — fixture shared across classes via `[Collection]`.
+- **`IAsyncLifetime`** — async setup/teardown via `InitializeAsync` / `DisposeAsync`.
+- **NSubstitute** — modern mocking library; cleaner API than Moq; no licensing drama.
+- **Moq sponsorship incident (2023)** — telemetry phoned home; many teams migrated off.
+- **FakeItEasy** — third mocking option; similar quality to NSubstitute.
+- **`WebApplicationFactory<TEntryPoint>`** — in-process ASP.NET Core integration test; real pipeline, swappable services.
+- **`WithWebHostBuilder(b => b.ConfigureTestServices(...))`** — override services for test setup.
+- **Testcontainers for .NET** — real ephemeral containers (Postgres, SQL Server, Redis) for integration tests.
+- **FluentAssertions v8** — commercial license; community forked v7 as **AwesomeAssertions** (Apache).
+- **Shouldly** — clean assertion library; `actual.ShouldBe(expected)` style.
+- **FsCheck** — property-based testing; generates random inputs to verify invariants.
+- **Roundtrip property** — `parse(format(x)) == x`; classic property-based test for serialisation.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Ecosystem currency** — Q82 (Moq sponsorship) and Q84 (FluentAssertions licensing) test whether the candidate has tracked the 2023-2025 churn. A candidate who reaches for NSubstitute and AwesomeAssertions reflexively has been paying attention; a candidate still defaulting to Moq + FluentAssertions hasn't. (2) **Integration test maturity** — Q83 (`WebApplicationFactory<T>` + Testcontainers) is the senior tell. Candidates who only write unit tests against mocks have shipped bugs that real-database integration would have caught; candidates who reach for Testcontainers know that. (3) **When property-based earns it** — Q85 (FsCheck) tests whether the candidate understands the *category* of tests where property-based wins: parsers, state machines, mathematical functions. The wrong answer is "always" or "never"; the right answer is "for invariant-driven domains where example coverage is insufficient." (4) Bonus signal: the candidate's test pyramid — heavy on integration with Testcontainers, lighter on unit tests with NSubstitute, sprinkled with property-based where invariants matter — versus the anti-pattern of 95% mocked unit tests that never catch a real bug.
+
+**Common confusions**
+
+- "xUnit tests in the same class run in parallel" — they don't. xUnit parallelises across test *classes*, not within a class. Inside a class, tests share fixtures, ordering is unspecified.
+- "`IClassFixture` and `ICollectionFixture` are interchangeable" — `IClassFixture` is per class; `ICollectionFixture` is shared across classes in the same `[Collection]`.
+- "EF in-memory provider is enough for integration tests" — it isn't. Different SQL dialect, no constraint enforcement, no concurrency. Use Testcontainers for real DB.
+- "Mocking the `DbContext` is the right unit test" — usually a code smell. Test against a real `DbContext` (in-memory or Testcontainer); save mocks for true external dependencies.
+- "`WebApplicationFactory<T>` spins up a process" — it doesn't. It runs the host in-process; the HttpClient is wired without sockets.
+- "FluentAssertions v7 is still fine for commercial use" — under the original Apache license yes; v8 is when the licensing changed. Use AwesomeAssertions (v7 fork) going forward.
+- "FsCheck replaces example-based tests" — it augments them. Use both: examples for documentation and well-known cases, properties for invariants.
+
+**What follows from this topic**
+
+Testing depends on every other section. ASP.NET Core (Q65-73) is what `WebApplicationFactory` exercises. EF Core (Q74-80) is what Testcontainers makes real. Concurrency (Q19-28c) is what property-based tests stress. Architecture Patterns (Q100b vertical slice) maps neatly to test organisation — each slice has its own test file. If a candidate's testing story stops at "I write unit tests with mocks," expect senior interviewers to push on integration coverage and the production bugs that mocks didn't catch.
+
 ### Q81. xUnit — what's the modern test class shape?
 
 `[Fact]` for parameterless tests; `[Theory] + [InlineData]` for parameterised; `[MemberData]` / `[ClassData]` for richer fixtures. Shared expensive setup: `IClassFixture<TFixture>` (one fixture instance per test class), `ICollectionFixture<TFixture>` (across multiple classes via `[Collection]`). Async setup/teardown: `IAsyncLifetime` (`InitializeAsync` / `DisposeAsync`). Don't share state between tests in a class beyond fixtures — xUnit parallelises tests across classes by default.
@@ -485,6 +1088,49 @@ When invariants matter more than individual examples. Example: "a sorted list is
 
 ## Build, Tooling & Deployment
 
+### Summary
+
+**What this topic covers**
+
+How modern .NET 10 projects are built, packaged, and shipped. The 3 questions in this section are short but cover the senior tooling vocabulary. Three concern areas: (1) **dependency management at scale** — Central Package Management (`Directory.Packages.props`) plus `Directory.Build.props` for repo-wide MSBuild settings; the monorepo-friendly story that ends "Serilog 4.0.1 in OrderApi, 4.0.3 in UserApi" drift; (2) **publishing modes** — framework-dependent vs self-contained vs single-file vs R2R (ReadyToRun) vs Native AOT, and when each makes sense; (3) **new in .NET 10** — the `dnx` tool runner that replaces `dotnet tool install -g` for one-off and CI usage. The 3 questions are tight but tested often — a senior engineer is expected to pick the right publishing mode reflexively and to know that Central Package Management is the modern default for any multi-project repo.
+
+**Mental model**
+
+Two design pressures shape modern .NET build: (1) **monorepos and dependency drift** — multiple projects in one repo end up with subtly different package versions, leading to runtime conflicts and "works in OrderApi, breaks in UserApi" bugs. Central Package Management solves this with a single `Directory.Packages.props` at the repo root listing every `<PackageVersion>`, and project files using `<PackageReference Include="Pkg" />` without versions. One source of truth. Combine with `Directory.Build.props` for repo-wide MSBuild settings — target framework, langversion, nullable enable, treat warnings as errors — and you get a consistent build profile across every project without copy-pasting csproj fragments. Essential for any solution with more than ~3 projects. (2) **Publishing as a continuum**, not a binary. **Framework-dependent** (default, smallest output, requires runtime on host) for server apps where you control the host environment. **Self-contained** (~80 MB output, includes runtime) for sealed appliances and containers where you want zero host dependencies. **Single-file** bundles into one executable; combine with self-contained for true portability. **R2R (ReadyToRun)** precompiles native code alongside IL — bigger output, faster startup. **Native AOT** is the extreme — full AOT compile, no JIT, smallest startup and working set, but a closed-world model that breaks most reflection. The 2026 default: framework-dependent for typical server apps; Native AOT for CLI tools, serverless cold-starts, and minimal-reflection ASP.NET Core APIs. The third mental shift is **`dnx`** (.NET 10) — execute .NET tools directly without `dotnet tool install -g my-tool`. `dnx my-tool@1.2.3 -- args` resolves the NuGet package, runs the tool, caches it. Particularly useful in CI pipelines and one-off invocations where global installs clutter the environment.
+
+**Key terms**
+
+- **`Directory.Packages.props`** — repo-root file with `<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>` and `<PackageVersion>` entries.
+- **`Directory.Build.props`** — repo-wide MSBuild settings; target framework, langversion, NRT, treat warnings as errors.
+- **Central Package Management (CPM)** — the dependency-version-drift-elimination pattern.
+- **Framework-dependent publish** — default; smallest output; requires .NET runtime on host.
+- **Self-contained publish** — includes the runtime; ~80 MB; no host dependency.
+- **Single-file publish** — bundles output into one executable; combine with self-contained for portability.
+- **R2R (ReadyToRun)** — precompiled native code alongside IL; faster startup, bigger output.
+- **Native AOT** — full AOT compile; no JIT, no IL at runtime; smallest startup; closed-world restrictions.
+- **`dnx` (.NET 10)** — tool runner; `dnx tool@version -- args`; replaces global install for one-offs.
+- **`dotnet publish -t:PublishContainer`** — build and push OCI image without Dockerfile; .NET 10 default base is Ubuntu chiseled.
+- **Chiseled images** — distroless equivalent; no shell, no package manager, minimal attack surface.
+- **TargetFramework moniker (TFM)** — `net10.0`, `net10.0-android`, `net10.0-ios`; controls API surface.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Repo hygiene** — Q86 (CPM) tests whether the candidate has worked in a real multi-project solution. Anyone who's debugged "Serilog 4.0.1 vs 4.0.3" drift reaches for Central Package Management reflexively. Pairing with `Directory.Build.props` is the senior tell. (2) **Deployment fluency** — Q87 (publishing modes) probes whether the candidate can pick the right packaging for the workload. The senior answer doesn't say "Native AOT for everything" — it picks based on workload: framework-dependent for typical servers, Native AOT for CLI/serverless/minimal-API hot paths, self-contained-single-file for sealed appliances. (3) **Currency** — Q88 (`dnx`) and the implicit `dotnet publish -t:PublishContainer` knowledge (from Q103b in the AOT section) test whether the candidate has read .NET 10 release notes. A candidate still installing tools globally in CI pipelines hasn't tracked the changes.
+
+**Common confusions**
+
+- "Central Package Management is just for monorepos" — useful even in single-repo, multi-project solutions. Anywhere you have ≥2 projects sharing dependencies.
+- "Self-contained is always safer" — bigger output, more disk, more bandwidth. Use only when you can't guarantee the runtime on the host.
+- "Single-file publish is AOT" — it isn't. Single-file is a packaging optimisation; AOT is a compilation model. They compose but are independent.
+- "R2R is the same as AOT" — R2R precompiles IL to native *alongside* IL; the JIT still runs for non-R2R'd methods. AOT removes the JIT entirely.
+- "Native AOT just makes startup faster" — it also closes the world (no `Assembly.LoadFrom`, restricted reflection, source-gen required for serialisers). It's a different deployment model.
+- "`dnx` replaces `dotnet tool install`" — for one-offs yes; for tools you use daily, global install is still fine.
+- "`Directory.Build.props` is automatic" — it's auto-discovered by MSBuild walking up from each project. The convention is implicit; the file must exist for the convention to apply.
+
+**What follows from this topic**
+
+Build/tooling sits under everything that ships. Native AOT & Trimming (Q101-103b) is the deepest dive into AOT publishing — direct extension of Q87. ASP.NET Core deployment patterns (containerised, minimal APIs with AOT, OpenAPI without Swashbuckle) all interact with the publishing model picked here. Observability (Q91 — OpenTelemetry export) is configured at build/deploy time. Security (data protection key persistence — Q95) interacts with how you deploy. If the candidate's deployment story stops at "I run `dotnet publish`," expect senior interviewers to probe the actual configuration.
+
 ### Q86. What's Central Package Management?
 
 `Directory.Packages.props` in the repo root with `<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>` and a `<PackageVersion>` per dependency. Individual projects then `<PackageReference Include="Pkg" />` without a version. Single source of truth across the solution — no more "OrderApi uses Serilog 4.0.1, UserApi uses 4.0.3" drift. Combine with `Directory.Build.props` for repo-wide MSBuild settings (target framework, langversion, nullable, treat-warnings-as-errors). Essential for monorepos.
@@ -500,6 +1146,50 @@ A tool to execute .NET tools directly without `dotnet tool install -g`. `dnx my-
 ---
 
 ## Observability
+
+### Summary
+
+**What this topic covers**
+
+Logging, metrics, and tracing — the three pillars of observability — in their modern .NET shape. The 5 questions in this section cover what every senior .NET engineer should reflexively reach for. Three concern areas: (1) **structured logging** — message templates (`{OrderId}` placeholders) over string interpolation, and `[LoggerMessage]` source-generated logging for zero-allocation hot paths; (2) **metrics and tracing** — `System.Diagnostics.Metrics` replacing EventCounters with OpenTelemetry-compatible instruments (Counter, Histogram, ObservableGauge), OpenTelemetry .NET as the cross-service tracing fabric; (3) **context propagation** — propagating trace context from an HTTP request into a background `Channel<T>` worker, manually carrying `Activity.Current.Context` across async boundaries where `ExecutionContext` doesn't auto-flow. The 5 questions are the observability minimum bar for a production .NET service in 2026: structured logs go to Seq/Datadog/Elastic with indexed fields, metrics export OTLP to Prometheus/Grafana, traces show end-to-end request flow across services.
+
+**Mental model**
+
+Observability is **the difference between "the service is broken" and "the service is broken because X is at fault at line Y"**. Three layers. (1) **Logging** — every line your code emits to a sink. Use **structured message templates**: `logger.LogInformation("Order {OrderId} processed in {Elapsed}ms", id, ms)` — the template is preserved as a *message ID*, and `OrderId` + `Elapsed` are emitted as searchable fields. Sinks (Seq, Elasticsearch, Datadog) index those fields. Search "all logs where OrderId=42" trivially. String interpolation (`$"Order {id} processed in {ms}ms"`) loses all structure and formats every time even at filtered-out levels — actively harmful. `[LoggerMessage]` source-generated logging takes it further: compile-time-emitted strongly-typed call sites with no boxing, no allocation, AOT-friendly. Adopt for any high-throughput log call. (2) **Metrics** — counts, gauges, histograms. `System.Diagnostics.Metrics`'s `Meter` factory produces OpenTelemetry-compatible instruments: `Counter<long>` for monotonic counts, `Histogram<double>` for latency distributions, `ObservableGauge<T>` for sampled values, `UpDownCounter<T>` for non-monotonic. Wire to OpenTelemetry exporter; ship OTLP to Prometheus/Grafana/Datadog. Replaces the older EventCounters pattern — same low-allocation philosophy, more instrument types, portable. (3) **Distributed tracing** — `Activity` (System.Diagnostics) is .NET's span primitive. ASP.NET Core's instrumentation reads the `traceparent` header inbound, creates the root `Activity`, and propagates it through `ExecutionContext`. `ActivitySource.StartActivity("op-name")` creates child spans for internal work. `HttpClient` instrumentation injects `traceparent` on outbound calls. Across `Channel<T>` workers and `Task.Run` boundaries — where the worker runs on a separate `ExecutionContext` — you must manually capture `Activity.Current?.Context` at enqueue and pass it as `parentContext` to the worker's `StartActivity`. Otherwise the worker's spans look orphaned.
+
+**Key terms**
+
+- **Structured logging** — message templates with `{Placeholders}`; fields indexed by sink.
+- **Message template** — the format string itself acts as a stable message ID across instances.
+- **`[LoggerMessage]`** — source-generated, strongly-typed, zero-allocation log call sites.
+- **`Meter`** — `System.Diagnostics.Metrics` factory; produces Counter, Histogram, Gauge, UpDownCounter.
+- **`Counter<T>`** — monotonic count instrument (orders processed).
+- **`Histogram<T>`** — latency distribution (request duration ms).
+- **`ObservableGauge<T>`** — sampled value (queue depth).
+- **`Activity` / `ActivitySource`** — .NET's span / tracer primitives; OpenTelemetry-compatible.
+- **`traceparent`** — W3C trace context header propagated across HTTP boundaries.
+- **`Activity.Baggage`** — key/value pairs propagating with the trace context.
+- **OTLP** — OpenTelemetry Protocol; standard export format to Prometheus, Jaeger, Tempo, Honeycomb, Datadog.
+- **`AddOpenTelemetry().WithTracing(...)` / `.WithMetrics(...)`** — DI registration for OTel.
+- **Context propagation across `Channel<T>`** — capture `Activity.Current?.Context` at enqueue, pass `parentContext` at worker `StartActivity`.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Production diagnosability** — Q89 (structured templates) catches whether the candidate has ever debugged a real outage. Anyone who's needed to search logs by `OrderId=42` knows why string interpolation is malpractice. (2) **Modernity** — Q90 (`[LoggerMessage]`) and Q92 (`System.Diagnostics.Metrics`) test whether the candidate has adopted the post-2022 idioms. `[LoggerMessage]` is a 2-line change that gives zero-allocation logging; reflexively reaching for it is the senior tell. (3) **Distributed-system reality** — Q91 (OpenTelemetry across services) and Q93 (manual context propagation across `Channel<T>`) sort candidates who've operated multi-service systems from candidates who've only built single-service apps. The right answer to Q93 includes the *why* — `ExecutionContext` flows automatically across `await`s but not across the producer/consumer boundary of a `Channel<T>`, because the worker task is its own root. Knowing the mechanism is the senior signal.
+
+**Common confusions**
+
+- "`$"Order {id}"` and `"Order {OrderId}", id` are the same" — completely different. Interpolation produces one opaque string; templates produce a stable message ID + structured fields.
+- "Logging at `Information` is fine in hot paths" — formatting cost happens regardless of level unless you use templates or `[LoggerMessage]`. Hot paths need the source-generated form.
+- "EventCounters are the way to expose metrics" — `System.Diagnostics.Metrics` is the modern replacement; OTel-compatible, more instrument types.
+- "`Activity.Current` flows everywhere" — it flows via `ExecutionContext`, which flows across `await` boundaries automatically. It does *not* flow across `Channel<T>` producer/consumer or manual `Task.Run` without capture.
+- "OpenTelemetry only works with Jaeger" — OTLP is the protocol; backends include Prometheus, Tempo, Honeycomb, Datadog, New Relic, AWS X-Ray. Backend-agnostic.
+- "Tracing is just for microservices" — single-service apps benefit from tracing too (DB calls, HTTP calls, background work all become spans). Visible value even at small scale.
+- "Sampling traces means losing data" — sampling at the producer reduces volume; tail-based sampling at the collector keeps traces with errors or slow operations. Both are standard practice at scale.
+
+**What follows from this topic**
+
+Observability touches almost every other topic. Concurrency (Q19-28 — `ExecutionContext` flow rules underpin Q93's manual context propagation). ASP.NET Core (Q65-73 — middleware is where ASP.NET Core's OTel instrumentation hooks in). Entity Framework Core (Q74-80 — the EF OTel instrumentation emits a span per query, often the only way to find N+1 problems in production). Architecture Patterns (Q99 MassTransit, Q100f event sourcing — both depend on tracing across async boundaries). If observability is "I write `Console.WriteLine`", expect senior interviewers to push hard.
 
 ### Q89. Why is structured logging via message templates better than string interpolation?
 
@@ -524,6 +1214,51 @@ The trace context lives in `Activity.Current` — it doesn't auto-propagate acro
 ---
 
 ## Security
+
+### Summary
+
+**What this topic covers**
+
+Security in ASP.NET Core is a wide topic; this section covers the senior bar in 6 questions. Four concern areas: (1) **password hashing** — Argon2id as the 2026 standard, ASP.NET Core Identity's PBKDF2 as adequate-but-not-best, never roll your own; (2) **Data Protection API** — `IDataProtector` underlies cookie encryption, antiforgery, OAuth state; key persistence in multi-instance deployments is the most common cause of intermittent auth failures; (3) **common mistakes** — SQL injection via `FromSqlRaw` interpolation, XSS via `@Html.Raw(userInput)`, CSRF via disabled antiforgery, open redirect via untrusted paths, credential logging via structured-log capture; (4) **modern and frontier topics** — post-quantum cryptography (ML-KEM, ML-DSA, SLH-DSA in .NET 10), JWT token revocation patterns when access tokens contain stale claims, mass-assignment prevention via DTOs. The 6 questions are the security minimum for any .NET service handling user data — and the ones a senior interviewer probes when the candidate's resume mentions "built an auth system."
+
+**Mental model**
+
+Two design principles frame .NET security. (1) **Defence in depth** — every layer adds protection independent of others, so a single mistake doesn't end the game. Password hashing uses memory-hard Argon2id (resistant to GPU/ASIC attacks); cookies are encrypted via Data Protection API (so stealing the cookie file doesn't yield credentials); CSRF tokens are validated on every state-changing request (so cookie theft alone doesn't authorise actions); input validation rejects malformed data before it hits the database; DTOs at the API boundary prevent mass assignment from setting fields the client shouldn't touch. Every layer is independent. (2) **Closed defaults** — modern ASP.NET Core defaults are secure: HTTPS enforced, antiforgery on for cookie-based auth, HSTS on, password validators sane. Most security bugs come from *opening* the closed default — `[IgnoreAntiforgeryToken]` for "convenience," `FromSqlRaw($"...{userInput}...")` for "speed," `@Html.Raw(userInput)` for "rich text." The Data Protection API specifically is the most-forgotten security configuration: by default the key ring persists to `%LOCALAPPDATA%` (user-local), which means in a multi-instance deployment behind a load balancer, every instance has its own key ring → cookies issued on instance A can't be decrypted on instance B → users get logged out after a load-balancer flip. Fix: `services.AddDataProtection().PersistKeysToAzureBlobStorage(...) / Redis / FileSystem(shared mount)`. The frontier mental shift is **post-quantum crypto agility**. .NET 10 surfaces ML-KEM (key encapsulation), ML-DSA (signatures), and SLH-DSA (hash-based signatures) — the NIST PQC algorithms. Production today still stays on AES-GCM + ECDSA P-256, but design for crypto agility so the eventual migration (5-10 years) is a configuration change, not a rewrite. Threat: "harvest now, decrypt later" — adversaries record encrypted traffic now to decrypt once quantum hardware matures.
+
+**Key terms**
+
+- **Argon2id** — memory-hard password hashing; resistant to GPU/ASIC; NIST + OWASP recommendation in 2026.
+- **PBKDF2-SHA256** — ASP.NET Core Identity's `PasswordHasher<TUser>` default; ~100k iterations; adequate but not best.
+- **Konscious.Security.Cryptography.Argon2** — the .NET Argon2id library; tune to ~250ms on your hardware.
+- **Data Protection API (`IDataProtector`)** — AES-GCM under the hood; used for cookies, antiforgery, OAuth state.
+- **Key ring persistence** — must be shared across instances; persist to Azure Blob, Redis, or shared filesystem.
+- **`FromSqlRaw` vs `FromSqlInterpolated`** — `Raw` does not parameterise (SQL injection); `Interpolated` auto-parameterises.
+- **`@Html.Raw(userInput)`** — bypasses Razor encoding; classic XSS hole.
+- **CSRF / antiforgery** — ASP.NET Core enables by default for cookie auth; do not disable.
+- **Open redirect** — accepting untrusted return URLs; validate via `Url.IsLocalUrl` before redirecting.
+- **Mass assignment** — binding `[FromBody]` directly to an EF entity; attacker sets fields not exposed in UI. Fix: DTOs.
+- **ML-KEM / ML-DSA / SLH-DSA** — NIST post-quantum algorithms surfaced in .NET 10.
+- **JWT revocation** — short-lived access + refresh tokens; revocation list in Redis; or stateful sessions.
+- **Mapperly** — source-generated mapping library; AOT-friendly DTO ↔ entity mapping without reflection.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Bread-and-butter security** — Q94 (password hashing) and Q96 (common mistakes) test whether the candidate's reflexes are right. A candidate who reaches for Argon2id, knows `FromSqlRaw` is SQL injection, and uses DTOs instead of binding to entities directly is operating at a senior level. (2) **Production scars** — Q95 (Data Protection key persistence) is *the* canonical "intermittent auth failure in prod" question. A candidate who's seen the bug — users randomly logged out after a deploy or LB flip — names the cause without prompting. (3) **Threat-model fluency** — Q97 (PQC), Q97b (JWT revocation patterns), Q97c (mass assignment) test whether the candidate can reason about adversary capabilities. The senior answer to Q97b lists all four revocation patterns and picks based on the threat model — short-lived access tokens for typical apps, stateful sessions for ultra-sensitive (banking), revocation lists for the middle ground.
+
+**Common confusions**
+
+- "ASP.NET Core Identity is enough — PBKDF2 is fine" — adequate but not best-in-class. For new systems, Argon2id; for existing Identity users, evaluate upgrade.
+- "Data Protection works out of the box" — only in single-instance deployments. Multi-instance needs explicit shared persistence.
+- "`FromSqlInterpolated` is just `FromSqlRaw` with prettier syntax" — no, it auto-parameterises. The difference is SQL injection vs not.
+- "Disable antiforgery for APIs" — fine for token-auth APIs that don't use cookies; harmful for cookie-auth (which is what browser sessions use).
+- "JWTs can be revoked by deleting them on the server" — they can't; that's the point of JWT being stateless. You revoke by short lifetimes + a separate revocation list, or by going stateful.
+- "Mass assignment is only a Ruby/Rails problem" — exactly the same problem in ASP.NET Core when binding to entities directly. DTOs are non-negotiable at API boundaries.
+- "PQC is needed today" — not yet in production. Awareness today, migration plan within 5-10 years.
+- "Logging the request object is fine for debugging" — if the request includes credentials / tokens, you've just leaked them to your logging sink. Add structured-log filters or use redacting types.
+
+**What follows from this topic**
+
+Security ties into ASP.NET Core (Q66 — captive dependencies in auth services), Entity Framework Core (Q76 — DTOs to prevent mass assignment via projection), Serialization (Q64 — `BinaryFormatter` removal was a security action), Architecture Patterns (Q100b — vertical slice with feature-local DTOs), Native AOT (Q103 — Mapperly is AOT-friendly mapping). If a candidate's security story is "we have HTTPS," expect senior interviewers to keep probing until they hit something the candidate hasn't thought about.
 
 ### Q94. Password hashing — what's the right choice in 2026?
 
@@ -552,6 +1287,52 @@ If your controller takes `[FromBody] Order order` and binds directly to your EF 
 ---
 
 ## Architecture Patterns
+
+### Summary
+
+**What this topic covers**
+
+The big-picture design choices senior .NET interviews probe — and the 2025-2026 ecosystem churn that changed the default answers. The 7 questions in this section span the senior architectural vocabulary. Four concern areas: (1) **mediator and messaging** — MediatR going commercial in 2025 and the OSS replacements (Mediator, Wolverine, Brighter, or hand-rolled handlers); MassTransit as the broker abstraction layer over RabbitMQ / Azure Service Bus / SQS / Kafka; (2) **domain modelling** — DDD tactical patterns mapped to C# (Entities, Value Objects, Aggregates, Domain Events, Repositories, Specifications); the senior judgement of when DDD's complexity pays off; (3) **architectural style** — vertical slice vs clean/onion/hexagonal for greenfield APIs; repository pattern over EF Core (often noise); CQRS (only when read/write models diverge); the monolith-vs-microservices seasoned answer; (4) **event sourcing** — Marten (Postgres-backed) and EventStoreDB/KurrentDB as the .NET stack; when full audit history justifies the cost. The 7 questions are exactly the territory a senior interviewer probes when the candidate says "I architected a system" on their resume.
+
+**Mental model**
+
+Three principles frame modern .NET architecture. (1) **Pick complexity that matches the domain**. Clean architecture, CQRS, event sourcing, microservices — all costly. Each pays off only when the domain has the corresponding pressure: clean architecture for genuinely rich domain logic; CQRS when reads dominate writes 10×+ *and* the models diverge; event sourcing when audit history is a real requirement; microservices when team-independence pressure justifies the operational cost. The seasoned answer to "monolith vs microservices" is **start with a modular monolith with clear bounded contexts; extract services when team/scale/independence pain justifies the cost.** Extracting early "to future-proof" without the deployment/observability/team structure to support distributed systems is the canonical mistake. (2) **Vertical slices beat layered architecture for greenfield APIs**. Each endpoint is a folder with its own request, handler, validator, response — self-contained, easy to add/remove, low cognitive load. Clean architecture's layered model (Domain / Application / Infrastructure / Presentation) wins on enforcing dependency direction but costs ceremony — every feature touches every layer. Reach for clean only when domain logic is rich enough to warrant the separation. (3) **Watch the ecosystem licensing**. MediatR moved to commercial in 2025; replacements are **Mediator** (source-generated, near-zero overhead, free), **Wolverine** (mediator + messaging + sagas + outbox, broader scope), or hand-rolled handlers (~30 lines for a single service). The senior signal is knowing the licensing situation and picking based on team scale — for a single-service API, hand-rolled handlers beat any framework. **MassTransit** is the abstraction layer when you want broker portability + sagas + outbox + OTel observability across services. The fourth shift: **DDD tactical patterns map cleanly to C#** — Value Objects are `readonly record struct`, Entities are classes with identity, Aggregates are entity clusters with one root enforcing invariants, Domain Events are `record` types published via a mediator, Specifications are composable `Expression<Func<T, bool>>` predicates. Knowing the mapping is the senior tell.
+
+**Key terms**
+
+- **MediatR (commercial 2025)** — moved to paid license; OSS replacements: **Mediator** (source-gen, free), **Wolverine** (broader scope), **Brighter**.
+- **MassTransit** — messaging abstraction over RabbitMQ / Azure Service Bus / SQS / Kafka; sagas, outbox, OTel.
+- **Saga** — stateful workflow persisted in DB; coordinates long-running, multi-step processes across services.
+- **Outbox pattern** — write message-to-publish into the same transaction as the domain change; separate worker publishes; eventual consistency without lost messages.
+- **DDD tactical patterns** — Entity, Value Object, Aggregate (Root), Domain Event, Repository, Specification.
+- **Aggregate Root** — only externally-referenced entity in an aggregate; invariants enforced here.
+- **Vertical slice** — feature-oriented folder structure; each endpoint self-contained.
+- **Clean / Onion / Hexagonal** — layered architecture enforcing inward dependency direction; ceremony-heavy.
+- **Repository pattern over EF Core** — often leaky; useful when collecting domain queries on an aggregate root.
+- **CQRS** — separate read and write models; pays off when reads dominate and models diverge.
+- **Modular monolith** — bounded contexts as internal modules; the seasoned starting point.
+- **Event sourcing** — store events as the source of truth, project read models from the event stream.
+- **Marten** — Postgres-backed document + event store; very ergonomic in .NET.
+- **EventStoreDB / KurrentDB** — purpose-built event store; multi-language; KurrentDB is the OSS continuation.
+- **Mapperly** — source-generated DTO ↔ entity mapping; AOT-friendly AutoMapper replacement.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Ecosystem currency** — Q98 (MediatR commercial) and Q103 reference to AutoMapper-style reflection libraries being AOT-hostile test whether the candidate has tracked the 2024-2025 licensing and AOT-readiness churn. A candidate still defaulting to MediatR + AutoMapper hasn't been paying attention. (2) **Architectural taste** — Q100b (vertical slice vs clean), Q100c (repository pattern over EF), Q100d (CQRS), Q100e (monolith → microservices) probe whether the candidate has *opinions* shaped by production experience. The senior answer to each is "it depends, here's the trigger that flips my default" — not "always X." The wrong answer is reflexive clean architecture for every greenfield API, or reflexive microservices for "scalability." (3) **DDD fluency** — Q100 (tactical patterns mapped to C#) sorts candidates who've read *Implementing Domain-Driven Design* from candidates who've heard the term. The mapping to `readonly record struct` for Value Objects is a recent senior idiom. The wrong answer is "DDD just means rich models" or "we use DDD everywhere."
+
+**Common confusions**
+
+- "Always use clean architecture" — only for genuinely rich domain logic. Vertical slice + thin shared kernel beats clean for typical CRUD-with-business-rules APIs.
+- "Repository pattern is always good practice" — over EF Core it's often noise. EF's `DbContext` *is* a unit of work; `DbSet<T>` *is* a repository.
+- "CQRS just means MediatR commands and queries" — it isn't. Real CQRS means *different read and write models*, often different databases. Using MediatR doesn't make you CQRS.
+- "Microservices are inherently scalable" — they shift complexity from in-process method calls to network calls. Without the operational stack (observability, deploy automation, on-call), they make things worse.
+- "Event sourcing is just an audit log" — it's the source of truth. Snapshotting, schema evolution of events, replayability of projections all become first-class concerns.
+- "MediatR is a hard dependency for clean architecture" — it isn't. You can hand-roll a mediator in ~30 lines. The pattern matters, not the library.
+- "MassTransit is required for any messaging" — for simple single-broker producer/consumer, raw client + a thin wrapper is often clearer. MassTransit shines on sagas and multi-broker portability.
+
+**What follows from this topic**
+
+Architecture patterns sit on top of everything else. ASP.NET Core (Q65-73 — Minimal APIs make vertical slice trivial). Entity Framework Core (Q74-80 — the repository-over-EF debate). Concurrency (Q19-28 — MassTransit consumers are async handlers). Observability (Q91-93 — tracing across MassTransit and saga boundaries). Native AOT (Q103 — Mapperly replaces AutoMapper, source-gen mediator replaces MediatR). If a candidate's architecture story is "we use clean architecture," expect senior interviewers to ask *why* — what triggered that choice over vertical slice, what alternatives were considered, what would make them change.
 
 ### Q98. MediatR went commercial in 2025 — what's the replacement?
 
@@ -589,6 +1370,51 @@ You need CQRS when (1) reads dominate writes by 10×+ and (2) the read model dif
 
 ## Native AOT & Trimming
 
+### Summary
+
+**What this topic covers**
+
+Native AOT is the deployment model that brings .NET into territory previously owned by Go and Rust — small native binaries, fast cold start, no JIT, no runtime IL. The 4 questions in this section cover the senior territory. Four concern areas: (1) **the model** — what Native AOT is (closed-world compilation, no JIT, severe reflection restrictions), and its tradeoffs (3× smaller binary, 10× faster cold start, 50% less working set vs reduced reflection capability); (2) **the trimmer** — IL trimming removes statically-unreachable code; trim warnings (`IL2026`, `IL2070`) flag reflection patterns the trimmer can't analyse; annotations (`[RequiresUnreferencedCode]`, `[DynamicallyAccessedMembers]`) tell the trimmer what to preserve; (3) **the AOT-compatibility landscape in 2026** — older AutoMapper / Newtonsoft / Castle.DynamicProxy / older Moq are AOT-hostile; modern alternatives are Mapperly, System.Text.Json source-gen, source generators broadly, EF Core 10 (fully AOT-compatible); (4) **container publishing** — `dotnet publish -t:PublishContainer` builds and pushes OCI images without a Dockerfile; .NET 10 default base is Ubuntu chiseled (distroless). The 4 questions are the AOT readiness assessment a senior interviewer applies to candidates targeting serverless, CLI tools, or minimal-footprint container deploys.
+
+**Mental model**
+
+Native AOT is **closing the world at compile time**. Standard .NET is open-world: at runtime, the CLR can load any assembly via `Assembly.LoadFrom`, instantiate any type via `Activator.CreateInstance(type)`, emit IL via `Reflection.Emit`, and JIT-compile new code as needed. AOT removes all of this — the publish step walks every statically-reachable type and method from the entry point, compiles them to native code, and discards the rest. The result: a single native executable, no JIT, no IL at runtime, no dynamic assembly loading. Benefits: ~3× smaller binary, ~10× faster cold start (no JIT warmup), ~50% smaller working set, ahead-of-time error detection of dependency issues. Costs: a closed-world model that breaks any library relying on runtime reflection or IL emit. The trimmer is the enforcement mechanism — it analyses the call graph, removes unreachable code, and emits **trim warnings** for patterns it can't analyse safely (typically reflection over `Type.GetMethod("Foo")` where the string is opaque to static analysis). You respond to warnings either with annotations (`[DynamicallyAccessedMembers(...)]` to preserve specific members, `[RequiresUnreferencedCode("Reason")]` to mark a method as "this uses reflection, callers beware") or by replacing reflection with source generators. **Zero trim warnings is the AOT-ready bar.** The 2026 AOT-compatibility landscape has matured: System.Text.Json source-gen, `[LoggerMessage]`, `[GeneratedRegex]`, Mapperly, EF Core 10, ASP.NET Core Minimal APIs with `TypedResults`, `[LibraryImport]` for P/Invoke — all AOT-friendly. The remaining AOT-hostile libraries are mostly the runtime-reflection-heavy classics (older AutoMapper, Newtonsoft with reflection, Castle.DynamicProxy used by older Moq) — find a non-emit alternative or skip AOT. **`dotnet publish -t:PublishContainer`** is the .NET 10 default container publish — no Dockerfile, picks Ubuntu chiseled (distroless) as the base, proper layer caching driven by build output.
+
+**Key terms**
+
+- **Native AOT** — `<PublishAot>true</PublishAot>`; closed-world compile to native binary; no JIT, no IL at runtime.
+- **Closed world** — every reachable type/method known statically; no runtime assembly loading or type discovery.
+- **IL trimmer** — removes statically-unreachable code; emits trim warnings when reflection patterns can't be analysed.
+- **Trim warning (`IL2026`, `IL2070`, ...)** — code patterns that may break under trimming; address with annotations or source-gen alternative.
+- **`[RequiresUnreferencedCode("Reason")]`** — marks method as "uses reflection, callers beware"; propagates warnings up.
+- **`[DynamicallyAccessedMembers(...)]`** — annotation on a `Type` parameter telling the trimmer to preserve specific members.
+- **R2R (ReadyToRun)** — different from AOT; precompiled native alongside IL; JIT still active.
+- **Mapperly** — source-generated mapping; AOT-friendly AutoMapper replacement.
+- **`[LibraryImport]`** — source-generated P/Invoke; AOT-compatible; replaces `[DllImport]` in new code.
+- **EF Core 10 AOT** — fully AOT-compatible for most providers; the long-standing gap is closed.
+- **`PublishContainer`** — `dotnet publish -t:PublishContainer`; build and push OCI image without Dockerfile.
+- **`<ContainerBaseImage>`** — csproj property setting base image; .NET 10 default is `mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled`.
+- **Chiseled / distroless** — minimal base image with no shell or package manager; reduced attack surface.
+
+**Why interviewers ask this**
+
+Three signals. (1) **AOT-readiness assessment** — Q101 (one-paragraph AOT) and Q102 (trim warnings) test whether the candidate has actually shipped an AOT app. Anyone who's published with `<PublishAot>true</PublishAot>` has dealt with trim warnings and knows the workflow: read the warning, find the reflection pattern, replace with source-gen or annotate. (2) **Library taste** — Q103 (AOT-incompatible in 2026) probes whether the candidate has internalised the source-generator-everywhere worldview. The right answer lists the AOT-hostile classics (older AutoMapper, Newtonsoft reflection, older Moq via Castle.DynamicProxy) and their modern replacements (Mapperly, STJ source-gen, NSubstitute). (3) **Deployment fluency** — Q103b (container publishing) tests whether the candidate has tracked the .NET 10 deployment story. `PublishContainer` without a Dockerfile, chiseled base image, reproducible builds — these are 2026 idioms.
+
+**Common confusions**
+
+- "Native AOT just makes startup faster" — it also closes the world. Source-gen everywhere, restricted reflection, no runtime IL emit.
+- "AOT and R2R are the same" — R2R precompiles IL to native alongside IL; the JIT still runs. AOT removes the JIT entirely.
+- "All libraries work under AOT" — no. Anything relying on runtime reflection or IL emit (older AutoMapper, Newtonsoft, Castle.DynamicProxy) breaks unless it has a source-gen alternative.
+- "Trim warnings are advisory" — they're indicators of code that *may break at runtime*. Treat them as errors for AOT-ready builds.
+- "EF Core can't be used with AOT" — pre-.NET 10 only partially; **EF Core 10 is fully AOT-compatible** for most providers.
+- "AOT is only for CLI tools" — also serverless (Lambda cold starts), sidecars, gRPC services, minimal APIs with source-gen JSON.
+- "Container publishing requires a Dockerfile" — not in .NET 10. `dotnet publish -t:PublishContainer` builds and pushes directly.
+- "Chiseled images are exotic" — they're the .NET 10 *default* base. Distroless equivalent with no shell, minimal attack surface.
+
+**What follows from this topic**
+
+Native AOT is the integration topic that touches everything. Generics & Type System (Q45 — reflection vs AOT). Serialization (Q63 — source-gen JSON is AOT-mandatory). ASP.NET Core (Q68 — Minimal APIs with `TypedResults` are AOT-friendly). Entity Framework Core (Q79 — EF Core 10 fully AOT). Observability (Q90 — `[LoggerMessage]` is AOT-friendly). Architecture Patterns (Q98 — source-gen mediator like Mediator over MediatR; Q100 — Mapperly over AutoMapper). If a candidate says "we want AOT" without addressing the library implications, expect senior interviewers to probe the dependency list.
+
 ### Q101. What is Native AOT, in one paragraph?
 
 Ahead-of-time compilation to a native binary — no JIT at runtime, no IL, no dynamic codegen. `<PublishAot>true</PublishAot>` in csproj. Wins: ~3× smaller binary, ~10× faster cold start, ~50% less working set, no JIT warmup. Costs: closed-world (no `Assembly.LoadFrom`, no runtime IL emit, very restricted reflection), trimming required (unreachable code is removed), most reflection-based libraries need source-gen alternatives. Use cases: CLI tools, serverless / Lambda, sidecars, gRPC services, ASP.NET Core minimal APIs with source-gen JSON.
@@ -608,6 +1434,50 @@ Older AutoMapper (reflection-based mapping) — use `Mapperly` (source-gen). New
 ---
 
 ## Interop
+
+### Summary
+
+**What this topic covers**
+
+Native interop — calling C/C++ libraries from C# and exposing C# functions to native callers. The 2 questions in this section are short but cover the senior P/Invoke vocabulary. Two concern areas: (1) **marshalling and blittability** — the runtime cost difference between blittable types (identical managed/native layout, zero-copy) and non-blittable types (stub-generated conversion), and how to design interop structs for the fast path; (2) **function pointers** — `delegate*<T>` (C# 9+) as the typed, allocation-free alternative to `Marshal.GetDelegateForFunctionPointer`, paired with `[UnmanagedCallersOnly]` for exposing managed callbacks to native callers. The 2 questions are tight but they're the senior interview filter for any role that touches native libraries: video/audio processing, OS integration, hardware drivers, FFI to C++ libraries, custom JITs, game engines.
+
+**Mental model**
+
+Two principles frame modern .NET interop. (1) **Blittable means free**. A blittable type has identical representation in managed and native memory — `int`, `long`, `float`, `double`, `IntPtr`, `byte`, `nuint`, structs containing only blittable fields with `LayoutKind.Sequential`. When you call a P/Invoke with a blittable struct, the runtime hands the native side a pointer — no copy, no conversion, no allocation. Non-blittable types (`string`, `bool` historically, complex structs with managed references) require **stub-generated conversion** — copy/transform/free. Hot interop paths are designed around blittable types: use `byte` instead of `bool`, pass strings as `byte*` + length or `ReadOnlySpan<byte>` when feasible, prefer fixed-size struct fields over object references, mark structs `[StructLayout(LayoutKind.Sequential, Pack = N)]` to match the native layout exactly. The second mental shift is the **`[LibraryImport]` modernisation** (covered in Memory Management Q15) — source-generated marshalling stubs that are faster than runtime-emitted ones, AOT-friendly, and give compile-time diagnostics on bad marshalling. Always prefer in new code. (2) **Function pointers replace delegate marshalling on the hot path**. `Marshal.GetDelegateForFunctionPointer<TDelegate>(ptr)` allocates a delegate object and creates a managed-to-native stub on every call. `delegate* unmanaged<int, int>` is a typed function pointer — direct call, no allocation, no stub, lowest possible interop overhead. Pair with `[UnmanagedCallersOnly]` on managed functions you want to expose to native callers (callbacks from a C library, vtable entries) — the runtime emits an unmanaged entry point that native code can call directly. Niche but transformative: custom JITs, FFI to high-throughput C++ libraries (graphics, audio, video codecs), embedding .NET runtimes in native hosts. For ultra-short native calls (microseconds), add `[SuppressGCTransition]` to skip the GC transition (no managed-to-native frame switch) — only safe for fast, non-blocking native calls because the runtime can't interrupt the call for a GC.
+
+**Key terms**
+
+- **Blittable** — type with identical managed/native layout; zero-copy marshalling.
+- **Non-blittable** — type requiring conversion (e.g. `string`, complex structs); stub-generated copy/transform.
+- **`[StructLayout(LayoutKind.Sequential)]`** — fields laid out in declaration order; default for structs.
+- **`[StructLayout(LayoutKind.Explicit)]` + `[FieldOffset(N)]`** — manual layout for unions and exact native binding.
+- **`[LibraryImport]`** — .NET 7+; source-generated P/Invoke; AOT-friendly; replaces `[DllImport]`.
+- **`[DllImport]`** — legacy P/Invoke; runtime-emitted stub via reflection; works everywhere but not AOT-friendly.
+- **`[UnmanagedCallersOnly]`** — marks a managed method as a native entry point; callable from native code as a function pointer.
+- **`delegate*<T>`** — C# 9+; typed function pointer; no allocation, no delegate wrapper.
+- **`delegate* unmanaged<T>`** — function pointer with the unmanaged calling convention.
+- **`Marshal.GetDelegateForFunctionPointer<T>`** — legacy bridge; allocates a delegate; slower than `delegate*<T>`.
+- **`[SuppressGCTransition]`** — skip GC transition for ultra-short native calls; only for fast, non-blocking native code.
+- **`SafeHandle`** — wraps a native resource; handles finalization, thread safety, ref counting; the safe interop primitive.
+- **Pinning** — `fixed` statement or `GCHandle.Alloc(obj, GCHandleType.Pinned)`; prevents GC from moving the object while native code holds the pointer.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Specialty filter** — interop is a senior-specialty topic. Most candidates have never written P/Invoke; the ones who have are valuable for roles touching native libraries (media, hardware, OS integration, game tooling). The Q104 blittability question separates "I've called a single LibraryImport once" from "I design interop structs for the hot path." (2) **Performance reasoning** — Q105 (function pointers) tests whether the candidate has profiled an interop hot path. Anyone who's discovered `Marshal.GetDelegateForFunctionPointer` is the bottleneck and switched to `delegate*<T>` has lived the issue. The senior tell includes `[UnmanagedCallersOnly]` for the callback direction. (3) **AOT alignment** — `[LibraryImport]` over `[DllImport]` is the AOT-friendly choice. Candidates who reflexively reach for `[LibraryImport]` have internalised the AOT story across the codebase. (4) Bonus signal: knowing `[SuppressGCTransition]` exists and what its safety conditions are — a niche optimisation only seasoned interop engineers have applied.
+
+**Common confusions**
+
+- "Strings are blittable" — they're not. `string` is a managed reference type with a UTF-16 layout; marshalling to `char*` or `byte*` requires copy/conversion.
+- "`bool` is blittable" — historically not (Win32 `BOOL` is 4 bytes, .NET `bool` is 1 byte). Use `[MarshalAs(UnmanagedType.U1)]` or `byte` for predictable layout.
+- "`[LibraryImport]` and `[DllImport]` are interchangeable" — `[LibraryImport]` is source-generated and AOT-friendly; `[DllImport]` is runtime-emitted. Prefer LibraryImport in new code.
+- "Function pointers are unsafe" — `delegate*<T>` requires `unsafe` context, but it's not categorically more dangerous than a `[DllImport]` — both call native code.
+- "Pinning is automatic" — only with `fixed` for the duration of the statement, or `GCHandle.Alloc(..., Pinned)` explicitly. Crossing async boundaries with pinned objects breaks; use `Memory<T>` with a pinned slice and pass the pointer synchronously.
+- "`[SuppressGCTransition]` always helps" — only for very short native calls (microseconds). The transition cost matters most when amortised across many calls; for long-running native code it's harmful (blocks GC).
+- "`Marshal.GetDelegateForFunctionPointer` is fine" — for cold-path interop yes; for hot loops it allocates a delegate and adds a stub call. Use `delegate*<T>` on the hot path.
+
+**What follows from this topic**
+
+Interop ties into Memory Management (Q15 `[LibraryImport]` — same family of techniques), Native AOT & Trimming (Q103 — AOT-friendly P/Invoke is `[LibraryImport]`), CLR Internals (Q9 `SafeHandle` for native resource lifetimes). For most senior interviews this is a "if it comes up" topic — but for specialty roles (media, gaming, OS integration, hardware drivers, game engines) it's a deep-dive area where the candidate's depth determines the role-fit.
 
 ### Q104. P/Invoke marshalling — what's "blittable" and why does it matter?
 
