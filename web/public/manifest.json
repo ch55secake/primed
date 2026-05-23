@@ -4,10 +4,10 @@
     {
       "id": "patterns",
       "file": "/patterns.md",
-      "title": "Patterns",
+      "title": "Example Questions",
       "category": "System Design",
-      "itemLabel": "Pattern",
-      "itemsPlural": "interview patterns",
+      "itemLabel": "Question",
+      "itemsPlural": "example questions",
       "storagePrefix": "sdf:patterns",
       "defaultRevealedSections": ["Problem"],
       "sectionOrder": [
