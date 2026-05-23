@@ -27,6 +27,12 @@ export interface Settings {
    *   0.85 (S) | 1.0 (M) | 1.15 (L) | 1.3 (XL)
    */
   fontScale: number;
+  /**
+   * When on and no per-item revealed state has been saved yet, auto-expand
+   * any "Summary" section on first visit. Per-item toggles always win after
+   * that — the setting only affects the initial state of a never-opened item.
+   */
+  autoRevealSummary: boolean;
 }
 
 /** Probe Android's manufacturer string for known e-ink vendors. */
@@ -40,6 +46,7 @@ const DEFAULTS: Settings = {
   themeMode: "system",
   eInkMode: detectEInkDefault(),
   fontScale: 1.0,
+  autoRevealSummary: true,
 };
 
 const STORAGE_KEY = "drilly:settings";

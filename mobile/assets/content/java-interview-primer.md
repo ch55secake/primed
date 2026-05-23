@@ -37,6 +37,47 @@ Each answer is interview-shaped: 2–6 sentences, code where useful, no textbook
 
 ## Core Java
 
+### Summary
+
+**What this topic covers**
+
+The language fundamentals every Java developer is expected to have at their fingertips — and that every Java interview opens with as a warm-up before going deeper. Three concern areas live here: (1) the **platform model** — the JDK / JRE / JVM stack and how Java source actually becomes a running program; (2) the **object model** — OOP principles, classes vs interfaces, immutability, inner classes, the Object contract, generics (with type erasure), reflection, annotations; and (3) the **semantic primitives** — pass-by-value, primitive vs reference, static vs dynamic binding, equals/hashCode, access modifiers, static initialisation order, the `final`/`finally`/`finalize` triad. The 23 questions in this topic are the surface; the principles underneath are what every later topic (Collections, Concurrency, Generics, Memory Management) silently builds on.
+
+**Mental model**
+
+Think of Java in three layers. (1) **Source → bytecode**: `javac` compiles `.java` files into platform-independent `.class` files of JVM bytecode. (2) **Bytecode → runtime**: a JVM (HotSpot, OpenJ9, GraalVM, Azul) loads classes, verifies bytecode, JIT-compiles hot methods to native machine code, and runs them inside the managed heap. (3) **The standard library + tooling**: collections, IO, concurrency primitives, the compiler itself — all distributed as the JDK. "Write once, run anywhere" really means "compile once, run wherever a JVM exists" — the JVM is the abstraction barrier. The other mental shift is **everything is an object except primitives**. The eight primitive types (`int`, `long`, `double`, etc.) live as raw values on the stack or inside objects; every other identifier is a *reference* to a heap-allocated object. Pass-by-value applies to *both* — primitives copy the value, references copy the pointer. That single rule explains why mutating an object through a parameter affects the caller but reassigning the parameter doesn't.
+
+**Key terms**
+
+- **JVM** — runtime executing bytecode, providing class loading + JIT + GC.
+- **JRE** — JVM + standard libraries; largely deprecated as a separate distribution since Java 11.
+- **JDK** — JRE + `javac` + tooling; the default download today.
+- **OOP principles** — encapsulation, inheritance, polymorphism, abstraction.
+- **Class vs interface** — single inheritance of state vs multiple inheritance of behaviour-only contracts (with default and static methods since Java 8, and private methods since Java 9).
+- **Immutability** — state cannot change after construction; thread-safe by default, safe as `HashMap` keys, cacheable.
+- **Inner classes** — non-static inner (captures enclosing instance), static nested (no capture), local (method-scoped), anonymous (single-use, now mostly replaced by lambdas).
+- **Type erasure** — generics are compile-time only; `List<String>` and `List<Integer>` are the same `List` at runtime. Drives the no-array-of-generics rule and the PECS (`producer extends, consumer super`) wildcard convention.
+- **`equals` / `hashCode` contract** — equal objects must have equal hash codes; a class overriding one must override the other.
+- **Static vs dynamic binding** — overloading resolves at compile time on the declared type; overriding resolves at runtime on the actual object's class.
+- **Pass-by-value** — Java has *only* pass-by-value; references happen to be values that point at objects.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Foundations check** — can you explain JVM vs JRE vs JDK without hedging? Junior candidates often slur them; senior candidates know the differences and the operational implication (you ship a JDK, not a JRE, in 2026 containers). (2) **Reasoning under semantics** — questions about immutability, pass-by-value, and equals/hashCode test whether you can reason about *what the runtime actually does*, not just write working code. Get the pass-by-value question right and the interviewer relaxes; get it wrong and the rest of the interview is a recovery operation. (3) **Modern Java awareness** — the diamond problem, default methods, records (Java 14+), pattern matching — knowing what changed in Java 8 / 11 / 17 / 21 / 25 separates candidates who've shipped recent code from candidates who haven't touched the language since Java 8.
+
+**Common confusions**
+
+- "JVM and JRE are the same thing" — they're not; the JRE is the JVM *plus* the runtime libraries. The distinction matters for size and tooling decisions.
+- "Abstract classes are interfaces with state" — closer to right than wrong, but ignores that interfaces have had default methods (Java 8), static methods (Java 8), and private methods (Java 9) for years; the gap is narrower than it used to be.
+- "Immutability means `final`" — `final` prevents *re-assignment* of a reference; it does **not** prevent mutation of the referenced object. `final List<String> xs = new ArrayList<>(); xs.add("hi");` compiles and runs.
+- "Java is pass-by-reference for objects" — it isn't. Java is **pass-by-value for everything**; the value of an object variable is a reference. That's why reassigning a parameter doesn't affect the caller but mutating through it does.
+- "Inner classes and nested classes are the same" — only the *non-static* nested ones are "inner" classes that capture the enclosing instance; static nested classes are just namespaced. Mixing the terms in an interview is a junior tell.
+- "Type erasure means generics are useless" — type erasure means generics are *compile-time* useful; the type checker enforces them, runtime just sees raw types. Drives the no-`new T()`, no-array-of-generics constraints.
+
+**What follows from this topic**
+
+Every later topic in this primer assumes you can think in these primitives. The immutability question previews the entire Concurrency section (thread-safe by construction is the easiest concurrency story). The JDK / JRE / JVM layering previews JVM Internals, Memory Management, and Performance. Abstract-vs-interface previews Design Patterns and Architecture. Generics + type erasure previews how Collections and Reactive APIs are typed. If Core Java feels shaky, fix it first — drilling further topics on top of weak foundations doesn't compound.
+
 ### Q1. Explain the difference between JDK, JRE, and JVM.
 
 **JVM (Java Virtual Machine)** — the runtime that executes bytecode. Per-platform implementation (HotSpot, OpenJ9), provides class loading, bytecode verification, JIT compilation, and garbage collection. The "write once, run anywhere" abstraction lives here.

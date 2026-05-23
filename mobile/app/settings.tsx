@@ -89,6 +89,24 @@ export default function SettingsScreen() {
           />
         </View>
       </Section>
+
+      <Section title="Auto-reveal Summary" palette={palette}>
+        <View style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.hint}>
+              Open Summary cards by default when you first visit a topic.
+              Turn off for study mode — start with a blank reader and
+              reveal each section as you go.
+            </Text>
+          </View>
+          <Switch
+            value={settings.autoRevealSummary}
+            onValueChange={(autoRevealSummary) => update({ autoRevealSummary })}
+            trackColor={{ false: palette.border, true: palette.accent }}
+            thumbColor={palette.surface}
+          />
+        </View>
+      </Section>
       </ScrollView>
     </View>
   );
