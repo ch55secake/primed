@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { router, usePathname } from "expo-router";
 import { useManifest } from "../lib/manifest";
-import { refreshSource } from "../lib/content";
+import { refreshSource, warmExternalCaches } from "../lib/content";
 import {
   formatRelativeTime,
   getLastFullRefresh,
@@ -130,6 +130,7 @@ export function DesktopSidebar() {
       await Promise.all([
         refresh().catch(() => {}),
         ...sources.map((s) => refreshSource(s).catch(() => {})),
+        warmExternalCaches(),
       ]);
       invalidateSourceItemsCache(); // re-parse on next expand
       const now = Date.now();
