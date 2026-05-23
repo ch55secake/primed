@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { useManifest } from "../lib/manifest";
-import { refreshSource } from "../lib/content";
+import { refreshSource, warmExternalCaches } from "../lib/content";
 import {
   formatRelativeTime,
   getLastFullRefresh,
@@ -72,6 +72,7 @@ export function RefreshAllButton() {
       await Promise.all([
         refreshManifest().catch(() => {}),
         ...sources.map((s) => refreshSource(s).catch(() => {})),
+        warmExternalCaches(),
       ]);
       const now = Date.now();
       await setLastFullRefresh(now);

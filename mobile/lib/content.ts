@@ -134,3 +134,33 @@ export async function refreshSource(cfg: SourceConfig): Promise<string> {
 export async function refreshAll(sources: SourceConfig[]): Promise<void> {
   await Promise.all(sources.map(refreshSource));
 }
+
+/**
+ * External CDN resources the rendered page lazy-loads. We fetch each one
+ * with `cache: "reload"` from a "refresh everything" handler so the
+ * Android WebView's HTTP cache contains them at their canonical URL,
+ * keeping the offline experience whole even for content the user hasn't
+ * navigated to online first.
+ *
+ * Currently: mermaid (`MermaidView` builds an HTML page that pulls this
+ * script via `<script src=…>`). If we add more external assets later
+ * (custom fonts, other libs), list them here.
+ */
+const EXTERNAL_CACHE_URLS: readonly string[] = [
+  "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js",
+];
+
+/**
+ * Warm the WebView HTTP cache for external (CDN-hosted) resources the
+ * site lazy-loads on demand. No-op outside of web — native paths don't
+ * benefit from the WebView cache. Errors are swallowed; warming is
+ * best-effort and the site still works (online) without it.
+ */
+export async function warmExternalCaches(): Promise<void> {
+  if (!IS_WEB) return;
+  await Promise.all(
+    EXTERNAL_CACHE_URLS.map((url) =>
+      fetch(url, { cache: "reload", mode: "no-cors" }).catch(() => {}),
+    ),
+  );
+}
