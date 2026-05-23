@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -17,27 +17,13 @@ import {
   setLastRefreshed,
 } from "../lib/storage";
 import type { SourceConfig } from "../lib/parser";
+import { invalidateSourceItemsCache, useSourceItems } from "../lib/useSourceItems";
 import { useTheme, type Palette } from "../lib/theme";
 
 const SIDEBAR_WIDTH = 280;
 
 /**
- * Persistent left sidebar shown on desktop web only (see _layout.tsx).
- *
- * Layout:
- *   DRILLY                          ↻  ⚙
- *   {N} sources · Updated 2h ago
- *   ----
- *   SYSTEM DESIGN
- *     • Patterns
- *   DSA
- *     • NeetCode 150
- *   LANGUAGES
- *     • Java
- *     • Kotlin
- *
- * The active source (matched against the URL pathname) gets the accent
- * highlight so the user always sees where they are in the library.
+ * Group sources by their `category` field while preserving manifest order.
  */
 function groupByCategory(
   sources: SourceConfig[],
@@ -52,12 +38,23 @@ function groupByCategory(
     }
     buckets.get(cat)!.push(s);
   }
-  return order.map((category) => ({
-    category,
-    sources: buckets.get(category)!,
-  }));
+  return order.map((c) => ({ category: c, sources: buckets.get(c)! }));
 }
 
+/**
+ * Persistent left sidebar on desktop web (see _layout.tsx).
+ *
+ * Tree:
+ *   CATEGORY
+ *     ▸ Source        (collapsed)
+ *     ▾ Source        (expanded)
+ *         1. Item
+ *         2. Item
+ *         …
+ *
+ * Source expansion is local sidebar state; the active source's tree
+ * auto-opens when the URL points at one of its items.
+ */
 export function DesktopSidebar() {
   const palette = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
@@ -66,22 +63,48 @@ export function DesktopSidebar() {
   const pathname = usePathname();
   const [busy, setBusy] = useState(false);
   const [refreshedLabel, setRefreshedLabel] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
-  // Hydrate the "Updated …" label on every render so it stays fresh after
-  // navigation; cheap because getLastFullRefresh is one AsyncStorage read.
-  useMemo(() => {
+  // Hydrate the "Updated …" label.
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       const ts = await getLastFullRefresh();
-      setRefreshedLabel(ts ? formatRelativeTime(ts) : null);
+      if (!cancelled) setRefreshedLabel(ts ? formatRelativeTime(ts) : null);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const activeId = useMemo(() => {
-    // Pathnames look like "/source/java" or "/reader/java/4" — pick the
-    // segment immediately after /source or /reader.
-    const m = pathname.match(/^\/(?:source|reader)\/([^/]+)/);
-    return m ? m[1] : null;
+  // URL parsing: matches both /source/[id] and /reader/[source]/[itemId].
+  const { activeSourceId, activeItemId } = useMemo(() => {
+    const m = pathname.match(/^\/(?:source|reader)\/([^/]+)(?:\/(\d+))?/);
+    return {
+      activeSourceId: m ? m[1] : null,
+      activeItemId: m && m[2] ? Number(m[2]) : null,
+    };
   }, [pathname]);
+
+  // Auto-expand the source tree whenever the URL points at one of its items.
+  useEffect(() => {
+    if (!activeSourceId) return;
+    setExpanded((prev) => {
+      if (prev.has(activeSourceId)) return prev;
+      const next = new Set(prev);
+      next.add(activeSourceId);
+      return next;
+    });
+  }, [activeSourceId]);
+
+  const toggleSource = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const onRefresh = useCallback(async () => {
     if (busy) return;
@@ -91,6 +114,7 @@ export function DesktopSidebar() {
         refresh().catch(() => {}),
         ...sources.map((s) => refreshSource(s).catch(() => {})),
       ]);
+      invalidateSourceItemsCache(); // re-parse on next expand
       const now = Date.now();
       await setLastFullRefresh(now);
       await Promise.all(sources.map((s) => setLastRefreshed(s.id, now)));
@@ -141,36 +165,106 @@ export function DesktopSidebar() {
         {grouped.map(({ category, sources: groupSources }) => (
           <View key={category} style={styles.group}>
             <Text style={styles.groupHeader}>{category}</Text>
-            {groupSources.map((s) => {
-              const active = s.id === activeId;
-              return (
-                <Pressable
-                  key={s.id}
-                  onPress={() => router.push(`/source/${s.id}`)}
-                  style={({ pressed }) => [
-                    styles.sourceRow,
-                    pressed && styles.sourceRowPressed,
-                    active && styles.sourceRowActive,
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.accentStrip,
-                      { backgroundColor: active ? palette.accent : "transparent" },
-                    ]}
-                  />
-                  <Text
-                    style={[styles.sourceTitle, active && styles.sourceTitleActive]}
-                    numberOfLines={1}
-                  >
-                    {s.title}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            {groupSources.map((s) => (
+              <SourceTreeNode
+                key={s.id}
+                source={s}
+                expanded={expanded.has(s.id)}
+                onToggle={() => toggleSource(s.id)}
+                activeSourceId={activeSourceId}
+                activeItemId={activeItemId}
+                palette={palette}
+              />
+            ))}
           </View>
         ))}
       </ScrollView>
+    </View>
+  );
+}
+
+interface SourceTreeNodeProps {
+  source: SourceConfig;
+  expanded: boolean;
+  onToggle: () => void;
+  activeSourceId: string | null;
+  activeItemId: number | null;
+  palette: Palette;
+}
+
+function SourceTreeNode({
+  source,
+  expanded,
+  onToggle,
+  activeSourceId,
+  activeItemId,
+  palette,
+}: SourceTreeNodeProps) {
+  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const items = useSourceItems(source, expanded);
+  const active = source.id === activeSourceId;
+
+  return (
+    <View>
+      <Pressable
+        onPress={onToggle}
+        style={({ pressed }) => [
+          styles.sourceRow,
+          pressed && styles.sourceRowPressed,
+          active && styles.sourceRowActive,
+        ]}
+      >
+        <View
+          style={[
+            styles.accentStrip,
+            { backgroundColor: active ? palette.accent : "transparent" },
+          ]}
+        />
+        <Text style={styles.toggleGlyph}>{expanded ? "▾" : "▸"}</Text>
+        <Text
+          style={[styles.sourceTitle, active && styles.sourceTitleActive]}
+          numberOfLines={1}
+        >
+          {source.title}
+        </Text>
+      </Pressable>
+
+      {expanded && (
+        <View style={styles.itemsList}>
+          {items === null ? (
+            <Text style={styles.itemsHint}>Loading…</Text>
+          ) : items.length === 0 ? (
+            <Text style={styles.itemsHint}>No items</Text>
+          ) : (
+            items.map((it) => {
+              const isActiveItem =
+                active && activeItemId !== null && activeItemId === it.id;
+              return (
+                <Pressable
+                  key={it.id}
+                  onPress={() => router.push(`/reader/${source.id}/${it.id}`)}
+                  style={({ pressed }) => [
+                    styles.itemRow,
+                    pressed && styles.sourceRowPressed,
+                    isActiveItem && styles.sourceRowActive,
+                  ]}
+                >
+                  <Text style={styles.itemNumber}>{it.id}</Text>
+                  <Text
+                    style={[
+                      styles.itemTitle,
+                      isActiveItem && styles.sourceTitleActive,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {it.title}
+                  </Text>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -246,17 +340,53 @@ function makeStyles(p: Palette) {
     accentStrip: {
       width: 3,
       height: 20,
-      marginRight: 12,
+      marginRight: 8,
+    },
+    toggleGlyph: {
+      color: p.textMuted,
+      fontSize: 12,
+      width: 14,
+      textAlign: "center",
     },
     sourceTitle: {
       color: p.text,
       fontSize: 14,
       fontWeight: "500",
       flex: 1,
+      marginLeft: 2,
     },
     sourceTitleActive: {
       color: p.textStrong,
       fontWeight: "600",
+    },
+    itemsList: { paddingLeft: 28, paddingBottom: 4 },
+    itemsHint: {
+      color: p.textMuted,
+      fontSize: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 6,
+      fontStyle: "italic",
+    },
+    itemRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      paddingVertical: 5,
+      paddingHorizontal: 8,
+      gap: 8,
+    },
+    itemNumber: {
+      color: p.textMuted,
+      fontSize: 11,
+      fontVariant: ["tabular-nums"],
+      width: 22,
+      textAlign: "right",
+      marginTop: 1,
+    },
+    itemTitle: {
+      color: p.text,
+      fontSize: 12,
+      lineHeight: 16,
+      flex: 1,
     },
   });
 }
