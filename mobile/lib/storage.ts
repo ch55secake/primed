@@ -5,10 +5,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 type SourceKey = string;
 
 const LAST_REFRESH_KEY = (id: SourceKey) => `lastRefresh:${id}`;
-const LAST_PAGE_KEY = (id: SourceKey, itemId: number) =>
-  `lastPage:${id}:${itemId}`;
-const LAST_PAGE_PREFIX = (id: SourceKey) => `lastPage:${id}:`;
 const ITEM_COUNT_KEY = (id: SourceKey) => `itemCount:${id}`;
+/** Per-item revealed-sections set. JSON array of section names. */
+const REVEALED_KEY = (id: SourceKey, itemId: number) =>
+  `revealed:${id}:${itemId}`;
+const REVEALED_PREFIX = (id: SourceKey) => `revealed:${id}:`;
 /** Set by the home-screen refresh-all button after a successful sweep. */
 const LAST_FULL_REFRESH_KEY = "drilly:lastFullRefresh";
 
@@ -24,22 +25,6 @@ export async function getLastRefreshed(
 ): Promise<number | null> {
   const raw = await AsyncStorage.getItem(LAST_REFRESH_KEY(id));
   return raw ? Number(raw) : null;
-}
-
-export async function setLastPage(
-  id: SourceKey,
-  itemId: number,
-  page: number,
-): Promise<void> {
-  await AsyncStorage.setItem(LAST_PAGE_KEY(id, itemId), String(page));
-}
-
-export async function getLastPage(
-  id: SourceKey,
-  itemId: number,
-): Promise<number> {
-  const raw = await AsyncStorage.getItem(LAST_PAGE_KEY(id, itemId));
-  return raw ? Number(raw) : 0;
 }
 
 /**
@@ -60,24 +45,50 @@ export async function getItemCount(id: SourceKey): Promise<number | null> {
 }
 
 /**
- * Cheap progress proxy for the home library: how many items have a saved
- * `lastPage:<id>:<itemId>` key. Items only get a key written when the user
- * actually moves past page 0 (see Reader's persist-current-page effect),
- * so a key's existence ≈ "this item has been opened past the first page".
- *
- * One getAllKeys() call regardless of source size — fine on cold start.
+ * Read the set of revealed section names for a given item. Empty array if
+ * never opened or no sections expanded yet.
+ */
+export async function getRevealedSections(
+  id: SourceKey,
+  itemId: number,
+): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(REVEALED_KEY(id, itemId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setRevealedSections(
+  id: SourceKey,
+  itemId: number,
+  names: string[],
+): Promise<void> {
+  await AsyncStorage.setItem(REVEALED_KEY(id, itemId), JSON.stringify(names));
+}
+
+/**
+ * How many items in this source have at least one revealed section. Powers
+ * the home-library "% read" progress label on each <SourceCard>.
  */
 export async function getProgressCount(id: SourceKey): Promise<number> {
   const keys = await AsyncStorage.getAllKeys();
-  const prefix = LAST_PAGE_PREFIX(id);
-  return keys.filter((k) => k.startsWith(prefix)).length;
+  const prefix = REVEALED_PREFIX(id);
+  let n = 0;
+  for (const k of keys) {
+    if (!k.startsWith(prefix)) continue;
+    const raw = await AsyncStorage.getItem(k);
+    if (raw && raw !== "[]") n += 1;
+  }
+  return n;
 }
 
 /**
  * Wall-clock of the last successful "refresh everything" sweep from the
- * home screen. Distinct from per-source `setLastRefreshed` so the home
- * label can show "Updated 2h ago" even if individual sources got refreshed
- * separately at different times.
+ * home screen.
  */
 export async function setLastFullRefresh(ms: number): Promise<void> {
   await AsyncStorage.setItem(LAST_FULL_REFRESH_KEY, String(ms));

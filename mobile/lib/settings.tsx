@@ -11,27 +11,20 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type ThemeMode = "system" | "light" | "dark";
-export type ReadingMode = "page" | "scroll";
 
 export interface Settings {
   themeMode: ThemeMode;
-  readingMode: ReadingMode;
-  volumeKeyNav: boolean;
   /**
    * Optimised for e-ink displays (Boox / Kindle / Kobo). When on:
-   *  - reader uses tap zones instead of swipe paging
-   *  - all Stack screen animations are suppressed
+   *  - Stack screen animations are suppressed (slide transitions ghost)
    *  - haptics are silenced
-   *  - reading mode is forced to "page" (scroll is unusable on e-ink)
+   *  - Mermaid diagrams render in monochrome
    * Auto-defaults to true on Boox / Onyx hardware; user override always wins.
    */
   eInkMode: boolean;
   /**
-   * Multiplier applied to every font size and line-height in the reader,
-   * including code blocks and pagination's char-per-line estimate. Stored
-   * as a number for forward-compat with a future continuous slider; the
-   * Settings UI today exposes four discrete steps:
-   *   0.85 (S) | 1.0 (M) | 1.15 (L) | 1.3 (XL).
+   * Body / heading / code font-size multiplier.
+   *   0.85 (S) | 1.0 (M) | 1.15 (L) | 1.3 (XL)
    */
   fontScale: number;
 }
@@ -45,8 +38,6 @@ function detectEInkDefault(): boolean {
 
 const DEFAULTS: Settings = {
   themeMode: "system",
-  readingMode: "page",
-  volumeKeyNav: true,
   eInkMode: detectEInkDefault(),
   fontScale: 1.0,
 };
@@ -83,9 +74,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setReady(true);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const update = useCallback((patch: Partial<Settings>) => {

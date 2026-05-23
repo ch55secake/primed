@@ -6,12 +6,10 @@ import {
   Pressable,
   Switch,
   StyleSheet,
-  Platform,
 } from "react-native";
 import {
   useSettings,
   useUpdateSettings,
-  type ReadingMode,
   type ThemeMode,
 } from "../lib/settings";
 import { useTheme, type Palette } from "../lib/theme";
@@ -40,24 +38,6 @@ export default function SettingsScreen() {
         />
       </Section>
 
-      <Section title="Reading mode" palette={palette}>
-        <Segmented<ReadingMode>
-          value={settings.readingMode}
-          options={[
-            { value: "page", label: "Page turn" },
-            { value: "scroll", label: "Scroll" },
-          ]}
-          onChange={(readingMode) => update({ readingMode })}
-          palette={palette}
-          disabled={settings.eInkMode}
-        />
-        <Text style={styles.hint}>
-          {settings.eInkMode
-            ? "Forced to page mode while E-ink mode is on (scroll causes ghosting on e-ink)."
-            : "Page turn = swipe between auto-paginated pages. Scroll = one continuous view of the whole item."}
-        </Text>
-      </Section>
-
       <Section title="Text size" palette={palette}>
         <Segmented<number>
           value={settings.fontScale}
@@ -70,55 +50,25 @@ export default function SettingsScreen() {
           onChange={(fontScale) => update({ fontScale })}
           palette={palette}
         />
-        <Text style={styles.hint}>
-          Applies to body text, headings, and code blocks. Pages re-flow
-          automatically.
-        </Text>
       </Section>
 
-      {Platform.OS === "android" && (
-        <Section title="Hardware" palette={palette}>
-          <View style={styles.row}>
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Hardware keys turn pages</Text>
-              <Text style={styles.hint}>
-                Vol-Down / Page-Down = next, Vol-Up / Page-Up = previous.
-                Captured at the OS level so volume doesn't change. Works
-                with the Boox Go 7's built-in volume → page-turn mapping.
-              </Text>
-            </View>
-            <Switch
-              value={settings.volumeKeyNav}
-              onValueChange={(volumeKeyNav) => update({ volumeKeyNav })}
-              trackColor={{
-                false: palette.border,
-                true: palette.accent,
-              }}
-              thumbColor={palette.surface}
-            />
+      <Section title="E-ink mode" palette={palette}>
+        <View style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.hint}>
+              Turn off screen animations, silence haptics, and render mermaid
+              diagrams in monochrome. Designed for Boox / Kindle-style e-ink
+              devices.
+            </Text>
           </View>
-
-          <View style={[styles.row, styles.rowSpaced]}>
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>E-ink mode</Text>
-              <Text style={styles.hint}>
-                Replaces page swipe with tap zones (left third = prev,
-                right third = next) and removes screen animations. Designed
-                for Boox / Kindle-style e-ink devices.
-              </Text>
-            </View>
-            <Switch
-              value={settings.eInkMode}
-              onValueChange={(eInkMode) => update({ eInkMode })}
-              trackColor={{
-                false: palette.border,
-                true: palette.accent,
-              }}
-              thumbColor={palette.surface}
-            />
-          </View>
-        </Section>
-      )}
+          <Switch
+            value={settings.eInkMode}
+            onValueChange={(eInkMode) => update({ eInkMode })}
+            trackColor={{ false: palette.border, true: palette.accent }}
+            thumbColor={palette.surface}
+          />
+        </View>
+      </Section>
     </ScrollView>
   );
 }
