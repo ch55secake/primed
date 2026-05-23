@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Platform,
   View,
   Text,
   Pressable,
@@ -99,6 +100,37 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
   const hideAll = useCallback(() => {
     setRevealed(new Set());
   }, []);
+
+  const revealNext = useCallback(() => {
+    const next = sortedSections.find((s) => !revealed.has(s.name));
+    if (!next) return;
+    setRevealed((prev) => {
+      const n = new Set(prev);
+      n.add(next.name);
+      return n;
+    });
+  }, [sortedSections, revealed]);
+
+  // Web-only keyboard shortcuts. Space reveals the next hidden section in
+  // order — mirrors the old web's study-mode flow. Esc collapses everything.
+  // Disabled inside text inputs so a user typing somewhere isn't hijacked.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    if (typeof document === "undefined") return;
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.matches?.("input, textarea, [contenteditable='true']")) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        revealNext();
+      } else if (e.code === "Escape") {
+        e.preventDefault();
+        hideAll();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [revealNext, hideAll]);
 
   const allRevealed =
     revealed.size > 0 && revealed.size === sortedSections.length;
