@@ -82,6 +82,20 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "csharp",
+      "file": "/csharp-interview-primer.md",
+      "title": "C#",
+      "category": "Languages",
+      "itemLabel": "Topic",
+      "itemsPlural": "C# topics",
+      "storagePrefix": "ip:csharp",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }
