@@ -99,13 +99,21 @@ export async function loadSource(cfg: SourceConfig): Promise<string> {
 }
 
 /**
- * Refresh a single source. On web, just re-fetches (browser cache busting via
- * a cache-buster query). On native, downloads to the FS cache and overwrites.
- * Throws on network error so the caller can fall back to whatever it already has.
+ * Refresh a single source. On web, re-fetches with `cache: "reload"` so
+ * the browser/WebView HTTP cache is bypassed for this request AND the
+ * fresh response is written back to the **canonical** URL's cache entry.
+ * Don't add a `?t=…` cache-buster — that would store the fresh response
+ * under a different cache key than subsequent normal loads request, so
+ * the warm-the-cache effect would never apply. The whole point of this
+ * call is for the Android WebView shell: hit refresh once online and
+ * every primer is now in the WebView cache at its canonical URL, ready
+ * to be served offline by `cacheMode="LOAD_CACHE_ELSE_NETWORK"`.
+ * On native, downloads to the FS cache and overwrites. Throws on network
+ * error so the caller can fall back to whatever it already has.
  */
 export async function refreshSource(cfg: SourceConfig): Promise<string> {
   if (IS_WEB) {
-    const url = `${webUrl(cfg)}?t=${Date.now()}`;
+    const url = webUrl(cfg);
     const res = await fetch(url, { cache: "reload" });
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
     return res.text();
