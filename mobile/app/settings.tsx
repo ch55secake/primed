@@ -13,6 +13,7 @@ import { router } from "expo-router";
 import {
   useSettings,
   useUpdateSettings,
+  type LayoutMode,
   type ThemeMode,
 } from "../lib/settings";
 import { useTheme, type Palette } from "../lib/theme";
@@ -70,6 +71,24 @@ export default function SettingsScreen() {
           onChange={(fontScale) => update({ fontScale })}
           palette={palette}
         />
+      </Section>
+
+      <Section title="Layout" palette={palette}>
+        <Segmented<LayoutMode>
+          value={settings.layoutMode}
+          options={[
+            { value: "auto", label: "Auto" },
+            { value: "mobile", label: "Mobile" },
+            { value: "desktop", label: "Desktop" },
+          ]}
+          onChange={(layoutMode) => update({ layoutMode })}
+          palette={palette}
+        />
+        <Text style={styles.hint}>
+          Auto switches to the desktop tree-sidebar at ≥ 900px viewport
+          width; otherwise the mobile stack. Override here if the
+          auto-detection misbehaves on your device.
+        </Text>
       </Section>
 
       <Section title="Auto-reveal Summary" palette={palette}>

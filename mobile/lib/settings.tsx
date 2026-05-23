@@ -10,9 +10,20 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type ThemeMode = "system" | "light" | "dark";
+export type LayoutMode = "auto" | "mobile" | "desktop";
 
 export interface Settings {
   themeMode: ThemeMode;
+  /**
+   * Layout override.
+   *   "auto"    — width-based: desktop tree-sidebar at ≥ 900px, mobile stack below
+   *   "mobile"  — always the mobile stack regardless of viewport
+   *   "desktop" — always the desktop tree-sidebar regardless of viewport
+   * Default "auto"; manual override is the escape hatch when the
+   * viewport-based detection misbehaves (Android WebView weirdness,
+   * unusual screen size, etc.).
+   */
+  layoutMode: LayoutMode;
   /**
    * Body / heading / code font-size multiplier.
    *   0.85 (S) | 1.0 (M) | 1.15 (L) | 1.3 (XL)
@@ -29,6 +40,7 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   themeMode: "system",
+  layoutMode: "auto",
   fontScale: 1.0,
   autoRevealSummary: false,
 };
