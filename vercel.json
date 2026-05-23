@@ -5,5 +5,12 @@
   "outputDirectory": "mobile/dist",
   "rewrites": [
     { "source": "/((?!_expo|assets|.*\\..*).*)", "destination": "/index.html" }
+  ],
+  "redirects": [
+    {
+      "source": "/drilly.apk",
+      "destination": "https://github.com/rjh-mopjones/drilly/releases/latest/download/drilly.apk",
+      "permanent": false
+    }
   ]
 }
