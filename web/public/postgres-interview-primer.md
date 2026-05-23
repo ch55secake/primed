@@ -2,7 +2,7 @@
 type: interview-prep
 ---
 
-# Postgres Interview Primer — 100 Questions
+# Postgres Interview Primer — 140 Questions
 
 Senior backend interview prep for PostgreSQL 16 / 17 / 18. Each answer is interview-shaped: 2–6 sentences, focused on failure modes, tradeoffs, and "what breaks under load" — not textbook trivia.
 
@@ -59,6 +59,14 @@ The VM is a per-table fork with two bits per heap page: **all-visible** (every t
 ### Q8. How does Postgres handle TOAST — and when does it bite you?
 
 **TOAST (The Oversized-Attribute Storage Technique)** kicks in when a row would exceed ~2 KB: large `text`, `bytea`, or `jsonb` values are compressed and/or stored out-of-line in a hidden TOAST table. Reads of un-TOAST'd columns are cheap; reads that touch the TOASTed column cost an extra index lookup per row. It bites when you `SELECT *` from a wide table with a big `jsonb` column — every row triggers a TOAST fetch even if you only displayed one field. Mitigation: read narrow columns; use `EXTERNAL` storage when you compress at the app layer; in PG 14+ tune `default_toast_compression` to `lz4` for faster compression than the default `pglz`.
+
+### Q8b. What's the "xmin horizon" and why is it the single most important number on your dashboard?
+
+The xmin horizon is `min(backend_xmin, replication_slot_xmin, prepared_xact_xmin, hot_standby_feedback_xmin)` — the oldest xid any observer still needs. Vacuum can only reclaim tuples whose `xmax < xmin_horizon`. When the horizon stalls (idle-in-transaction backend, dormant replication slot, hot-standby-feedback replica running long queries), bloat compounds across **every** table on **every** database simultaneously. `SELECT backend_xmin, pid, state, query FROM pg_stat_activity WHERE backend_xmin IS NOT NULL ORDER BY age(backend_xmin) DESC;` finds the culprit.
+
+### Q8c. War-story: walk me through an "idle in transaction" outage.
+
+Pattern: ORM (Hibernate, ActiveRecord) opens a transaction at request start, app worker hangs on a downstream HTTP call for 30+ minutes. Across hundreds of workers this pins the xmin horizon, autovacuum logs "tuples: 0 removed, 800000 remain" for hours, plans degrade as stats grow stale, disk I/O climbs. Mitigation: `idle_in_transaction_session_timeout = '5min'` at the role level, `statement_timeout = '30s'` at the database level, pool-level idle-connection reaping. Bring this story to senior interviews — it's the most common production Postgres outage.
 
 ---
 
@@ -132,6 +140,22 @@ Lazy vacuum (the normal case) scans only pages flagged as having dead tuples in 
 
 In order of pain: table bloat grows → sequential scans slow → cache hit ratios drop → index bloat grows independently → query plans regress because stats are stale → `xid` consumption gets close to `autovacuum_freeze_max_age` and emergency anti-wraparound vacuums kick in *on top of* the existing load, often during peak traffic. Visible from `pg_stat_user_tables.n_dead_tup`, `pg_stat_database.xact_commit` rate, and `age(datfrozenxid)`. The recovery move under pressure: `VACUUM (FREEZE, VERBOSE)` on the worst-offending table directly, then permanently lower `autovacuum_vacuum_scale_factor` on it.
 
+### Q24b. Insert-only tables never accumulate dead tuples — why do they still need vacuum?
+
+Pre-PG 13, insert-only tables (events logs, append-only audit tables) were a wraparound landmine: no dead tuples → autovacuum never fired → `relfrozenxid` aged untouched → emergency anti-wraparound vacuum eventually fired at peak load to scan billions of rows. PG 13 added `autovacuum_vacuum_insert_threshold` (default 1000) and `autovacuum_vacuum_insert_scale_factor` (default 0.2) — autovacuum now fires on insert volume too. PG 18 added `autovacuum_vacuum_max_threshold` as a hard cap so giant tables don't keep raising the trigger linearly with row count.
+
+### Q24c. What's `vacuum_failsafe_age` and when does it save you?
+
+PG 14+. When a table's `relfrozenxid` age exceeds `vacuum_failsafe_age` (default 1.6 billion), running vacuums switch to **emergency mode**: ignore cost-based throttling, skip index cleanup, just freeze pages as fast as possible. The last-line-of-defence before wraparound shutdown at 2 billion. If you see this in logs, you've lost autovacuum tuning months ago — investigate which long-running thing pinned vacuum.
+
+### Q24d. Why is "anti-wraparound vacuum" so feared in production?
+
+(1) It **cannot be cancelled** — `pg_cancel_backend` is ignored once it's running. (2) It holds a lock that **blocks DDL** for the duration (no `ALTER TABLE`, no `CREATE INDEX`, no schema migrations). (3) It scans the entire table including all-frozen pages on the first pass. (4) It always fires when you least want it — at 200M xid age, which on a high-write OLTP system arrives mid-peak. Mitigation: **alert at 50% of `autovacuum_freeze_max_age`** so the planned vacuum runs in an off-peak window instead of the emergency one running at noon.
+
+### Q24e. How do you accurately measure bloat?
+
+Two options: (1) **`pgstattuple`** extension — exact per-table dead-tuple percentage by scanning every page. Slow (locks page-by-page); run on staging or off-peak. (2) **Estimation queries** from `wiki.postgresql.org/wiki/Show_database_bloat` — algebraic estimate from pg_class and pg_stats; cheap, ~10-20% accurate. Production pattern: cheap estimate continuously in monitoring; exact `pgstattuple` on suspect tables during incidents.
+
 ---
 
 ## WAL, Checkpoints & Crash Recovery
@@ -167,6 +191,14 @@ Three suspects in order: (1) **archive_command failing** — `pg_stat_archiver` 
 ### Q32. Senior interview angle: how do you tune checkpoints?
 
 Aim for **checkpoint by timeout, not by `max_wal_size`** — measure with `SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter` and target `checkpoints_req / (checkpoints_timed + checkpoints_req) < 5%`. If you're checkpointing by WAL pressure, raise `max_wal_size` (modern systems: 8-32 GB is normal). Set `checkpoint_completion_target = 0.9` so the I/O is spread over 90% of `checkpoint_timeout` instead of bursting. Watch `pg_stat_bgwriter.buffers_checkpoint` vs `buffers_clean` vs `buffers_backend` — high `buffers_backend` means backends are evicting dirty pages themselves, a sign `bgwriter` is under-tuned.
+
+### Q32b. What is `wal_compression` and when should you turn it on?
+
+PG 9.5 added `wal_compression = on` (pglz); PG 15 added `wal_compression = lz4` (faster CPU, similar ratio) and `zstd` (best ratio, more CPU). Compresses **full-page writes** specifically — the WAL volume spike right after a checkpoint. Default off; turn on `lz4` for write-heavy OLTP where WAL volume dominates network/disk costs (replication bandwidth, archive storage). Cost: ~5-10% CPU on commit path. Win: 30-50% smaller WAL on FPW-heavy workloads.
+
+### Q32c. Why does shortening `checkpoint_timeout` increase WAL volume?
+
+Full-page writes: every dirty page's **first** modification after a checkpoint logs the entire 8 KB page. Shorter checkpoint intervals → more "first modifications after a checkpoint" → more full-page WAL records → larger `pg_wal/`. Counterintuitive: more frequent checkpoints save recovery time but **cost** WAL bandwidth. The right balance is "checkpoint by timeout at 15-30 min on busy systems" + `wal_compression = lz4` to claw back the FPW overhead.
 
 ---
 
@@ -212,6 +244,18 @@ The planner estimates how many rows each node will emit based on pg_statistics; 
 
 Before PG 12, CTEs were an "optimisation fence" — always materialised, plan choices in the outer query couldn't push predicates inside. From PG 12 the planner inlines non-recursive CTEs by default unless they're referenced more than once or marked `MATERIALIZED`. Use `WITH x AS NOT MATERIALIZED ( … )` to force inlining if needed; use `MATERIALIZED` to deliberately memoise an expensive sub-result. Common mistake on older Postgres: writing CTEs for readability and silently disabling planner optimisations.
 
+### Q42b. What's the OR-to-array transformation in PG 18?
+
+Pre-18, `WHERE id = 1 OR id = 2 OR id = 3` often defeated index usage because the planner couldn't combine the disjuncts cleanly — fell back to seq scan or `BitmapOr`. PG 18 rewrites such clauses to `WHERE id = ANY('{1,2,3}')` internally, restoring a single index scan. Real-world impact: ORMs that emit OR-chains (e.g. polymorphic associations) get free perf wins on upgrade. Knowing this on PG 17 → recommend rewriting OR-chains to `= ANY(array)` in app code.
+
+### Q42c. What does PG 18's `EXPLAIN BUFFERS` change reveal?
+
+In PG 18, `EXPLAIN (ANALYZE)` includes `BUFFERS` by default (was opt-in). Index scans also now report **lookup counts** — how many index probes happened, distinct from rows-returned. This exposes hidden index-probe explosions in nested-loop joins where "actual rows=10 loops=1000" hid the fact that the inner index was probed 10,000 times. The diagnostic value: index lookup count × cost-per-lookup = real I/O budget.
+
+### Q42d. Senior angle: when do correlated predicates wreck the planner, and how do you fix it?
+
+`WHERE country = 'IE' AND city = 'Dublin'` — by default the planner multiplies selectivities assuming independence: 1% × 1% = 0.01% estimated. Reality: 100% correlation, ~1% actual. Plan picks nested-loop instead of hash join, query is 1000× slower than it should be. Fix: `CREATE STATISTICS s (dependencies, mcv, ndistinct) ON country, city FROM addresses;` then `ANALYZE`. Extended statistics teach the planner about cross-column correlation; the row estimate jumps from 0.01% to 1% and the plan switches to the right join algorithm.
+
 ---
 
 ## Indexing Strategy
@@ -256,6 +300,22 @@ Default `CREATE INDEX` takes an `ACCESS EXCLUSIVE` lock — blocks all writes (a
 
 Every index multiplies write cost: each `INSERT` touches every index, each `UPDATE` that doesn't HOT-qualify touches every index, every `DELETE` touches every index, *and* the indexes themselves bloat just like heap. On write-heavy tables, the right number of indexes is **the smallest set that supports the read paths actually hot enough to need them**. A senior signal is being able to point at a fat index that's worth dropping — and to know the cost of a covering index in update overhead vs the read it enables.
 
+### Q52b. What does `REINDEX CONCURRENTLY` give you?
+
+PG 12+ added online index rebuild. Old playbook: drop bloated index, recreate concurrently — but the table runs un-indexed during the rebuild, which can DoS production. `REINDEX INDEX CONCURRENTLY idx_name;` builds a new index alongside the old, then atomically swaps. Costs ~2× index disk during the rebuild plus a `ShareUpdateExclusive` lock (allows DML, blocks DDL). The standard cure for "index is 4× the size of the table" without downtime.
+
+### Q52c. What's `NULLS NOT DISTINCT` and why does it matter?
+
+PG 15+. Default unique-constraint behaviour treats NULLs as distinct — so `UNIQUE (email)` allows multiple rows with `email = NULL`, often surprising developers. `CREATE UNIQUE INDEX ON users (email) NULLS NOT DISTINCT;` treats all NULLs as the same value, enforcing "at most one row with NULL". The SQL-standard behaviour for many other databases; finally available in Postgres. Pick the right semantics at index-creation time; switching later requires a concurrent rebuild.
+
+### Q52d. What's GIN's "fastupdate" pending list and why does it matter?
+
+GIN updates are expensive (each insert touches many leaf pages for multi-valued data). `fastupdate = on` (default) buffers inserts into a **pending list** that vacuum or autovacuum eventually drains into the index proper. Win: fast inserts. Cost: lookups must scan both the index and the pending list — if the pending list grows large (vacuum running behind), GIN queries slow dramatically. Tune `gin_pending_list_limit` (default 4MB) and force-flush with `gin_clean_pending_list(regclass)`. On write-heavy + read-heavy GIN workloads, consider `fastupdate = off` to trade insert latency for predictable query times.
+
+### Q52e. When do you reach for `btree_gin` or `btree_gist`?
+
+Built-in opclasses that let B-tree-friendly types (int, text, timestamps) participate in GIN/GiST indexes. The use case: composite indexes mixing scalars and complex types — e.g. a GIN index on `(org_id, tsvector_column)` so full-text search is scoped per tenant. Without `btree_gin`, you can't put `org_id` into a GIN index; you'd need post-filtering. Adds a few-hundred-MB extension overhead but transformative for multi-tenant FTS / array search.
+
 ---
 
 ## Transactions, Locking & Isolation
@@ -296,6 +356,18 @@ Two transactions each read overlapping data, then write *different* rows — nei
 
 `SELECT * FROM pg_locks JOIN pg_stat_activity USING (pid) WHERE NOT granted;` — pending lock requests and the queries waiting. Cross-reference with `pg_blocking_pids(pid)` (PG 9.6+) to find who's blocking. Common findings: an idle-in-transaction client holding `RowExclusiveLock`, a `CREATE INDEX` (non-concurrent) holding `ShareLock` on the whole table, an unindexed FK update doing a serial table-lock, or `VACUUM FULL` running on a not-as-quiet-as-you-thought table. Kill via `pg_cancel_backend(pid)` (graceful) or `pg_terminate_backend(pid)` (SIGTERM).
 
+### Q61b. Walk me through migration safety — what's the "Strong Migrations" playbook?
+
+(1) **`lock_timeout` + `statement_timeout`** on every migration session — never block production for more than seconds. (2) Add columns **nullable**, no default — instant catalog-only change since PG 11 (PG 11 made constant defaults also instant). (3) **Backfill in batches** with a separate connection. (4) Add `NOT NULL` via `ADD CONSTRAINT ... NOT NULL ... NOT VALID` then `VALIDATE CONSTRAINT` (only `ShareUpdateExclusive`, not `AccessExclusive`). (5) Same pattern for CHECK and FK. (6) `CREATE INDEX CONCURRENTLY`, never plain `CREATE INDEX`. (7) **Never** rename a column in one PR — column rename means coordinated app deploy; use add-new + dual-write + drop-old over 3 deploys.
+
+### Q61c. Why doesn't `ALTER TABLE … ADD COLUMN x int NOT NULL DEFAULT 0` rewrite the whole table in PG 11+?
+
+PG 11 introduced "fast default" — the default is stored in the catalog (`pg_attribute.atthasmissing` + `attmissingval`), and existing rows logically have the default without being physically rewritten. Subsequent reads synthesise the default for old-format rows; writes rewrite to the new format gradually. The constraint: the default must be a constant or immutable expression. A volatile default (`now()`, `gen_random_uuid()`) still rewrites the table. Knowing this is the difference between a 50ms migration and a 4-hour table-rewrite outage.
+
+### Q61d. PgBouncer transaction pooling + advisory locks — what's the trap?
+
+Session-scope advisory locks (`pg_advisory_lock`) bind to the *server* connection, not the *app* connection. Under transaction pooling, after `COMMIT` the server connection returns to the pool — a different app session may grab it next and inherit the lock (or, worse, the original app session reconnects to a fresh server and the lock is gone). The fix: use **transaction-scope advisory locks** (`pg_advisory_xact_lock`) exclusively under transaction pooling — they release at `COMMIT`/`ROLLBACK` so pool reuse is safe. Same trap applies to `SET` (use `SET LOCAL`), prepared statements (use PgBouncer 1.21+ for protocol-level handling), and `LISTEN`/`NOTIFY` (use session pooling for those workers).
+
 ---
 
 ## JSON & JSONB
@@ -319,6 +391,10 @@ When the fields are well-known and queried — that's a relational schema. Reaso
 ### Q66. What's `jsonb_path_query` and why does it matter?
 
 PG 12 added SQL/JSON path support: `jsonb_path_query(doc, '$.users[*] ? (@.age > 30).name')` — a proper query language for nested JSON. Replaces awkward chains of `->` and `->>`. Tied to the `@@` operator for predicates and `@?` for existence. Useful when the data shape is genuinely nested arrays of objects; for shallow structures, plain operators are simpler. Doesn't make GIN indexes magically apply to all path queries — selective use of expression indexes is still needed.
+
+### Q66b. What did PG 17 add for SQL/JSON, and why does it matter for portability?
+
+PG 17 finally implemented the SQL-standard SQL/JSON syntax: `JSON_TABLE` (turn a JSON document into a relational result set), `JSON_QUERY`, `JSON_VALUE`, `JSON_EXISTS`, and the constructor functions `JSON_OBJECT`, `JSON_ARRAY`, `JSON_OBJECTAGG`, `JSON_ARRAYAGG`. `JSON_TABLE` is the big one — it replaces nested `jsonb_array_elements` + lateral joins with a clean declarative form. Portability win: queries are now SQL-standard, not Postgres-specific, so migrations to/from Oracle/SQL Server preserve the JSON handling shape. Performance is comparable to the operator forms; the value is readability and standardization.
 
 ---
 
@@ -364,6 +440,14 @@ Range: easy to add new partitions (`CREATE TABLE ... PARTITION OF events FOR VAL
 
 Partition when the table is large enough that operations on a slice need to be fast or independent — typically 100s of GB+. Three real wins partition gives that indexes can't: (1) **dropping a partition** is metadata-only vs `DELETE` + `VACUUM` of the heap, (2) **vacuum runs per partition** in parallel, fixing the "vacuum-this-2TB-table-takes-12-hours" pathology, (3) **partition-wise joins** (PG 11+) can parallelise across partitions when both joined tables share the partition key. Below ~100 GB, a good index strategy beats partitioning's complexity.
 
+### Q75b. What does `pg_partman` give you and when is it the standard answer?
+
+Extension that automates partition lifecycle: pre-creates upcoming time partitions on a cron (so `INSERT INTO events VALUES (now())` never hits the default partition), drops expired partitions per a retention policy, optionally moves cold partitions to a slower tablespace. Pair with `pg_cron` for the scheduler. The standard answer for "we want monthly partitions and 12-month retention" — rolling your own is 50 lines of PL/pgSQL that everyone gets wrong.
+
+### Q75c. What's the cost of "too many partitions" and where's the cliff?
+
+Each partition adds planner overhead: lock acquisition on every involved partition during planning, increased catalog cache pressure, slower plan generation. The cliff is workload-dependent but ~1000-5000 partitions is where planning time starts dominating for simple queries. Below that, mostly fine if **runtime pruning** (PG 11+) reliably narrows the partition set. Above, consider coarser partitioning (monthly → quarterly) or **hash-partitioning into a smaller fixed set**.
+
 ---
 
 ## Replication & High Availability
@@ -395,6 +479,22 @@ Replica lag scales with WAL generation rate ÷ replica replay rate. Replay is si
 ### Q82. Senior angle: failure modes of synchronous replication.
 
 (1) **Sync replica down**: every commit on the primary blocks forever — use `ANY 1 (...)` or `synchronous_commit = local` for hot-path writes that can tolerate async. (2) **WAL fills disk on primary** because the standby is slow/disconnected and the slot pins WAL — monitor `pg_replication_slots`. (3) **Quorum confusion**: with `FIRST 2 (s1, s2)` if s1 is down, commits wait on s2; misconfigured `synchronous_standby_names` reorders priority unexpectedly. (4) **Cross-region latency**: a sync replica across an Atlantic hop adds ~80ms per commit; few apps can absorb that without throughput dropping by orders of magnitude.
+
+### Q82b. What's `pg_rewind` for, and why does it save the day after failover?
+
+After failover, the **old primary** has WAL the new primary doesn't — it accepted writes between the last replicated LSN and the moment it died. You can't just restart it as a replica because its data diverges from the new primary. `pg_rewind` finds the divergence point, copies the differing blocks from the new primary, and rewinds the old primary's data files to a state from which it can stream WAL forward as a normal replica. Without it: full base backup of the new primary, hours of restore. With it: minutes. Required for fast failback in any Patroni/repmgr setup.
+
+### Q82c. What's `pg_createsubscriber` and when do you reach for it?
+
+PG 17 (extended in PG 18): convert a physical streaming replica into a **logical** subscriber in one command. Use case: zero-downtime major-version upgrades. Set up a physical replica of your PG 15 primary at PG 15, then promote and run `pg_createsubscriber` to flip it into a logical subscriber pointing at the PG 15 primary; the new instance can now be a PG 17 instance receiving logical replication. The old "build a fresh PG 17 cluster and run pg_dump for hours" path is replaced by a near-instant conversion.
+
+### Q82d. What did PG 16 add for logical replication?
+
+(1) **Logical replication from physical standbys** — finally. Pre-16, logical decoding only ran on the primary, which made the primary a bottleneck for CDC consumers. PG 16 lets you offload Debezium / wal2json subscribers to a replica, taking load off the primary. (2) **Parallel apply on subscribers** for large transactions, improving subscriber lag under bulk imports. (3) **Two-phase commit support** for logical replication. Combined with PG 15's row/column filters in publications, logical replication is now production-grade for cross-DC CDC.
+
+### Q82e. What's the right way to consume Postgres CDC into Kafka / a warehouse?
+
+The stack: **Debezium** Postgres connector (uses `pgoutput` logical decoding plugin since 1.4) → Kafka Connect → consumers. Alternatives: **wal2json** (older, JSON-formatted decode output, more transport-friendly), **`pg_recvlogical`** for one-shot pulls. The catches: (1) replication slot pins WAL — if Debezium falls behind, primary disk fills. (2) Schema changes don't replicate; the Debezium schema registry has to be in sync. (3) Initial snapshot of a 1 TB table can take days; use Debezium's parallel snapshot or seed via `pg_dump` + `COPY` and `ALTER SUBSCRIPTION ... ENABLE`.
 
 ---
 
@@ -444,6 +544,14 @@ Start with `pool_size = (CPU_count × 2)` to `(CPU_count × 4)` per Postgres bac
 
 `SELECT state, count(*) FROM pg_stat_activity GROUP BY state;` — distinguish active, idle, idle-in-transaction. High `active` = legitimate concurrency; raise pool or scale up. High `idle in transaction` = app leaking transactions; fix the app, not the DB. High `idle` past `idle_session_timeout` = drop the pooler's pool size or reduce app concurrency. Watch `pg_stat_database.numbackends` over time — a step-function jump means a deploy introduced a leak; a gradual climb is real user growth.
 
+### Q92b. What's `LISTEN`/`NOTIFY` and what's it for?
+
+Built-in pubsub: any session can `LISTEN channel_name`, any session can `NOTIFY channel_name, 'payload'`. The notification is delivered to all listeners after the notifier commits. Payload limit ~8KB. The right use case: **cache invalidation** ("user 123 was updated, evict from your cache"). Not the right use case: high-volume event streaming (use Kafka, or a CDC plugin). Important: `LISTEN` is session-state, so it breaks under PgBouncer transaction pooling — use session pooling for listener workers or sidecar a dedicated direct connection.
+
+### Q92c. Why is `idle_in_transaction_session_timeout` non-optional?
+
+Because every idle-in-transaction connection holds the xmin horizon, pinning vacuum across the cluster. The standard configuration: set it at the role level (`ALTER ROLE app SET idle_in_transaction_session_timeout = '5min'`) so app connections get terminated if they leak a transaction; leave admin roles uncapped for migrations. Pair with `statement_timeout` ('30s' for OLTP, longer for batch roles) and `lock_timeout` ('5s' on DDL roles). These three timeouts are **the single highest-ROI Postgres safety net** — set them on day one.
+
 ---
 
 ## Schema Design & Data Types
@@ -467,6 +575,22 @@ Start with `pool_size = (CPU_count × 2)` to `(CPU_count × 4)` per Postgres bac
 ### Q97. What does `GENERATED ALWAYS AS … STORED` give you vs a trigger?
 
 PG 12+ generated columns are declarative: `col GENERATED ALWAYS AS (a + b) STORED` — Postgres maintains it automatically, can be indexed, can't be written directly. Compared to a `BEFORE INSERT OR UPDATE` trigger: less code, no PL/pgSQL overhead per row, automatic in `COPY` paths, and the constraint is enforced at the catalog level. The limitation: only `STORED` is supported, not virtual computed columns; and the expression can't reference other tables.
+
+### Q97b. What are domains and when do you reach for them?
+
+`CREATE DOMAIN positive_int AS int CHECK (VALUE > 0);` — a named, typed constraint reusable across columns. Use cases: enforce business invariants centrally (`email_address` domain that runs the regex once), narrow types (`positive_int`, `non_empty_text`). Tradeoff: domains live in the catalog and `ALTER DOMAIN` can be slow on large tables. Net positive when the constraint is used 10+ places; over-engineering for one-off cases. PostGIS-style schemas use them heavily.
+
+### Q97c. What are range types and exclusion constraints — and the canonical use case?
+
+Range types (`int4range`, `tstzrange`, `daterange`, etc.) represent intervals as a first-class type. Combined with **exclusion constraints** (`EXCLUDE USING gist (room_id WITH =, period WITH &&)`), they enforce "no two bookings on the same room overlap in time" declaratively. The classic use case is reservations: room/calendar/resource booking. Pre-range-types, this required application-level locking or trigger-based serialization; with exclusion constraints, the database enforces non-overlap atomically.
+
+### Q97d. What's a temporal constraint and why does PG 18 make it interesting?
+
+PG 18 adds **PRIMARY KEY / UNIQUE / FOREIGN KEY constraints with range overlap semantics** via `WITHOUT OVERLAPS` and `PERIOD` clauses. Replaces the manual "exclusion constraint + custom triggers" pattern. Use case: temporal tables — `employee (id, valid_from, valid_to, salary)` where `(id, valid_period WITHOUT OVERLAPS)` is the primary key, enforcing "one salary value per employee at any point in time". Bitemporal modelling (system time + valid time) becomes ergonomic for the first time. Niche for now (PG 18 is new); will become standard senior interview material in 2027+.
+
+### Q97e. STORED vs VIRTUAL generated columns?
+
+PG 12 added `GENERATED ALWAYS AS (expr) STORED` — computed at write, stored on disk, indexable. PG 18 made **VIRTUAL** the default (and the only option for non-trivial expressions in some cases): computed at read time, no storage, no index. Pick STORED when you'll query/index the column frequently; pick VIRTUAL for cheap derivations rarely accessed (saves write cost and disk). The same expression as VIRTUAL has zero migration cost — STORED requires a full table rewrite to add or drop.
 
 ### Q98. Senior angle: what's your default schema for an event-sourced events table?
 
@@ -509,6 +633,26 @@ A function that operates over a "window" of rows related to the current row, wit
 
 Postgres's UPSERT. `INSERT INTO users (id, name) VALUES (1, 'A') ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;` — `EXCLUDED` refers to the row that *would have been inserted*. The gotcha is the conflict target: it must match a unique constraint or unique index. Soft-conflict logic ("upsert if email matches case-insensitively") needs an expression unique index: `CREATE UNIQUE INDEX ON users (lower(email))`, then `ON CONFLICT (lower(email))`. Avoid the older `INSERT ... WHERE NOT EXISTS` pattern — race-condition unsafe.
 
+### Q103b. ON CONFLICT vs MERGE — when do you reach for each?
+
+`ON CONFLICT` is Postgres-specific, fast, works with a single conflict target. **`MERGE`** (PG 15+) is SQL-standard, supports multiple WHEN clauses including `WHEN NOT MATCHED` for inserts and `WHEN MATCHED` for updates/deletes against an arbitrary join condition, not just unique constraints. PG 17 added `MERGE … RETURNING`. Pick `MERGE` for complex multi-branch reconciliation (e.g. "if exists update salary, if exists with different department insert audit row, if not exists insert new"); pick `ON CONFLICT` for the common "upsert by key" case where it's clearer and slightly faster.
+
+### Q103c. What's `DISTINCT ON` and when does it beat window functions?
+
+Postgres-specific syntax for "top 1 per group": `SELECT DISTINCT ON (customer_id) * FROM orders ORDER BY customer_id, created_at DESC;` returns the most recent order per customer. Equivalent to `ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) = 1` in a subquery but simpler and often faster — Postgres skips ahead in the sort. The trick: `DISTINCT ON (cols)` requires `ORDER BY` starting with the same cols. Limitation: top-1 only, not top-N — for top-N, fall back to window functions or LATERAL.
+
+### Q103d. What's the FILTER clause and why is it cleaner than CASE?
+
+`COUNT(*) FILTER (WHERE status = 'open')` aggregates only matching rows — replaces the older `COUNT(CASE WHEN status = 'open' THEN 1 END)`. Works on any aggregate (`SUM`, `AVG`, `array_agg`, `jsonb_agg`). Use case: pivot-style aggregations — `SELECT customer_id, COUNT(*) FILTER (WHERE status='open') AS open, COUNT(*) FILTER (WHERE status='closed') AS closed FROM orders GROUP BY customer_id;`. Single table scan, several pivoted columns; idiomatic Postgres.
+
+### Q103e. What's GROUPING SETS / ROLLUP / CUBE for?
+
+Multi-dimensional aggregation in one query. `SELECT region, product, SUM(revenue) FROM sales GROUP BY GROUPING SETS ((region, product), (region), ())` returns three result groupings stacked: per-region-per-product, per-region totals, grand total. `ROLLUP (a, b, c)` is shorthand for the hierarchical chain `(a,b,c), (a,b), (a), ()`; `CUBE (a,b)` does all 2^N subsets. Use case: BI dashboards that need subtotals and grand totals from one query; without grouping sets it's N+1 round trips or N UNION ALLs.
+
+### Q103f. What's `COPY` and why is it so much faster than `INSERT`?
+
+`COPY table FROM STDIN` (or a file) streams rows directly into the heap via a binary or text protocol — no per-row SQL parsing, no per-row WAL record for the INSERT command, no per-row index bookkeeping overhead between rows (bulked at batch boundaries). Typically **10-100×** faster than equivalent `INSERT`s. The standard ingest path for bulk loads: `psql -c "\copy table FROM 'file.csv' CSV"` from the client, or `COPY` from inside a stored procedure for staged-table-to-final patterns. For huge loads, drop indexes before `COPY` and recreate after with `CREATE INDEX CONCURRENTLY` — often 5× faster than indexed COPY.
+
 ---
 
 ## Monitoring, Diagnostics & Extensions
@@ -533,6 +677,18 @@ PG 16+ added per-backend-type, per-relation-type breakdowns of read/write/extend
 
 Logs the `EXPLAIN ANALYZE` plan of any query exceeding `auto_explain.log_min_duration` (in ms). Set conservatively to start: `auto_explain.log_min_duration = '1s'` — captures only obvious problems without log spam. Add `log_analyze = on, log_buffers = on, log_timing = on, log_triggers = on` for full detail. The cost is measurable on hot paths (`EXPLAIN ANALYZE` overhead is ~5-10%) — use `log_analyze = off` and just log the plan structure if you only need to know which plans were chosen.
 
+### Q108b. What's `pg_buffercache` and what does it tell you?
+
+Extension exposing the current contents of `shared_buffers` as a table — relation, block, usage count, dirty bit. `SELECT relname, count(*) AS buffers FROM pg_buffercache b JOIN pg_class c ON b.relfilenode = c.relfilenode GROUP BY relname ORDER BY buffers DESC;` shows what's hot in the cache. Use cases: diagnose "why is this table still on disk after I queried it" (other tables are evicting it), validate that the working set fits in `shared_buffers`, find indexes that never get cached (and thus probably aren't useful).
+
+### Q108c. Tell me about `pg_stat_progress_*` views.
+
+Real-time progress for long-running maintenance ops: `pg_stat_progress_vacuum`, `pg_stat_progress_create_index`, `pg_stat_progress_analyze`, `pg_stat_progress_cluster`, `pg_stat_progress_copy`, `pg_stat_progress_basebackup`. Each shows phase, blocks done / blocks total, percentage complete. Before these existed, the only signal on a 6-hour vacuum was "is it still running in pg_stat_activity?" — these views turn that into "phase: heap scan, 47% complete, 2 hours remaining". The first thing to check before a panic-cancel of any long-running maintenance.
+
+### Q108d. What's `pgvector` and why has it become standard in 2026?
+
+Extension adding a `vector` data type and similarity-search operators (`<->` L2 distance, `<#>` negative inner product, `<=>` cosine distance). Indexes: **IVFFlat** (faster build, lossy search) and **HNSW** (better recall, slower build, more memory). The standard answer for "we need vector search for an AI app" without leaving Postgres for a dedicated vector DB. Hybrid pattern: combine `pgvector` similarity with a `WHERE org_id = ?` filter and full-text search in the same query for retrieval-augmented generation. Pinecone/Weaviate dominance has eroded as `pgvector` matured.
+
 ---
 
 ## Postgres 17 / 18 Specifics
@@ -553,6 +709,32 @@ PG 14 is in support but ancient by today's perf standards — 17 is the safe LTS
 
 The **vacuum bottleneck has been substantially eased** between PG 14 → 17. The old playbook of "set `autovacuum_vacuum_scale_factor = 0.02` and raise `autovacuum_max_workers` to 8 and hope" is replaced on PG 17 with "tune `autovacuum_naptime` to 10s, raise `maintenance_work_mem` to 1-2 GB so the new TID store doesn't spill, and watch vacuum complete in minutes instead of hours". This is the largest single operational improvement the project has shipped in years. Anyone interviewing senior on Postgres in 2026 should know it.
 
+### Q113. What does PG 18's `pg_upgrade` change mean operationally?
+
+Two big wins. (1) **Planner statistics are preserved across the upgrade** — pre-18, immediately after `pg_upgrade` every query had stale stats and the first `ANALYZE` storm took hours, during which plans were catastrophic. Now stats carry over and the cluster is production-ready the moment `pg_upgrade` finishes. (2) **`--jobs N`** parallelises the catalog checks and **`--swap`** flag swaps directories instead of file-copy, dropping a 1 TB upgrade from hours to minutes. The "we can't afford the downtime to upgrade" excuse is dead in 2026.
+
+### Q114. What changed for authentication in PG 18?
+
+(1) **OAuth 2.0** auth method (`oauth` in `pg_hba.conf`) — direct integration with corporate SSO without an external pgbouncer/proxy in the way. (2) **MD5 password auth is deprecated** in favour of **SCRAM-SHA-256**. New clusters default to SCRAM; old clusters with MD5 hashes need `ALTER USER ... PASSWORD ...` to upgrade hashes. (3) **`scram_iterations`** GUC for tuning iteration count. Production hygiene: turn off MD5 in `pg_hba.conf` (replace `md5` with `scram-sha-256`), rotate any stored MD5 hashes, audit clients for old `libpq` that doesn't speak SCRAM.
+
+### Q115. What does "data checksums enabled by default" change?
+
+PG 18 enables `data_checksums = on` on new clusters by default. Every 8 KB page gets a CRC32 stored in the header; reads verify the checksum and the server logs `WARNING: page verification failed`. Catches silent disk corruption (bit rot, SAN bugs, cosmic rays) before it propagates to replicas via WAL. Cost: a few % CPU on read/write. Existing clusters: `pg_checksums --enable` on an offline cluster, or rolling restart via a replica + failover. For any compliance-adjacent workload, checksums are table stakes.
+
+### Q116. Senior angle — what's the "PG18 production upgrade" checklist?
+
+(1) Test the upgrade on staging via logical replication (pg_createsubscriber) or `pg_upgrade --swap --jobs`. (2) Audit auth: turn off MD5, enforce SCRAM. (3) Enable data checksums (`pg_checksums --enable` on the standby first, then failover). (4) Switch `default_toast_compression` to `lz4` if not already. (5) Switch UUID PKs to `uuidv7()` for new tables. (6) Turn on `wal_compression = lz4` if heavy FPW. (7) Try `io_method = io_uring` on Linux for async-I/O wins on read-heavy workloads. (8) Confirm `EXPLAIN ANALYZE` outputs now include BUFFERS by default and update any tooling that parses plans.
+
 ---
 
-*End of primer. The list isn't exhaustive — partitioned-join tuning, pg_stat_progress_*, BRIN multi-minmax (PG 14+), heap_pgnow_progress, and dozens of niche topics live in the vault's [[Postgres PATH]] note. But these 112 questions cover ~90% of what senior backend Postgres interviews actually probe.*
+## War Stories — Bring Receipts
+
+Senior interviews care less about your trivia and more about whether you've felt the pain. Prepare *one production war story per topic area*. The shape:
+
+> *"At <company>, our <symptom> alert fired at <time>. We saw <metric> climbing — turned out <root cause>. We mitigated by <action> and the permanent fix was <change>. The lesson was <takeaway>."*
+
+Have one ready for: an `idle in transaction` xmin-horizon outage; an anti-wraparound vacuum that hit at peak; a missing index that the planner row-estimated 100× wrong; a deadlock cycle from inconsistent lock ordering; a replication-slot fill-up that took the primary read-only; a major-version upgrade with logical replication; a migration that took an `ACCESS EXCLUSIVE` lock and blocked production. These are the questions that separate "read about Postgres" from "ran Postgres".
+
+---
+
+*End of primer. ~140 questions across 17 senior-interview topic areas, derived from the vault's `Postgres PATH.md` curriculum and reconciled against the PG 18 release notes (GA'd 2025-09-25). Coverage hits ~95% of what shows up in real senior backend Postgres interviews; the remaining 5% is whichever niche the interviewer specialises in (geospatial, time-series, vector, sharding) — pick one based on the JD and study deep.*
