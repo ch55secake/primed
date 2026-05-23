@@ -138,13 +138,24 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
+        <Pressable
+          onPress={() => router.push(`/source/${source.id}`)}
+          style={styles.backButton}
+          accessibilityLabel={`Back to ${source.title}`}
+        >
           <Text style={styles.backArrow}>‹</Text>
         </Pressable>
         <View style={styles.headerTitle}>
-          <Text style={styles.headerLabel}>
-            {source.itemLabel} {item.id}
-          </Text>
+          {/* Crumb shows the parent source so the user always knows where
+              up goes — tap it to jump to the source's item list. */}
+          <Pressable
+            onPress={() => router.push(`/source/${source.id}`)}
+            accessibilityLabel={`Open ${source.title} list`}
+          >
+            <Text style={styles.headerCrumb} numberOfLines={1}>
+              {source.title.toUpperCase()} · {source.itemLabel} {item.id}
+            </Text>
+          </Pressable>
           <Text style={styles.headerName} numberOfLines={1}>
             {item.title}
           </Text>
@@ -242,6 +253,12 @@ function makeStyles(p: Palette) {
       fontSize: 11,
       letterSpacing: 1.2,
       textTransform: "uppercase",
+    },
+    headerCrumb: {
+      color: p.textMuted,
+      fontSize: 11,
+      letterSpacing: 1.2,
+      fontWeight: "600",
     },
     headerName: { color: p.textStrong, fontSize: 15, fontWeight: "600" },
     body: { flex: 1 },
