@@ -1,0 +1,367 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+} from "react-native";
+import { useRouter } from "expo-router";
+import Markdown from "react-native-markdown-display";
+import * as Haptics from "expo-haptics";
+import { sortSections, type Pattern, type SourceConfig } from "../lib/parser";
+import {
+  getRevealedSections,
+  setRevealedSections,
+} from "../lib/storage";
+import { useSettings } from "../lib/settings";
+import { useTheme, type Palette } from "../lib/theme";
+import { markdownRules } from "./CodeBlock";
+import { CopyButton } from "./CopyButton";
+
+interface Props {
+  source: SourceConfig;
+  item: Pattern;
+  /** Adjacent-item navigation (per-source "prev / next problem"). */
+  onNeighbourItem: (delta: 1 | -1) => void;
+}
+
+/**
+ * Reveal-on-tap reader. Replaces the previous paginated PagerView with
+ * the simpler "section cards" UX from the old web app: each section is a
+ * collapsible card with a tap-to-toggle header. Default-revealed sections
+ * (see `SourceConfig.defaultRevealedSections`) expand on first open;
+ * everything else stays hidden until the user taps to reveal — useful for
+ * studying problems where you want to read the prompt first and force
+ * yourself to think before peeking at the answer.
+ */
+export function ItemView({ source, item, onNeighbourItem }: Props) {
+  const palette = useTheme();
+  const router = useRouter();
+  const settings = useSettings();
+  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const markdownStyles = useMemo(
+    () => makeMarkdownStyles(palette, settings.fontScale),
+    [palette, settings.fontScale],
+  );
+
+  const sortedSections = useMemo(
+    () => sortSections(item.sections, source.sectionOrder),
+    [item, source],
+  );
+
+  // revealed = set of section names currently expanded. Hydrated from
+  // AsyncStorage on mount; falls back to source.defaultRevealedSections.
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const saved = await getRevealedSections(source.id, item.id);
+      if (cancelled) return;
+      if (saved.length > 0) {
+        setRevealed(new Set(saved));
+      } else {
+        setRevealed(new Set(source.defaultRevealedSections));
+      }
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source.id, source.defaultRevealedSections, item.id]);
+
+  // Persist on every change (after hydration so we don't overwrite saved
+  // state with the initial empty set on mount).
+  useEffect(() => {
+    if (!hydrated) return;
+    setRevealedSections(source.id, item.id, Array.from(revealed));
+  }, [hydrated, source.id, item.id, revealed]);
+
+  const toggle = useCallback(
+    (name: string) => {
+      if (!settings.eInkMode) Haptics.selectionAsync().catch(() => {});
+      setRevealed((prev) => {
+        const next = new Set(prev);
+        if (next.has(name)) next.delete(name);
+        else next.add(name);
+        return next;
+      });
+    },
+    [settings.eInkMode],
+  );
+
+  const showAll = useCallback(() => {
+    setRevealed(new Set(sortedSections.map((s) => s.name)));
+  }, [sortedSections]);
+
+  const hideAll = useCallback(() => {
+    setRevealed(new Set());
+  }, []);
+
+  const allRevealed =
+    revealed.size > 0 && revealed.size === sortedSections.length;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backArrow}>‹</Text>
+        </Pressable>
+        <View style={styles.headerTitle}>
+          <Text style={styles.headerLabel}>
+            {source.itemLabel} {item.id}
+          </Text>
+          <Text style={styles.headerName} numberOfLines={1}>
+            {item.title}
+          </Text>
+        </View>
+        <CopyButton item={item} source={source} />
+      </View>
+
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.bodyInner}
+      >
+        <View style={styles.controlsRow}>
+          <Pressable
+            onPress={allRevealed ? hideAll : showAll}
+            style={({ pressed }) => [
+              styles.controlButton,
+              pressed && styles.controlButtonPressed,
+            ]}
+          >
+            <Text style={styles.controlText}>
+              {allRevealed ? "Hide all" : "Show all"}
+            </Text>
+          </Pressable>
+          <Text style={styles.progressText}>
+            {revealed.size} / {sortedSections.length}
+          </Text>
+        </View>
+
+        {sortedSections.map((section) => {
+          const open = revealed.has(section.name);
+          return (
+            <View key={section.name} style={styles.sectionCard}>
+              <Pressable
+                onPress={() => toggle(section.name)}
+                style={({ pressed }) => [
+                  styles.sectionHeader,
+                  pressed && styles.sectionHeaderPressed,
+                ]}
+              >
+                <Text style={styles.sectionToggle}>{open ? "▾" : "▸"}</Text>
+                <Text style={styles.sectionName}>{section.name}</Text>
+              </Pressable>
+              {open && (
+                <View style={styles.sectionBody}>
+                  <Markdown style={markdownStyles} rules={markdownRules}>
+                    {section.content}
+                  </Markdown>
+                </View>
+              )}
+            </View>
+          );
+        })}
+
+        <View style={styles.footerNav}>
+          <Pressable
+            onPress={() => onNeighbourItem(-1)}
+            style={styles.footerButton}
+          >
+            <Text style={styles.footerButtonText}>‹ Previous</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => onNeighbourItem(1)}
+            style={styles.footerButton}
+          >
+            <Text style={styles.footerButtonText}>Next ›</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function makeStyles(p: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: p.bg },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: p.border,
+      backgroundColor: p.surface,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    backArrow: { color: p.accent, fontSize: 28, lineHeight: 28 },
+    headerTitle: { flex: 1, marginLeft: 4 },
+    headerLabel: {
+      color: p.textMuted,
+      fontSize: 11,
+      letterSpacing: 1.2,
+      textTransform: "uppercase",
+    },
+    headerName: { color: p.textStrong, fontSize: 15, fontWeight: "600" },
+    body: { flex: 1 },
+    bodyInner: { paddingHorizontal: 16, paddingVertical: 16, paddingBottom: 48 },
+    controlsRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 12,
+    },
+    controlButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderWidth: 1,
+      borderColor: p.border,
+      borderRadius: 6,
+      backgroundColor: p.surface,
+    },
+    controlButtonPressed: { backgroundColor: p.surfacePressed },
+    controlText: { color: p.text, fontSize: 12, fontWeight: "500" },
+    progressText: {
+      color: p.textMuted,
+      fontSize: 12,
+      fontVariant: ["tabular-nums"],
+    },
+    sectionCard: {
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: p.border,
+      borderRadius: 8,
+      backgroundColor: p.surface,
+      overflow: "hidden",
+    },
+    sectionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    sectionHeaderPressed: { backgroundColor: p.surfacePressed },
+    sectionToggle: {
+      color: p.textMuted,
+      fontSize: 14,
+      width: 18,
+    },
+    sectionName: {
+      color: p.textStrong,
+      fontSize: 15,
+      fontWeight: "600",
+      flex: 1,
+    },
+    sectionBody: {
+      paddingHorizontal: 14,
+      paddingBottom: 14,
+      borderTopWidth: 1,
+      borderTopColor: p.border,
+      backgroundColor: p.bg,
+    },
+    footerNav: {
+      marginTop: 16,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    footerButton: {
+      flex: 1,
+      paddingVertical: 12,
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: p.border,
+      borderRadius: 8,
+      backgroundColor: p.surface,
+    },
+    footerButtonText: {
+      color: p.accent,
+      fontSize: 14,
+      fontWeight: "500",
+    },
+  });
+}
+
+function makeMarkdownStyles(p: Palette, scale: number) {
+  const fs = (n: number) => n * scale;
+  return {
+    body: { color: p.text, fontSize: fs(15), lineHeight: fs(22) },
+    heading1: {
+      color: p.textStrong,
+      fontSize: fs(20),
+      fontWeight: "700" as const,
+      marginTop: 12,
+      marginBottom: 8,
+    },
+    heading2: {
+      color: p.textStrong,
+      fontSize: fs(17),
+      fontWeight: "700" as const,
+      marginTop: 12,
+      marginBottom: 6,
+    },
+    heading3: {
+      color: p.textStrong,
+      fontSize: fs(15),
+      fontWeight: "600" as const,
+      marginTop: 10,
+      marginBottom: 4,
+    },
+    heading4: {
+      color: p.textStrong,
+      fontSize: fs(14),
+      fontWeight: "600" as const,
+      marginTop: 8,
+      marginBottom: 2,
+    },
+    strong: { color: p.textStrong },
+    em: {
+      color: p.scheme === "light" ? "#6845c0" : "#b8a3ff",
+      fontStyle: "italic" as const,
+    },
+    link: { color: p.accent },
+    paragraph: { marginTop: 6, marginBottom: 6 },
+    list_item: { marginVertical: 2 },
+    bullet_list: { marginVertical: 6 },
+    ordered_list: { marginVertical: 6 },
+    code_inline: {
+      backgroundColor: p.codeBg,
+      color: p.accent,
+      fontFamily: "Courier",
+      fontSize: fs(13),
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: 3,
+    },
+    blockquote: {
+      backgroundColor: "transparent",
+      borderLeftColor: p.accent,
+      borderLeftWidth: 3,
+      paddingLeft: 12,
+      marginVertical: 6,
+    },
+    table: {
+      borderWidth: 1,
+      borderColor: p.border,
+      borderRadius: 6,
+      marginVertical: 6,
+    },
+    th: {
+      backgroundColor: p.surfacePressed,
+      color: p.textStrong,
+      fontWeight: "600" as const,
+      padding: 6,
+    },
+    td: { padding: 6, color: p.text },
+    hr: { backgroundColor: p.border, height: 1, marginVertical: 12 },
+  };
+}

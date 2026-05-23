@@ -34,8 +34,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-asset",
-      "./plugins/withHardwareKeyIntercept.js"
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

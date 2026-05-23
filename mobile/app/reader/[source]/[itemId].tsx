@@ -3,7 +3,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import { parseContent, type Pattern } from "../../../lib/parser";
 import { loadSource } from "../../../lib/content";
-import { Reader } from "../../../components/Reader";
+import { ItemView } from "../../../components/ItemView";
 import { useSource } from "../../../lib/manifest";
 import { useTheme, type Palette } from "../../../lib/theme";
 
@@ -84,7 +84,7 @@ export default function ReaderScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <Reader source={source} item={item} onNeighbourItem={onNeighbourItem} />
+      <ItemView source={source} item={item} onNeighbourItem={onNeighbourItem} />
     </>
   );
 }
