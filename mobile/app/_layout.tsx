@@ -7,11 +7,24 @@ import { SettingsProvider } from "../lib/settings";
 import { ThemeProvider, useTheme } from "../lib/theme";
 import { ManifestProvider } from "../lib/manifest";
 import { DesktopSidebar } from "../components/DesktopSidebar";
+import { NativeWebViewShell } from "../components/NativeWebViewShell";
 
 /** Width threshold for switching from mobile stack to desktop sidebar layout. */
 const DESKTOP_BREAKPOINT_PX = 900;
 
 export default function RootLayout() {
+  // Native (Android / iOS) is a thin WebView wrapper around the production
+  // site. The web build of this same codebase IS the site — keeping a
+  // single source of truth instead of maintaining native React Native
+  // screens that mirror the web. See components/NativeWebViewShell.tsx.
+  if (Platform.OS !== "web") {
+    return (
+      <SafeAreaProvider>
+        <NativeWebViewShell />
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
