@@ -9,7 +9,6 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import Markdown from "react-native-markdown-display";
-import * as Haptics from "expo-haptics";
 import { sortSections, type Pattern, type SourceConfig } from "../lib/parser";
 import {
   getRevealedSections,
@@ -99,7 +98,6 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
 
   const toggle = useCallback(
     (name: string) => {
-      if (!settings.eInkMode) Haptics.selectionAsync().catch(() => {});
       setRevealed((prev) => {
         const next = new Set(prev);
         if (next.has(name)) next.delete(name);
@@ -107,7 +105,7 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
         return next;
       });
     },
-    [settings.eInkMode],
+    [],
   );
 
   const showAll = useCallback(() => {

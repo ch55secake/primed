@@ -7,21 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type ThemeMode = "system" | "light" | "dark";
 
 export interface Settings {
   themeMode: ThemeMode;
-  /**
-   * Optimised for e-ink displays (Boox / Kindle / Kobo). When on:
-   *  - Stack screen animations are suppressed (slide transitions ghost)
-   *  - haptics are silenced
-   *  - Mermaid diagrams render in monochrome
-   * Auto-defaults to true on Boox / Onyx hardware; user override always wins.
-   */
-  eInkMode: boolean;
   /**
    * Body / heading / code font-size multiplier.
    *   0.85 (S) | 1.0 (M) | 1.15 (L) | 1.3 (XL)
@@ -31,22 +22,15 @@ export interface Settings {
    * When on and no per-item revealed state has been saved yet, auto-expand
    * any "Summary" section on first visit. Per-item toggles always win after
    * that — the setting only affects the initial state of a never-opened item.
+   * Default off — explicitly opt in via Settings.
    */
   autoRevealSummary: boolean;
 }
 
-/** Probe Android's manufacturer string for known e-ink vendors. */
-function detectEInkDefault(): boolean {
-  if (Platform.OS !== "android") return false;
-  const mfr = (Platform.constants as { Manufacturer?: string }).Manufacturer;
-  return !!mfr && /onyx|boox/i.test(mfr);
-}
-
 const DEFAULTS: Settings = {
   themeMode: "system",
-  eInkMode: detectEInkDefault(),
   fontScale: 1.0,
-  autoRevealSummary: true,
+  autoRevealSummary: false,
 };
 
 const STORAGE_KEY = "drilly:settings";
