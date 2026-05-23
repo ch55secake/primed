@@ -64,14 +64,31 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
       if (saved.length > 0) {
         setRevealed(new Set(saved));
       } else {
-        setRevealed(new Set(source.defaultRevealedSections));
+        // No saved state — seed from manifest defaults, plus the Summary
+        // card if the user has the auto-reveal setting on AND this item
+        // actually has a section named "Summary". Per-item toggles always
+        // win after first visit (they take the `saved.length > 0` branch).
+        const initial = new Set(source.defaultRevealedSections);
+        if (
+          settings.autoRevealSummary &&
+          sortedSections.some((s) => s.name === "Summary")
+        ) {
+          initial.add("Summary");
+        }
+        setRevealed(initial);
       }
       setHydrated(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [source.id, source.defaultRevealedSections, item.id]);
+  }, [
+    source.id,
+    source.defaultRevealedSections,
+    item.id,
+    settings.autoRevealSummary,
+    sortedSections,
+  ]);
 
   // Persist on every change (after hydration so we don't overwrite saved
   // state with the initial empty set on mount).
