@@ -17,6 +17,7 @@
 
 // Use the legacy API — stable, matches the FileSystem.cacheDirectory pattern.
 // The new API (Paths/File/Directory) is fine but verbose for this use case.
+import { Platform } from "react-native";
 import * as FS from "expo-file-system/legacy";
 import { Asset } from "expo-asset";
 import type { SourceConfig } from "./parser";
@@ -32,9 +33,11 @@ const BUNDLED: Record<string, number> = {
   java: require("../assets/content/java-interview-primer.md"),
 };
 
-const CACHE_DIR = (FS.cacheDirectory ?? "") + "content/";
+const IS_WEB = Platform.OS === "web";
+const CACHE_DIR = IS_WEB ? "" : (FS.cacheDirectory ?? "") + "content/";
 
 async function ensureCacheDir(): Promise<void> {
+  if (IS_WEB) return; // Browser HTTP cache covers caching on web.
   const info = await FS.getInfoAsync(CACHE_DIR);
   if (!info.exists) {
     await FS.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
@@ -47,11 +50,31 @@ function fileName(file: string): string {
 }
 
 /**
- * Load a source's markdown — prefers cache, falls back to bundled asset on first launch.
- * For sources added via remote manifest with no bundled fallback, throws if the cache is
- * empty so the caller can show a "pull to refresh" hint.
+ * Web: fetch from the same origin (Expo Web export + content are co-hosted
+ * at the deploy root), so a relative URL is enough. Native: hit REMOTE_BASE
+ * directly because the device has no notion of "same origin".
+ */
+function webUrl(cfg: SourceConfig): string {
+  return cfg.file.startsWith("/") ? cfg.file : "/" + cfg.file;
+}
+function nativeUrl(cfg: SourceConfig): string {
+  return `${REMOTE_BASE}${cfg.file.startsWith("/") ? cfg.file : "/" + cfg.file}`;
+}
+
+/**
+ * Load a source's markdown.
+ *
+ * Web: fetch over HTTP, no filesystem cache (the browser caches GETs for us).
+ * Native: cache-first via expo-file-system; bundled asset as offline fallback
+ * on first launch; remote-only sources fall through to refreshSource.
  */
 export async function loadSource(cfg: SourceConfig): Promise<string> {
+  if (IS_WEB) {
+    const res = await fetch(webUrl(cfg));
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${webUrl(cfg)}`);
+    return res.text();
+  }
+
   await ensureCacheDir();
   const cachePath = CACHE_DIR + fileName(cfg.file);
 
@@ -76,12 +99,19 @@ export async function loadSource(cfg: SourceConfig): Promise<string> {
 }
 
 /**
- * Refresh a single source from the Vercel endpoint, overwriting the cache.
- * Throws on network error — caller should fall back to cached / bundled.
+ * Refresh a single source. On web, just re-fetches (browser cache busting via
+ * a cache-buster query). On native, downloads to the FS cache and overwrites.
+ * Throws on network error so the caller can fall back to whatever it already has.
  */
 export async function refreshSource(cfg: SourceConfig): Promise<string> {
+  if (IS_WEB) {
+    const url = `${webUrl(cfg)}?t=${Date.now()}`;
+    const res = await fetch(url, { cache: "reload" });
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+    return res.text();
+  }
   await ensureCacheDir();
-  const url = `${REMOTE_BASE}${cfg.file.startsWith("/") ? cfg.file : "/" + cfg.file}`;
+  const url = nativeUrl(cfg);
   const cachePath = CACHE_DIR + fileName(cfg.file);
   const result = await FS.downloadAsync(url, cachePath);
   if (result.status !== 200) {
