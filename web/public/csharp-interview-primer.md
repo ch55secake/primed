@@ -4,6 +4,8 @@ type: interview-prep
 
 # C# / .NET Interview Primer — 130 Questions
 
+> Pass 2 added gap-fill from Stephen Toub's *Performance Improvements in .NET 10* and current senior interview banks. Look for `Q…b` / `Q…c` insertions across sections.
+
 Senior backend interview prep for **.NET 10 LTS** (shipped Nov 11 2025, supported until Nov 10 2028) and **C# 14**. Each answer is 2–6 sentences shaped for an interview — failure modes, tradeoffs, "what fails under load" — not textbook trivia. Pair with the vault's `C Sharp Path.md` curriculum.
 
 1. [[#CLR Internals & Runtime]]
@@ -70,6 +72,10 @@ Implement `IDisposable` for any class owning unmanaged resources OR managed disp
 ### Q10. What's `AssemblyLoadContext` and where do collectible ALCs come in?
 
 The .NET Core+ replacement for AppDomains. Loads assemblies in isolated graphs with their own dependency resolution. **Collectible ALCs** allow unloading: useful for plugin scenarios, hot-reload, test runners that load and discard hundreds of test assemblies. Classic leak: a delegate or static field in the host assembly captures a type from the plugin ALC — the plugin can never unload because the host roots it. Diagnose with `dotnet-gcdump` + `clrmd` to find the GC root of a "should-be-unloaded" type.
+
+### Q10b. What does .NET 10 actually change for the JIT?
+
+Per Stephen Toub's *Performance Improvements in .NET 10*: (1) **better escape analysis** — more heap allocations get rewritten as stack allocations automatically, no source change needed. (2) **More aggressive devirtualization** beyond what PGO already delivered — interface calls inlined where the JIT can prove the concrete type. (3) **Improved struct argument codegen** — wide structs passed by value cost less. (4) **Better inlining heuristics** — fewer methods get rejected for inlining because of trivial size cliffs. (5) **AVX10.2** support on bleeding-edge Intel + **Arm64 SVE** for vectorised hot loops. (6) **Improved code layout** — hot code is grouped to fit in L1 instruction cache. Net effect: many apps see 5-15% throughput improvement on `net10.0` with zero code changes.
 
 ---
 
@@ -151,6 +157,14 @@ The canonical one: `.Result` or `.Wait()` on an async method from a UI/legacy AS
 
 `IAsyncEnumerable<T>` — sequences whose elements arrive asynchronously. Implemented either by an async iterator method (`async IAsyncEnumerable<T> Foo()` with `yield return`) or hand-rolled `IAsyncEnumerator<T>`. Consume with `await foreach (var x in source.WithCancellation(ct).ConfigureAwait(false)) { … }`. **Critical**: inside an async iterator, annotate the `CancellationToken` parameter with `[EnumeratorCancellation]` so `WithCancellation(ct)` actually wires through. Use case: streaming EF Core results, paged API responses, file-tailing — anywhere a "list" is materialised in chunks.
 
+### Q28b. CancellationToken — what's the actual production pattern?
+
+Every async method that can take meaningful time accepts a `CancellationToken` and **passes it down**. ASP.NET Core gives you `HttpContext.RequestAborted` — flows automatically into model binding / endpoint handlers if you accept a parameter named `cancellationToken`. The non-negotiable rules: (1) never swallow `OperationCanceledException` without rethrowing — it's the signal that the caller gave up. (2) Never `cts.Cancel()` from a code path that also `await`s on a token from the same source — deadlock waiting on yourself. (3) For "first of N completes wins", use `CancellationTokenSource.CreateLinkedTokenSource` and cancel the rest. **Production payoff**: a disconnected client (browser tab closed) cancels the request token; downstream EF queries, HTTP calls, and CPU work all unwind — server doesn't burn cycles on dead requests.
+
+### Q28c. Parallelising independent I/O — when is `Task.WhenAll` the answer, and what's the trap?
+
+If three downstream HTTP calls are independent, `var (a, b, c) = await (CallA(ct), CallB(ct), CallC(ct)).WhenAll();` cuts wall-clock from sum-of-latencies to max-of-latencies. **Trap 1**: if any task throws, the others keep running until they complete or hit their own cancellation. Fix: pass a linked `CancellationTokenSource` so the first failure cancels the rest. **Trap 2**: `WhenAll` rethrows only the first exception — to see all, await the returned `Task<T[]>` and inspect `.Exception` (an AggregateException). **Trap 3**: don't `WhenAll` over N=1000 independent tasks — you'll saturate the thread pool and the downstream. Chunk to a bounded concurrency level via `SemaphoreSlim` or `Parallel.ForEachAsync(items, new() { MaxDegreeOfParallelism = 16 }, async (item, ct) => …)`.
+
 ---
 
 ## Modern C# Language Features
@@ -210,6 +224,10 @@ Stephen Toub's perf work — many operators now use `Span<T>` internally, take f
 ### Q41. Expression trees — when do they actually come up?
 
 `Expression<Func<T, bool>>` is an AST representing a lambda — visit/build/transform/compile at runtime. EF Core uses them to translate `x => x.Status == "active"` to SQL. AutoMapper, Moq, MediatR, FluentValidation — all expression-tree-based. You'll hit them when (1) writing a custom EF query, (2) building dynamic search filters from user input, (3) writing a `IsValid<T>` rule engine. Walk with `ExpressionVisitor`; compile with `expr.Compile()`. Compiled delegates are cached because compilation is slow.
+
+### Q41b. What did .NET 10 do to LINQ and collection perf specifically?
+
+Per Toub's post: collection operations (`AddRange`, `CopyTo`, `Contains` on `List<T>`/`HashSet<T>`) reached 65%+ improvements on common paths via internal `Span<T>` use and SIMD where applicable. JSON serialise/deserialise got faster again (after .NET 9's gains). Compression (`GZipStream`, `BrotliStream`) and crypto (AES-GCM, SHA-256) also saw 60%+ on some workloads thanks to vectorisation and `LibraryImport` migrations. Senior signal: when asked "would you rewrite this hot loop in raw `for`?", the right answer in 2026 is *measure on .NET 10 first* — many "obvious" rewrites are no longer wins.
 
 ---
 
@@ -367,6 +385,34 @@ Implement `BackgroundService.ExecuteAsync(CancellationToken stoppingToken)`. Pas
 
 `AddProblemDetails()` in DI; `app.UseExceptionHandler(...)` writes a Problem Details JSON for unhandled exceptions; `Results.Problem(...)` / `TypedResults.Problem(...)` for handler-emitted errors. Provides a uniform error contract: `type`, `title`, `status`, `detail`, `instance`, plus extension members. Replaces ad-hoc `{ error: "..." }` shapes that vary across endpoints. Customise via `ProblemDetailsService` or `IProblemDetailsWriter` for response-shape conventions.
 
+### Q73b. Middleware vs endpoint filters — when do you reach for which?
+
+**Middleware** runs in the global pipeline before/after routing — affects every (or matched-prefix) request, has access to the raw `HttpContext` early. Use for cross-cutting concerns: auth, logging, request ID assignment, CORS, exception handling. **Endpoint filters** (`MapGet(...).AddEndpointFilter(...)`) run per-endpoint after model binding — get typed parameter access (`EndpointFilterInvocationContext.GetArgument<T>(0)`), can short-circuit individual endpoints. Use for endpoint-specific concerns: per-route validation, per-route rate limit decoration, audit logging on mutating endpoints. Rule of thumb: middleware for pipeline-wide; filters for "this set of endpoints only".
+
+### Q73c. `TypedResults` vs `Results` in Minimal APIs — and why does it matter for OpenAPI?
+
+`Results.Ok(...)` returns `IResult` — runtime-typed; OpenAPI generation can't infer the response shape, you must annotate `.Produces<MyDto>(200)`. **`TypedResults.Ok(...)`** returns `Ok<MyDto>` — a concrete result type — and the OpenAPI generator reads the type to auto-document response shape and status. Also AOT-friendlier (no runtime type discovery). Pattern: return `Results<Ok<T>, NotFound, BadRequest<ProblemDetails>>` from a handler — union return types tell OpenAPI the full set of responses without attributes.
+
+### Q73d. Built-in OpenAPI in .NET 9+ — what replaced Swashbuckle?
+
+`Microsoft.AspNetCore.OpenApi` is now the framework default. `services.AddOpenApi(); app.MapOpenApi();` produces `/openapi/v1.json`. Faster than Swashbuckle (source-gen friendly), AOT-compatible, owned by the ASP.NET team. **Doesn't include a UI** — for Swagger UI / Scalar / Redoc, add a separate package. Migration: replace `AddSwaggerGen()` + `UseSwagger()` with the above; OpenAPI documents are mostly compatible. Note: `.WithOpenApi()` is deprecated in .NET 10 — defaults are now inferred from `TypedResults` and parameter attributes.
+
+### Q73e. Configuring `ForwardedHeaders` behind a reverse proxy — what breaks if you don't?
+
+Behind Nginx / Cloudflare / ALB / API Gateway, the `HttpContext.Connection.RemoteIpAddress` is the proxy's IP and `Request.Scheme` is `http` (proxy did TLS termination). Without `app.UseForwardedHeaders(...)`, you can't rate-limit by client IP, log the real source IP, or generate correct `https://` absolute URLs. Setup: `services.Configure<ForwardedHeadersOptions>(o => { o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto; o.KnownProxies.Add(IPAddress.Parse("…")); });` then `app.UseForwardedHeaders()` **before** anything that reads `RemoteIpAddress` or builds URLs. Set `KnownProxies` / `KnownNetworks` properly — otherwise an attacker can spoof `X-Forwarded-For` to look like any IP.
+
+### Q73f. CORS — what's the one config that bites everyone?
+
+`AllowAnyOrigin()` + `AllowCredentials()` = **rejected by the spec**, browsers refuse. Credentialed CORS requires an explicit origin allowlist or a dynamic origin policy that echoes the validated `Origin` header. Pattern: `AddCors(o => o.AddPolicy("default", b => b.WithOrigins("https://app.example.com").AllowAnyHeader().AllowAnyMethod().AllowCredentials()))`. Senior signal: knowing the spec restriction (credentialed requests demand a specific origin) without having to look it up.
+
+### Q73g. Health checks — what's the difference between liveness and readiness?
+
+**Liveness**: "is the process alive?" — should fail only when the process is truly broken (deadlocked, OOM-ed) and needs a restart. Kubernetes restarts the pod on failure. **Readiness**: "can this instance serve traffic right now?" — should fail when the instance is alive but temporarily unable to serve (DB unreachable, dependency degraded, warming up). Kubernetes removes the pod from the service load balancer but doesn't restart. `app.MapHealthChecks("/health/live", new() { Predicate = c => c.Tags.Contains("live") })` + `MapHealthChecks("/health/ready", new() { Predicate = c => c.Tags.Contains("ready") })`. Tag checks accordingly. **Don't** check downstream services from liveness — a 5-minute DB blip shouldn't cycle every pod simultaneously.
+
+### Q73h. What's the right ASP.NET Core Identity story in 2026?
+
+For B2C apps with self-managed users: **ASP.NET Core Identity** (built-in, free, integrates with EF Core). For OAuth/OIDC server (issuing tokens for clients): **OpenIddict** (free, OSS, well-maintained) or **Duende IdentityServer** (commercial, was IdentityServer4 OSS). For managed identity: **Microsoft Entra ID** (formerly Azure AD), **Auth0**, **Okta**, **AWS Cognito** — outsource the auth surface entirely. Senior signal: knowing that IdentityServer4 went commercial as Duende; teams that need OSS now pick OpenIddict.
+
 ---
 
 ## Entity Framework Core
@@ -398,6 +444,18 @@ EF compiles every LINQ query into a SQL string + result materialiser; for a quer
 ### Q80. Why does my query return entities that don't exist in the DB?
 
 The **identity map** / change tracker. If you've previously loaded an entity in the same `DbContext`, then `Remove`d it without `SaveChanges`, then queried again — EF can return the cached in-memory entity (marked `Deleted`) instead of hitting the DB. Or: an entity tracked as `Added` but not yet persisted shows up in a `LINQ` query. Cause: long-lived `DbContext` accumulating state. Fix: short-lived contexts via `IDbContextFactory`, or `AsNoTracking` queries when you want database truth.
+
+### Q80b. Optimistic concurrency control — how does it work in EF Core?
+
+Add a `[Timestamp] byte[] RowVersion { get; set; }` (SQL Server) or `[ConcurrencyCheck] DateTimeOffset UpdatedAt { get; set; }` (any provider). On `SaveChanges`, EF includes the original `RowVersion` value in the UPDATE's WHERE clause; if zero rows are affected (someone else changed it first), EF throws `DbUpdateConcurrencyException`. Catch it, decide your strategy: client-wins (re-fetch, retry the update), store-wins (discard user's edit), merge (interactive UI). Without this, concurrent edits silently overwrite. **Senior production-readiness flag**: every entity exposed via a multi-user UI should have either optimistic concurrency or an explicit "single writer per row" architecture.
+
+### Q80c. EF Core migrations in a multi-instance production deployment — what's the danger?
+
+If two app instances start simultaneously and both try `dbContext.Database.MigrateAsync()`, you get a race: one acquires the migration lock (PG: advisory lock; SQL Server: app lock), the other waits, sometimes the wait times out leaving the DB in a partial state. Mitigations: (1) **never** call `MigrateAsync()` on app start in production — run `dotnet ef database update` (or generate an idempotent SQL script via `dotnet ef migrations script --idempotent`) as a **separate CI/CD step before the deploy rollout**. (2) Use the EF Core migration history table for state, not application code. (3) For zero-downtime deploys, write **expand-then-contract** migrations: add new columns nullable, deploy app reading old+new, then remove old in a second migration after rollout.
+
+### Q80d. Cursor-based pagination vs offset — when do you switch?
+
+Offset (`Skip(N).Take(M)`) is easy but performs terribly past a few thousand rows: the DB still scans-and-skips the first N rows. **Cursor-based**: `WHERE id < lastSeenId ORDER BY id DESC LIMIT M` — O(log N + M) on a sorted index, regardless of page depth. Trade-off: can't jump to "page 42", only forward/backward navigation. **Cursor encodes the sort key** (not just `id` — if sorting by `created_at`, cursor is `(created_at, id)` tuple). For any list expected to grow beyond ~10k rows, design cursor-first. Bonus: cursors are stable under inserts (offset shifts everything by one when new rows arrive at the top).
 
 ---
 
@@ -483,6 +541,14 @@ ASP.NET Core uses `IDataProtector` (under the hood: AES-GCM-based) for cookie en
 
 .NET 10 added .NET surface for **ML-KEM** (key encapsulation), **ML-DSA** (digital signatures), **SLH-DSA** (stateless hash-based signatures) — the NIST-standardised PQC algorithms. Awareness-only at most levels: production crypto agility for the post-quantum transition is a 5-10 year roadmap; most current systems should stay on AES-GCM + ECDSA P-256 with a migration plan. Senior interviews: know the API exists, know which algos NIST selected, know "harvest now decrypt later" is the threat.
 
+### Q97b. JWT token revocation — short-lived tokens still contain stale claims, what's the play?
+
+The problem: an admin demotes user X to non-admin, but X's JWT is valid for another 15 minutes and still claims `role=admin`. Three patterns: (1) **Short-lived access tokens + refresh tokens** — issue 5-15min access tokens; the refresh flow re-reads claims from the DB. Standard OAuth pattern. (2) **Revocation list** in fast cache (Redis) — middleware checks every request against `revoked:{jti}` set; constant-time lookup, fails-closed on cache outage. (3) **Stateful sessions** — JWT acts as a session ID, not a credential; every request rehydrates claims from a server-side store. (4) For impossible-to-be-stale data (account suspension), accept the 5-15min window and design UX around it. Senior signal: knowing all four trade-offs and picking based on the threat model.
+
+### Q97c. Mass assignment in ASP.NET Core — how do you prevent it?
+
+If your controller takes `[FromBody] Order order` and binds directly to your EF entity, an attacker can set fields you never exposed in the UI — `order.Status = "paid"`, `order.UserId = 999`. **DTO pattern**: bind to `CreateOrderRequest` (only the fields a client may set), then map to the entity in code. Don't expose entities at API boundaries. **`[Bind(nameof(Order.Description), nameof(Order.Quantity))]`** attribute exists but is fragile — every new safe field requires a code change. Strong-typed DTOs + a mapping step (manual or Mapperly) is the senior answer.
+
 ---
 
 ## Architecture Patterns
@@ -499,6 +565,26 @@ A messaging abstraction over RabbitMQ, Azure Service Bus, Amazon SQS, Kafka. Con
 
 **Entities** — classes with identity that persists across mutations; identity via `Id`. **Value Objects** — `readonly record struct` is the perfect fit (immutable, value-equality, small). **Aggregates** — entity clusters with one root; the root is the only externally-referenced entity; invariants enforced at root. **Domain events** — `record` types raised from aggregates and published via a mediator. **Repositories** — interfaces in the domain layer, implementations in infrastructure. **Specifications** — composable `Expression<Func<T, bool>>` predicates passed to repositories. Senior signal: knowing when DDD's complexity is worth it (rich domain rules) vs anaemic CRUD (just use EF and DTOs).
 
+### Q100b. Vertical slice vs clean / onion / hexagonal — what do you pick for a new API?
+
+**Clean / Onion / Hexagonal**: organise by technical layer (Domain / Application / Infrastructure / Presentation). Wins on enforcing dependency direction (domain depends on nothing); costs ceremony — every feature touches every layer. **Vertical slice**: organise by feature — each endpoint is a folder with its own request, handler, validator, response. Wins: each feature self-contained, easy to add/remove, low cognitive load. Costs: cross-cutting concerns need explicit shared utilities. Modern preference for greenfield APIs: **vertical slices**, with a thin "shared kernel" for true cross-feature primitives. Reach for clean architecture only when the domain logic is complex enough to warrant the layer separation.
+
+### Q100c. Repository pattern over EF Core — when does it add value, when is it just noise?
+
+The case **against**: EF's `DbContext` *is* a unit of work, `DbSet<T>` *is* a repository; wrapping it in `IGenericRepository<T> { Get(id); Add(e); }` is leaky (you'll add `IncludeMany` and `QueryWithSpec` and now it's EF-shaped). The case **for**: (1) testability if you can't use a real DB in tests (Testcontainers is the modern alternative), (2) swapping providers (rare), (3) **collecting domain-specific queries on the aggregate root**: `IOrderRepository.GetActiveByCustomer(id)`. The middle path: domain-specific repositories that expose business-shaped methods (not generic CRUD); no repository if the entity is just a DTO over a table.
+
+### Q100d. CQRS — when does the read/write split actually pay off?
+
+You need CQRS when (1) reads dominate writes by 10×+ and (2) the read model differs enough from the write model that you'd denormalise. Then: write side uses your aggregates + EF Core; read side hits a denormalised view (a materialised view, ElasticSearch index, Redis cache, or a separate read-only DB). Updated via domain events or CDC. Don't reach for CQRS in a CRUD app — it's pure overhead. Senior signal: knowing the trigger is **divergent read/write models**, not "we want our API to be modern".
+
+### Q100e. Monolith → microservices — what's the seasoned answer?
+
+"Start with a **modular monolith** with clear bounded contexts; extract services only when team/scale/independence pain justifies the operational cost." The honest hierarchy: (1) one well-structured monolith with internal modules beats badly-bounded microservices. (2) Extract a service when its team needs independent deploy cadence or scale profile. (3) Distributed transactions are a tax — minimise cross-service writes via outbox + eventual consistency. The anti-pattern: extracting microservices early to "future-proof" without the deployment, observability, and team structure to support them.
+
+### Q100f. Event sourcing — what's the .NET stack and when is it the right call?
+
+**Marten** (Postgres-backed, document + event store, very ergonomic in .NET) or **EventStoreDB / KurrentDB** (purpose-built event store, multi-language). Event sourcing pays off when (1) you genuinely need full audit history of every state change ("show me what the order looked like at 14:23 last Tuesday"), (2) you need replay-based projections (different read models built from the same event stream), (3) the domain is reactive (every command produces events others care about). Costs: snapshotting strategy, schema evolution of events (you can't change history), eventual consistency for projections. Don't event-source CRUD; the trigger is genuine temporal/auditing needs.
+
 ---
 
 ## Native AOT & Trimming
@@ -514,6 +600,10 @@ The IL trimmer removes types and members that aren't statically reachable from t
 ### Q103. What's AOT-incompatible in 2026?
 
 Older AutoMapper (reflection-based mapping) — use `Mapperly` (source-gen). Newtonsoft.Json with reflection — switch to `System.Text.Json` source generation. Any library that emits IL at runtime (`Castle.DynamicProxy`, older Moq versions) — find a non-emit alternative or source-gen replacement. **EF Core**: partial AOT support in 8/9, **fully AOT-compatible in 10**. Validate by adding `<PublishAot>true</PublishAot>` and reading trim warnings — they tell you exactly what's not AOT-safe.
+
+### Q103b. Container publishing without a Dockerfile — what's the pitch?
+
+`dotnet publish -t:PublishContainer -p:ContainerRepository=myorg/myapp -p:ContainerImageTag=1.2.3` builds and pushes an OCI image directly — no Dockerfile, no `docker build` step. Uses base images defined in csproj (`<ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled</ContainerBaseImage>`). Default in .NET 10 is **Ubuntu chiseled** (distroless equivalent — no shell, no package manager, minimal attack surface). Wins: reproducible images, faster CI (no Docker daemon needed), proper layer caching driven by build output. Use for greenfield deploys; legacy Dockerfiles are fine if they already work.
 
 ---
 
