@@ -7,12 +7,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Platform } from "react-native";
 import * as FS from "expo-file-system/legacy";
 import { SOURCES, type SourceConfig } from "./parser";
 
+const IS_WEB = Platform.OS === "web";
 const REMOTE_BASE = "https://drilly-rjh-mopjones-projects.vercel.app";
 const MANIFEST_FILE = "manifest.json";
-const CACHE_DIR = (FS.cacheDirectory ?? "") + "content/";
+const CACHE_DIR = IS_WEB ? "" : (FS.cacheDirectory ?? "") + "content/";
 const CACHE_PATH = CACHE_DIR + MANIFEST_FILE;
 
 // Bundled fallback — copied from web/public into mobile/assets/content at build time
@@ -24,6 +26,7 @@ interface ManifestFile {
 }
 
 async function ensureCacheDir(): Promise<void> {
+  if (IS_WEB) return; // browser HTTP cache covers caching on web
   const info = await FS.getInfoAsync(CACHE_DIR);
   if (!info.exists) {
     await FS.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
@@ -38,10 +41,27 @@ function fromBundled(): SourceConfig[] {
 }
 
 /**
- * Load the manifest — prefers cache, falls back to bundled JSON on first launch.
- * Never throws; the app must keep working offline on first install.
+ * Load the manifest.
+ *
+ * Web: fetch `/manifest.json` from the same origin; no filesystem cache.
+ * Native: cache-first via expo-file-system; bundled JSON as offline fallback.
+ *
+ * Never throws — falls back to bundled defaults so the app keeps working.
  */
 export async function loadManifest(): Promise<SourceConfig[]> {
+  if (IS_WEB) {
+    try {
+      const res = await fetch("/" + MANIFEST_FILE);
+      if (res.ok) {
+        const parsed = (await res.json()) as ManifestFile;
+        if (parsed?.sources?.length) return parsed.sources;
+      }
+    } catch {
+      // Network failed — fall through to bundled defaults
+    }
+    return fromBundled();
+  }
+
   await ensureCacheDir();
   const info = await FS.getInfoAsync(CACHE_PATH);
   if (info.exists) {
@@ -69,10 +89,20 @@ export async function loadManifest(): Promise<SourceConfig[]> {
 }
 
 /**
- * Refresh the manifest from the Vercel endpoint, overwriting the cache.
- * Throws on network error — caller decides whether to keep using current.
+ * Refresh the manifest. Web: re-fetches with cache:reload. Native: downloads
+ * to FS cache. Throws on network error so callers can keep using current.
  */
 export async function refreshManifest(): Promise<SourceConfig[]> {
+  if (IS_WEB) {
+    const url = `/${MANIFEST_FILE}?t=${Date.now()}`;
+    const res = await fetch(url, { cache: "reload" });
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+    const parsed = (await res.json()) as ManifestFile;
+    if (!parsed?.sources?.length) {
+      throw new Error("Manifest at " + url + " has no sources");
+    }
+    return parsed.sources;
+  }
   await ensureCacheDir();
   const url = `${REMOTE_BASE}/${MANIFEST_FILE}`;
   const result = await FS.downloadAsync(url, CACHE_PATH);
