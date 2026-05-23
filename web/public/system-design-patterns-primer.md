@@ -2,7 +2,9 @@
 type: interview-prep
 ---
 
-# System Design Patterns Primer — 140 Questions
+# System Design Patterns Primer — 150 Questions
+
+> Pass 2 added (a) an **AI / LLM Infrastructure** section reflecting the 2026 reality that ~50% of staff-level system design rounds now include an ML-adjacent question, (b) a **Modern Frameworks** section (Kafka KRaft, Flink, Temporal), (c) Brooker-specific takes on backoff, jitter, and load shedding, and (d) gap-fill `Q…b` insertions across sections.
 
 Senior/staff system design interview prep. Patterns and components — not worked examples (see "Example Questions" for those). The aim: build a toolkit so any prompt becomes *"I recognise this — it's patterns X, Y, Z composed in this order."* Each answer is 2–6 sentences shaped for an interview: failure modes, tradeoffs, "what fails first" — not surface trivia.
 
@@ -26,6 +28,8 @@ Senior/staff system design interview prep. Patterns and components — not worke
 18. [[#Data Structures for System Design]]
 19. [[#Anti-patterns & Smells]]
 20. [[#Tradeoff Vocabulary]]
+21. [[#AI & LLM Infrastructure]]
+22. [[#Modern Frameworks: Kafka, Flink, Temporal]]
 
 ---
 
@@ -347,6 +351,14 @@ A **saga** is a long-running multi-step transaction across services, **without 2
 
 **Retry storm.** When B returns errors, all of A's clients retry at the same exponentially-spaced intervals. Since the intervals are synchronised (no jitter), they all retry simultaneously — a much larger spike than the original load. B, just recovering, gets clobbered again, fails again, triggering another synchronised retry. The storm propagates upward (A becomes the new B for its own callers). The fix is **jitter** (full jitter ideally), **retry budgets** to cap the multiplier, and **circuit breakers** to fast-fail when B is sick. Bring receipts on this — it's the single most common production resilience failure.
 
+### Q70b. Marc Brooker's exact framing: what is backoff *for*?
+
+Brooker (Senior Principal Engineer at AWS, the canonical voice on this) frames it precisely: backoff has two purposes — (1) **let the downstream recover** without being kept under the same load that broke it, and (2) **spread retries across time** so they don't synchronise. Pure exponential gives you (1) but not (2). Jitter — adding randomness — gives you (2). The AWS-recommended **full jitter** formula: `sleep = random_between(0, min(cap, base × 2^attempt))`. **Capped exponential**: you must bound the maximum sleep (often 30s-5min) or attempts climb into hours. The senior gotcha: backoff *cannot* solve long-term overload — if the downstream is permanently smaller than your offered load, retries just defer pain. Load shedding solves overload; backoff solves transient pain.
+
+### Q70c. "Deferring load doesn't work" — what's Brooker driving at?
+
+A common naive defence against overload: "we'll buffer the excess requests and process them later." Brooker's point: **deferred load is still load**, and your downstream's capacity didn't change. If your offered load permanently exceeds capacity, queue depth grows without bound, latency grows without bound, OOM eventually. The only escape: **reduce the offered load** — load shed (return 429), shrink the work per request (fewer features under stress), or scale capacity (slow). Queues smooth bursts; they don't fix steady-state overcapacity. The discipline: always model your steady-state, not just your peak.
+
 ---
 
 ## Asynchronous & Event-Driven Patterns
@@ -511,6 +523,14 @@ Cross-region traffic costs $0.02-0.09/GB on AWS / GCP / Azure. A "small" service
 
 Target steady-state utilisation at 60-70% of peak capacity. Why not 90%? Because **utilisation has tail behaviour** — at 90% mean, you spend significant time at 100% (queueing theory: utilisation approaches 1 → queue length → infinity). Also: N+1 redundancy requires you can lose one instance and still serve peak. At 70% × 3 instances, you can absorb the loss of one (then 105%, briefly overloaded, recoverable). Over-provisioning is a feature, not waste. Capacity engineers model peak × failure × growth and provision accordingly.
 
+### Q104b. Senior interview angle: "estimate the monthly cloud cost of your design".
+
+2026 interviewers explicitly evaluate cost reasoning at staff level. The framing: (1) **Compute** — number of instances × hours × $/hour. Memorise rough numbers ($0.05/hour for small, $0.50 for mid, $3-5 for GPU). (2) **Storage** — GB × $/GB-month (S3 ~$0.023, EBS ~$0.10, RDS ~$0.20). (3) **Data transfer** — egress GB × $0.02-0.09. (4) **Managed service premiums** — RDS / DynamoDB / managed Kafka often 2-3× DIY. (5) **Per-request fees** — DynamoDB RCU/WCU, API Gateway, S3 requests. Walk through each line, write the assumption, give a total. The signal: "this design costs ~$50k/month at 1M DAU, ~$2M at 100M DAU" — concrete enough that you've clearly thought about it.
+
+### Q104c. What do "operationally mature" services look like in 2026 staff interviews?
+
+Tier framework (Hello Interview / Exponent style): (1) **functional correctness**, (2) **scalable to spec**, (3) **production readiness** — SLOs defined, error budgets, capacity headroom. (4) **operational maturity** — runbooks, on-call rotation, chaos engineering, capacity planning, cost models. (5) **real-world case-study fluency** — "Netflix solves this by X, here's the war story". Staff candidates are expected to hit tier 4 reflexively and tier 5 to win the room. Hitting tier 1-2 only is a senior signal, not staff.
+
 ---
 
 ## Data Structures for System Design
@@ -638,6 +658,78 @@ Name the axis and the endpoint you're picking. "I'm choosing **availability over
 ### Q124. Senior interview angle: structure a 45-minute system design interview.
 
 (1) **Requirements** (5 min) — functional + non-functional; clarify scale, SLOs, consistency expectations, dominant access patterns. (2) **Capacity estimation** (5 min) — QPS, storage, bandwidth, peak vs avg, with assumptions written down. (3) **High-level design** (10 min) — boxes-and-arrows architecture; name the components and why. (4) **Data model** (5-10 min) — schemas, partition keys, indexes; show you've thought about scale. (5) **Deep dive into 1-2 components** (10-15 min) — typically the most interesting / risky one; failure modes, tradeoffs, capacity. (6) **Wrap-up** (5 min) — review tradeoffs you made, what you'd revisit, what you'd monitor. **Bring war stories** throughout — "at company X we hit this exact problem, here's what we did."
+
+---
+
+## AI & LLM Infrastructure
+
+### Q125. Design a system that handles 10,000 concurrent requests to an LLM with 2-8s inference latency on $3/hour GPUs. Walk me through it.
+
+Three big shifts from traditional serving. (1) **Long, variable latency** — each request takes seconds, not ms. Active connections grow until you hit pool limits. (2) **Expensive compute** — GPUs cost 30-100× a CPU instance; you can't over-provision casually. (3) **Variable output length** — a request might emit 50 tokens or 5000; can't pre-allocate. Architecture: **request queue with priority tiers** (paid users → low-latency lane, free users → standard lane), **token-level streaming response** (start emitting tokens as soon as they're generated — don't wait for full completion), **autoscaling on queue depth + GPU utilisation** (not just CPU), and **batch inference** at the model layer (process multiple requests per forward pass to amortise GPU memory bandwidth). Tools: vLLM / TensorRT-LLM for batching, Ray Serve / KServe / Triton for orchestration.
+
+### Q126. GPU autoscaling — why is it harder than CPU autoscaling?
+
+(1) **Cold start time** — GPU instances take 3-7 minutes to boot (vs ~30s for CPU): model weights download (10-100 GB), CUDA init, library load, weight loading into VRAM. (2) **No partial scale** — a GPU instance either has the model loaded or doesn't; can't gradually accept traffic. (3) **Cost** — at $3/hour idle, over-provisioning hurts immediately. (4) **Spot interruption hurts more** — losing a GPU instance loses 3-7 minutes of replacement time. Mitigations: **pre-warm capacity** (predictive scaling based on time of day), **model sharing** (load multiple model variants on one GPU via LoRA), **request hold-and-retry** during scale-up window, **mixed fleet** of on-demand + reserved + spot with priority routing.
+
+### Q127. Walk me through a RAG (retrieval-augmented generation) architecture.
+
+(1) **Ingestion**: documents → chunked (200-500 tokens) → embeddings via embedding model → stored in vector DB (pgvector / Pinecone / Weaviate / Milvus) with metadata (source, timestamp, doc-level access controls). (2) **Query path**: user query → embedding → **hybrid search** (vector ANN + BM25 keyword) → top-K (typically 10-50) → optional **reranker** (cross-encoder for quality) → top-N (typically 3-10) → assembled context → LLM generates answer with citations. (3) **Operational**: monitor recall (did we retrieve relevant docs), embedding drift (re-embed when model changes), citation accuracy (does the answer ground in the retrieved docs). The senior signal: knowing it's hybrid (not pure vector), knowing the reranker step, and explicitly designing for stale-data handling.
+
+### Q128. How do you do AI agents safely — when the agent can take real actions?
+
+Defence in depth. (1) **Tool sandboxing** — agents can only call a whitelisted set of tools with typed inputs; no arbitrary code execution unless in an isolated sandbox (Firecracker, gVisor). (2) **Action budgets** — caps on tool calls per turn, money spent, API calls made. (3) **Human-in-the-loop** for irreversible actions — agent proposes, human approves anything destructive / financial / external-facing. (4) **Audit log** of every action with the prompt that triggered it (for forensic review). (5) **Capability boundaries** — agents operate within bounded contexts (one user's data, one project, one timeframe); never cross-tenant. (6) **Output filtering** — moderation on agent responses to catch prompt-injection-driven exfiltration. The honest answer: agentic safety is an unsolved research problem; production deployments today over-rotate to human review.
+
+### Q129. Token-level streaming response — what changes architecturally?
+
+Traditional request/response: client sends, server processes, server returns. LLM responses arrive **token by token over seconds**. Streaming protocols: **SSE** (most common — browser-native, HTTP/1.1 friendly), **WebSocket** (when bidirectional like agent interactions), **HTTP/2 streaming**. Implications: (1) **Connection holds for seconds** — sticky load balancing, longer keep-alive timeouts. (2) **Backpressure** — slow client → don't buffer all tokens; let the model pause. (3) **Cancellation propagation** — user closes tab → cancel inference (saves GPU time on dropped requests; meaningful $$). (4) **Observability** — measure time-to-first-token separately from total latency; both are user-experienced metrics.
+
+### Q130. Distribute a 100 GB model file to 1000 inference machines on a constrained network link. How?
+
+A 2026 staff-favourite. Naive approach: each machine pulls from S3 — 100 TB cross-region transfer, hours, expensive. Better: (1) **BitTorrent-style P2P**: one downloader becomes a seeder; new downloaders pull from the swarm. Total transfer is bounded by N × file size at network limit, not N² × file size. (2) **Tiered caching**: regional / rack-local caches; the rack pulls once, machines pull from rack. (3) **Compression** (zstd level 19 on weights — 30-50% savings) and **delta updates** (only changed weights for fine-tunes). Real-world: **Meta's Torchcache**, **Uber's Petastorm**, Kubernetes-native solutions like **Dragonfly**. Senior signal: P2P + tiered caching, not "just S3 with retries".
+
+### Q131. Feature stores — what problem do they solve in ML systems?
+
+The bug: training computes features one way (batch pipeline, Pandas, last week's data); production serves features a different way (real-time API, different code, recent data). Result: model trained on slightly different inputs than it serves → performance gap. **Feature store** (Feast, Tecton, Featureform, Vertex AI Feature Store): single definition of each feature, used by both training (offline store: warehouse) and serving (online store: Redis-like). Guarantees train/serve consistency. Bonus: feature reuse across models, freshness monitoring, lineage. Operational complexity is real — adopt when you have multiple models, not your first model.
+
+### Q132. What's the inference latency breakdown for an LLM request — and where are the levers?
+
+(1) **Time-to-first-token (TTFT)**: prompt processing (the LLM reads the input) — proportional to input length, often 50-500ms on a 7B model, seconds on 70B+. (2) **Time-per-output-token (TPOT)**: 10-50ms per token typically. (3) **Total latency** = TTFT + TPOT × output_length. Levers: (a) **smaller / quantised models** (4-bit, 8-bit GPTQ/AWQ — 2-3× faster, mild quality loss), (b) **prompt caching** (Anthropic / OpenAI APIs — cache the prefix, slash TTFT for chatbots), (c) **speculative decoding** (small model proposes tokens, large model verifies — 2-3× speedup), (d) **prefix sharing** in batching (vLLM PagedAttention), (e) **shorter outputs** via response-length caps.
+
+---
+
+## Modern Frameworks: Kafka, Flink, Temporal
+
+### Q133. What's KRaft and why did Kafka replace ZooKeeper with it?
+
+ZooKeeper was Kafka's external coordination service — stored metadata about brokers, topics, partitions, consumer offsets. Operational complexity (separate cluster, separate version compatibility matrix, separate failure mode). **KRaft** (Kafka Raft, GA in Kafka 3.5+): Kafka's own internal Raft-based metadata cluster — same Kafka brokers host the control plane via a quorum. Wins: one cluster to operate, faster controller failover (seconds vs minutes), supports orders of magnitude more partitions (millions vs ~200k), simpler deployment. As of 2026, **KRaft is the default** and ZooKeeper is deprecated for new Kafka clusters.
+
+### Q134. Kafka exactly-once semantics — how does the transactional API actually work?
+
+Within Kafka, producers can write to multiple partitions atomically using **transactional API**: `producer.beginTransaction()`, write to multiple topics/partitions, `producer.commitTransaction()`. Consumers configured with `isolation.level=read_committed` only see committed messages. Combined with **idempotent producers** (`enable.idempotence=true` — dedupes producer retries via sequence numbers), this gives exactly-once within Kafka. **Across systems** (Kafka → Postgres, Kafka → external API): still at-least-once with idempotent consumers; Kafka transactions don't span external resources. The senior take: "exactly-once within Kafka via transactions + idempotent producers; across system boundaries, at-least-once + idempotent consumers."
+
+### Q135. When do you reach for Flink over Kafka Streams?
+
+**Kafka Streams**: a library embedded in your JVM app; deploys with your service; great for stateless / lightly-stateful processing co-located with Kafka. **Flink**: a separate cluster, designed for stateful streaming at scale — event-time windowing with watermarks, sophisticated state management (RocksDB-backed), exactly-once across complex pipelines, streaming SQL. Use Flink for: complex windowing, joins across multiple streams, large state (TB scale), event-time correctness against late data, ML feature pipelines. Use Kafka Streams for: per-service real-time enrichment, simple aggregations, when you don't want to operate a separate cluster. Flink dominates the low-latency / large-state streaming space in 2026.
+
+### Q136. What is Temporal and what does it solve that wasn't well-solved before?
+
+**Temporal** (and Cadence, its predecessor at Uber): a workflow orchestration engine where workflow code is **durable and replayable**. Write a workflow in code (`async def order_workflow(order_id)`), call activities (each an idempotent unit of work). Temporal persists every step's input + output; if the worker crashes mid-workflow, a new worker resumes from the persisted state — workflow looks like uninterrupted execution to the developer. Solves: (1) long-running multi-step workflows that previously needed bespoke state machines + retries + timer logic, (2) sagas with compensation, (3) human-in-the-loop workflows (sleep for 7 days, then check). Replaces: hand-rolled state machines + cron + queue glue. Production-grade orchestrated saga engine.
+
+### Q137. AWS Step Functions vs Temporal vs Cadence — when do you pick which?
+
+**AWS Step Functions**: serverless, AWS-native, JSON-defined workflows, integrates with all AWS services. Good for: AWS-centric pipelines, infrequent runs, simple workflows. Limits: complex logic in JSON gets ugly, vendor lock-in. **Temporal**: code-defined workflows in Go/Java/TypeScript/Python; richer programming model; self-hostable or Temporal Cloud. Best for: complex business workflows, multi-cloud, when you want workflow logic in your team's language. **Cadence**: Uber's predecessor (Temporal is the fork); similar capabilities; less momentum than Temporal in 2026. Default modern choice: **Temporal** unless you're deep in AWS and Step Functions covers your needs.
+
+### Q138. Sidekiq / Celery / Hangfire — what tier of "background job" are these?
+
+The lighter tier: **job queues for periodic / async work**. Sidekiq (Ruby/Redis), Celery (Python/Redis/RabbitMQ), Hangfire (.NET/SQL/Redis), Bull/BullMQ (Node). Use for: send-email, generate-report, retry-failed-payment, scheduled cleanup. Compared to Temporal: simpler programming model (each job is independent), no built-in long-running workflow state, no compensations. Use Sidekiq-tier for **single-step async jobs**; reach for Temporal when steps span hours/days and need to coordinate. The mistake is using Sidekiq for what should be a Temporal workflow — you end up rebuilding workflow state in your job code.
+
+### Q139. Real-time data warehouse — what's the modern shape?
+
+**Old shape**: batch ETL daily; data lands in BigQuery / Snowflake / Redshift; analysts query yesterday's data. **Modern shape**: **streaming ETL** via Flink / Kafka Connect / Materialize / RisingWave → real-time aggregates pushed into the warehouse continuously. Dashboards reflect data 1-second-stale instead of 24-hour-stale. Specific products: **Materialize** (streaming SQL engine, "incremental view maintenance"), **RisingWave**, **ClickHouse** with Kafka engine, **Tinybird**. The senior signal: knowing the line between **batch warehouse** (BigQuery / Snowflake for analytics), **real-time OLAP** (ClickHouse, Druid, Pinot for live dashboards), and **operational store** (Postgres for app data) — and not confusing them.
+
+### Q140. Edge functions / edge compute — when does it pay off?
+
+Cloudflare Workers, Vercel Edge Functions, AWS Lambda@Edge, Deno Deploy. **Edge compute** runs at the CDN POP — sub-50ms latency for users globally, no cold start (V8 isolates), but constrained runtime (no traditional Node modules, time/CPU/memory limits, no native binaries). Wins: (1) **personalised CDN responses** without origin round trips (A/B test routing, geo routing, auth checks). (2) **API aggregation** at the edge (compose multiple backend calls, return one response). (3) **Static + dynamic** in one — render a page with edge-fetched content. Loses: heavy compute, large dependencies, stateful workloads. Match the workload to the runtime; edge isn't a universal replacement for backend services.
 
 ---
 
