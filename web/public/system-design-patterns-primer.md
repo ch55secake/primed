@@ -35,6 +35,46 @@ Senior/staff system design interview prep. Patterns and components — not worke
 
 ## Foundational Mental Models
 
+### Summary
+
+**What this topic covers**
+
+The handful of mental primitives that every senior system design answer silently leans on: the **latency hierarchy** (L1 → memory → SSD → same-DC RTT → cross-region RTT), **capacity estimation** (QPS, bandwidth, storage from user counts), the precise definitions of **reliability / availability / scalability / performance**, the **percentile ladder** (p50 / p99 / p99.9) and why tails amplify under fan-out, **Little's Law** (`L = λ × W`) as the universal sizing equation, and the three competing observability frameworks — **USE** (resources), **RED** (services), and Google SRE's **Four Golden Signals**. The 7 questions in this topic are the warm-up of every senior round; getting them tight is what buys you airtime for the harder questions later.
+
+**Mental model**
+
+Think of system design as a constant arithmetic game played against the physics of the network. Every design choice is bounded by three numbers: the **latency budget** (~50ms for a p99 user-facing target leaves no room for a synchronous cross-region call at 100ms RTT), the **utilisation ceiling** (queueing theory says you can't run hot — utilisation past ~70% turns tail latency exponential), and the **concurrency in-flight** that Little's Law forces on you (1000 RPS × 50ms service time = 50 concurrent in-flight, period). The right framing for every prompt is: "given the back-of-envelope numbers, what is the system *physically* able to do?" Combined with the percentile mindset — your p50 is a lie at scale because fan-out turns sub-call p99s into request-level p99.9s — you can dismiss bad designs in 30 seconds without simulation. Systems like Netflix's Hystrix, Google's hedged-request fabric, and AWS's load shedders are all engineered against these primitives.
+
+**Key terms**
+
+- **Latency numbers** — L1 ~1ns, memory ~100ns, SSD ~16µs, same-DC RTT ~0.5ms, cross-region RTT 50-150ms. Decide design feasibility in seconds.
+- **QPS estimation** — users × actions ÷ seconds; apply 2-4× peak factor, then 3-5× safety for surge/failover.
+- **Reliability vs availability** — reliability is "doesn't lose data under fault"; availability is "% time serving requests". Orthogonal axes.
+- **p50 / p99 / p99.9** — percentile latency; p99.9 is what fan-out users actually experience.
+- **Tail amplification** — N parallel sub-calls means request-level p50 ≈ sub-call p99 for N=100.
+- **Little's Law** — `L = λ × W`; drives thread pools, connection pools, queue depth.
+- **USE method** — Utilisation, Saturation, Errors. Brendan Gregg's resource-level dashboard.
+- **RED method** — Rate, Errors, Duration. Per-service dashboard.
+- **Four Golden Signals** — Latency, Traffic, Errors, Saturation. SRE alerting + SLO foundation.
+- **Hedged requests** — Google's tail-cutting technique; fire to a second replica if p95 elapses.
+
+**Why interviewers ask this**
+
+Three signals at once. (1) **Numerical fluency** — staff candidates quote the latency numbers without hesitating; if you have to derive them mid-interview you've already lost the airtime. (2) **Method over answer** — capacity estimation is graded on whether you write assumptions on the whiteboard, not whether you hit the right number. Interviewers want to see "100M DAU × 10 actions / 86,400 = ~12k RPS, peak 4× = 50k, design for 3× = 150k". (3) **Tail awareness** — the p50-vs-p99 question is the trap that separates senior from junior. Anyone who says "p50 is 5ms so we're fine" loses the room; the correct answer names GC pauses, lock contention, cold caches, fan-out amplification, head-of-line blocking, and noisy neighbours as the six suspects, then names the diagnostic tools (flame graphs, distributed tracing).
+
+**Common confusions**
+
+- "Reliability = availability" — no; you can be reliable but unavailable (offline correctness), or available but unreliable (serving wrong data).
+- "p50 is the typical user experience" — false at scale; a user making 100 requests will probably hit at least one p99-bad one per session.
+- "More capacity fixes tail latency" — not if the tail is GC pauses or lock contention; you need root-cause diagnosis, not headroom.
+- "Little's Law only applies to queues" — applies to any system in steady state; thread pools, connection pools, in-flight requests.
+- "USE and RED measure the same thing" — USE is for resources (CPU is saturated), RED is for services (this endpoint's error rate). Use both.
+- "Peak = 2× average is good enough" — for daily-cycle apps maybe; viral spikes and failover demand 3-5× peak as the design target.
+
+**What follows from this topic**
+
+Every later section assumes you've internalised these primitives. The latency ladder dictates Networking choices (HTTP/3 vs HTTP/2, edge vs origin). Capacity estimation dictates Database Scaling (when sharding crosses the cost/benefit line). Little's Law dictates Resilience (timeout ordering, backpressure, retry budgets). Tail amplification dictates Caching (stampede prevention, hot key handling) and Resilience (hedged requests). Golden Signals dictate Observability (SLOs, error budgets, multi-burn-rate alerts). If this topic feels shaky, fix it before going further — the rest of the primer compounds on these foundations.
+
 ### Q1. Give me the back-of-envelope latency numbers every senior engineer should have memorised.
 
 L1 cache ~1 ns · L2 ~4 ns · main memory ~100 ns · SSD random read ~16 µs · same-DC network RTT ~0.5 ms · cross-region RTT ~50–150 ms · HDD seek ~5 ms (mostly historical). These decide whether a design is sane in 30 seconds — "we'll do a sync cross-region call on the hot path" with 100ms RTT is a non-starter for a p99 SLO of 50ms. Internalise them; if you have to look them up mid-interview, you've already lost ground.
@@ -66,6 +106,47 @@ Six suspects: (1) **GC pause** — bursty, kills the tail. (2) **Lock contention
 ---
 
 ## Networking & Protocols
+
+### Summary
+
+**What this topic covers**
+
+The wire protocols and routing fabric that connect every distributed system together. Three layers of concern: (1) the **request lifecycle** — what happens between L3 IP, L4 TCP, TLS, and L7 HTTP for a single HTTPS call, and which round trips are unavoidable vs cacheable; (2) the **HTTP protocol family** — HTTP/1.1 vs HTTP/2 (multiplexing) vs HTTP/3 (QUIC over UDP) and the practical differences for tail latency and mobile networks; and (3) the **internal vs edge dichotomy** — gRPC for typed service-to-service calls, REST at the public boundary, WebSockets vs SSE vs long polling for browser push, and the CDN cache header set (`Cache-Control`, `stale-while-revalidate`, `stale-if-error`) that powers modern edge networks. The 7 questions also cover **anycast** — the BGP-level trick that makes Cloudflare and Google DNS resilient — and the diagnostic playbook for "the site is slow from country X".
+
+**Mental model**
+
+Networking decisions are dominated by **round trips, not bytes**. A modern internet path adds ~50ms cross-region, and most production latency is RTT × number of round trips, not bandwidth. That's why TLS 1.3 (1 RTT, 0-RTT with resumption) replaced TLS 1.2 (2 RTT), why HTTP/2 multiplexing matters less than people think (head-of-line blocking still bites at the TCP layer), and why HTTP/3's QUIC is a meaningful win for mobile users who switch networks mid-session. The second mental shift is **where you terminate matters**: terminate TLS at the edge (Cloudflare, AWS CloudFront, Fastly) and origin RTT drops because the edge has warm connections. Anycast routes users to the topologically nearest POP automatically — failure of one POP is invisible because BGP reconverges. Inside the mesh, gRPC over HTTP/2 with persistent connections is the right call; at the public edge, REST plus HTTP/3 plus aggressive CDN caching is the modern default.
+
+**Key terms**
+
+- **L3 / L4 / L7** — IP routing / TCP transport (with congestion control like BBR) / HTTP application semantics.
+- **TLS handshake** — 2 RTT on TLS 1.2, 1 RTT on TLS 1.3, 0 RTT with session resumption.
+- **HTTP/2** — binary framing, multiplexed streams on one TCP connection; suffers TCP head-of-line blocking.
+- **HTTP/3 / QUIC** — UDP-based, independent streams, 0-RTT, connection migration across IP changes.
+- **gRPC** — Protobuf-typed RPC over HTTP/2; supports unary + streaming; needs gRPC-Web for browsers.
+- **Anycast** — same IP advertised from multiple POPs via BGP; routes users to nearest, fails over transparently.
+- **GeoDNS** — DNS-resolution-time location targeting; complementary to anycast.
+- **Server-Sent Events (SSE)** — unidirectional server→client over HTTP; auto-reconnect via `EventSource`.
+- **WebSockets** — full-duplex upgrade from HTTP/1.1; stateful, sticky load balancing required.
+- **stale-while-revalidate** — CDN header: serve stale up to N seconds while fetching fresh; hides origin latency.
+- **Connection migration** — QUIC feature; survives client IP change without reconnecting (WiFi → LTE).
+
+**Why interviewers ask this**
+
+Three signals. (1) **Protocol-level fluency** — staff candidates can name which RTTs are unavoidable vs cacheable, and pick HTTP/3 vs HTTP/2 vs HTTP/1.1 with a reason ("HTTP/3 because our users are mobile and connection migration matters"). (2) **Edge / origin reasoning** — knowing that CDN caching with `s-maxage` and `stale-while-revalidate` is the single highest-ROI latency win for user-facing content separates candidates who've shipped production from candidates who've only done internal services. (3) **Diagnostic instinct** — the "site is slow from one country" question is a multi-layer triage problem: DNS → TLS → network path → CDN coverage → app latency → bundle size. The right answer walks down the OSI stack with diagnostic tools (`mtr`, `dig`, WebPageTest, Chrome DevTools) at each layer.
+
+**Common confusions**
+
+- "HTTP/2 fixes head-of-line blocking" — only at the HTTP layer; TCP still serialises packet retransmits, blocking all streams.
+- "WebSockets are always better than SSE" — SSE is simpler, HTTP-friendly, and auto-reconnects natively; pick it for one-way push.
+- "gRPC is faster, use it everywhere" — gRPC is harder to debug, hard to CDN-cache, needs shimming for browsers. Reserve for service-to-service.
+- "Anycast and GeoDNS are competitors" — they're complementary; modern stacks use both at different layers.
+- "TLS handshake is always 2 RTT" — TLS 1.3 is 1 RTT, and session resumption hits 0-RTT.
+- "CDN cache headers are just `Cache-Control: max-age`" — modern CDNs respect `s-maxage`, `stale-while-revalidate`, and `stale-if-error` — these are the killer features.
+
+**What follows from this topic**
+
+Networking primitives feed directly into Load Balancing (where L4 vs L7 decisions live), Caching (CDN is just a cache at the edge), Resilience (timeout ordering depends on knowing RTTs at each hop), and Real-Time (WebSocket vs SSE for push). The cost lever in Cost & Capacity Engineering is partly networking — egress bandwidth is the silent killer in cross-region designs. Get this topic right and the rest of the primer's protocol references make sense without re-derivation.
 
 ### Q8. Walk me through what happens at each layer when you make an HTTPS request.
 
@@ -99,6 +180,48 @@ Order: (1) **DNS resolution** — slow or wrong record? `dig` + `mtr`. (2) **TLS
 
 ## Load Balancing & Traffic Management
 
+### Summary
+
+**What this topic covers**
+
+How traffic gets distributed across a fleet of backends, and how that distribution holds up under realistic conditions: unequal connection lifetimes, sick backends, hot keys, and partial network partitions. Six questions cover the foundational dichotomies and one staff-tier diagnostic. (1) **L4 vs L7 load balancers** — payload-blind TCP forwarding (HAProxy/NLB) vs HTTP-aware routing (NGINX/Envoy/ALB); (2) **consistent hashing** with virtual nodes (Cassandra, DynamoDB, Discord) and its cousin rendezvous hashing; (3) **power of two choices** — the surprisingly effective O(1) approximation of least-connections; (4) **active vs passive health checks** with Envoy-style **outlier detection** as the modern hybrid; (5) the **service mesh vs API gateway** distinction (east-west vs north-south); and (6) the canonical senior diagnostic: the load balancer says traffic is even, but one backend is melting — what's actually going on?
+
+**Mental model**
+
+Load balancing is a **scheduling problem disguised as a routing problem**. "Even distribution" is the wrong target because backends don't have equal capacity, equal connection lifetimes, or equal per-request work. The right targets are **balance work, not connections** (use least-connections or per-request L7 routing for HTTP), and **isolate failure** (consistent hashing limits the blast radius of a backend swap to 1/N of keys, vs the entire keyspace under naive modulo). The other mental shift: **load balancers are observability points**, not just traffic distributors — Envoy's per-route metrics, outlier ejection counters, and circuit-breaker tripping signals are how you find sick backends before users notice. Power-of-two-choices is the canonical example of "less coordination = better outcome": polling every backend's load to pick the least-loaded one is slower than picking two at random because the global view is stale by the time you act on it. Production systems (Netflix Ribbon, Finagle, Envoy) all converged on this insight.
+
+**Key terms**
+
+- **L4 load balancer** — TCP/UDP forwarding, payload-blind, fast, protocol-agnostic. HAProxy TCP mode, AWS NLB.
+- **L7 load balancer** — HTTP-aware, routes by path/header/host, terminates TLS, per-route policy. NGINX, Envoy, AWS ALB.
+- **Consistent hashing** — hash keys + nodes onto a ring; adding/removing a node moves 1/N of keys, not all.
+- **Virtual nodes (vnodes)** — each physical node owns hundreds of ring positions; smooths distribution.
+- **Rendezvous hashing** — `argmax(hash(node, key))`; no ring; simpler for small N.
+- **Power of two choices** — pick 2 backends at random, route to less-loaded; max load O(log log N).
+- **Active health checks** — periodic `/health` probes; predictable but stale.
+- **Passive health checks** — observe real traffic for errors/latency; reactive.
+- **Outlier detection** — Envoy hybrid; passively counts errors, ejects + probes for recovery.
+- **API gateway** — north-south traffic (external → internal); auth, rate limit, transform.
+- **Service mesh** — east-west traffic (service ↔ service); sidecar Envoys for mTLS, retries, observability.
+- **Connection draining** — graceful shutdown phase where LB stops sending new requests but lets in-flight finish.
+
+**Why interviewers ask this**
+
+Two signals. (1) **You've felt the production pain**. The "evenly distributed connections, one backend melting" diagnostic is the dead giveaway between candidates who've operated systems and candidates who've only designed them. The answer requires knowing that **long-lived connections + recent deploys = uneven steady-state load** — A restarts, its connections rebalance to B and C, A comes back with zero connections, new clients land on A but new clients are *active* clients, so A's per-connection work is higher even though its connection count is lower. (2) **Layer-fluency**. Mixing up API gateway and service mesh in a senior interview is a junior tell. Kong / Apigee / AWS API Gateway live at the edge with auth + rate limiting + monetisation; Istio / Linkerd / Consul Connect live between services with sidecar mTLS and retries. Both can coexist.
+
+**Common confusions**
+
+- "L7 is always better than L4" — L4 is faster, supports any protocol (PostgreSQL, Redis, custom binary), critical for raw TCP services where latency dominates.
+- "Consistent hashing eliminates rebalancing" — it eliminates *most* of it; you still move 1/N when the topology changes.
+- "Least-connections is the gold standard" — it's O(N) to scan, and the global view is always stale. Power of two choices wins in practice.
+- "Service mesh = API gateway" — north-south vs east-west; they sit at different points and solve different problems.
+- "Sticky sessions are fine" — they break load balancing on deploy and create hot backends; avoid unless protocol requires (WebSockets).
+- "Active health checks catch everything" — probe interval = staleness window; passive checks react faster to real degradation.
+
+**What follows from this topic**
+
+Load balancing patterns feed into Caching (consistent hashing in Redis Cluster), Database Scaling (the same hash ring for shard ownership), Resilience (outlier detection as a circuit-breaker precursor), and Service Architecture (service mesh as the substrate for mTLS, retries, timeouts everywhere). The hot key problem in Caching is the same shape as the whale problem in sharding — both are "uniform hashing doesn't mean uniform load".
+
 ### Q15. L4 vs L7 load balancers — when do you pick each?
 
 **L4 (transport)**: HAProxy in TCP mode, AWS NLB. Doesn't inspect the payload — just forwards TCP/UDP. Faster, supports any protocol (PostgreSQL, Redis, custom binary). Can't route by URL path, can't terminate TLS (unless using SNI-based passthrough). **L7 (application)**: NGINX, Envoy, AWS ALB. Inspects HTTP — routes by path/header/host, terminates TLS, applies per-route retries/timeouts/rate-limits/headers. Slower per request, more memory. Use L4 for raw TCP services or when latency is critical; L7 for HTTP services where routing/observability/policy matters.
@@ -127,6 +250,47 @@ Likely **long-lived connections + recent deploys** = uneven steady-state. When b
 
 ## Data Storage Foundations
 
+### Summary
+
+**What this topic covers**
+
+The storage substrates you compose every distributed system out of, and how they earn or fail their place against modern Postgres. Five questions across (1) the **B-tree vs LSM-tree** dichotomy — read-optimised in-place updates (Postgres, MySQL InnoDB) vs write-optimised append-only with compaction (RocksDB, Cassandra, ScyllaDB); (2) **when Cassandra beats Postgres** — write rates above ~100k/sec, multi-region active-active, billion-row tables with bounded query patterns; (3) **column-oriented storage** for analytics — ClickHouse, DuckDB, Snowflake, BigQuery, Parquet — and why compression + vectorisation + column-scan-only wins by 10-100× on OLAP; (4) **S3 / object storage** as the 11-nines, infinite-scale, strongly-consistent-since-2020 blob layer; and (5) the contrarian staff-tier answer — "just put everything in Postgres" is right more often than candidates believe.
+
+**Mental model**
+
+Storage engines split along **write path vs read path**. B-trees update pages in place — every write is a page modification protected by the WAL, every point lookup is 3-4 page hits, range scans are sequential within the tree. LSM-trees buffer writes in an in-memory memtable, flush to immutable sorted SSTables on disk, and pay the cost later via **compaction** that merges levels. Writes are sequential and cheap; reads may hit multiple SSTables (read amplification), mitigated by bloom filters and tiered/leveled compaction. The third axis is **row vs column**: row stores (Postgres, MySQL) put all columns of one row together — great for OLTP point lookups; column stores (ClickHouse, Snowflake) put all values of one column contiguously — great for analytical scans because compression hits 5-20× and SIMD vectorisation crushes aggregation. The fourth axis is **block vs object**: EBS-style block storage is low-latency-high-cost; S3-style object storage is high-latency-low-cost-infinite. Modern designs are **layered** — Postgres for OLTP, ClickHouse for OLAP, S3 for the data lake underneath, Redis for the hot cache. The senior insight: most systems below 1TB don't need the second engine yet.
+
+**Key terms**
+
+- **B-tree** — balanced page tree, in-place updates, optimised for reads. Postgres, MySQL InnoDB, MongoDB WiredTiger.
+- **LSM-tree** — memtable → SSTable + compaction; write-optimised, sequential I/O. RocksDB, Cassandra, ScyllaDB, BigTable.
+- **WAL (Write-Ahead Log)** — durability primitive; writes go to log before pages, replayed on crash recovery.
+- **Compaction** — LSM background merge of SSTables; trades write amplification for read amplification.
+- **Tiered vs leveled compaction** — tiered (Cassandra default) batches sizes; leveled (RocksDB default) bounds level size for better reads.
+- **Row store** — all columns of one row together; OLTP-friendly.
+- **Column store** — all values of one column together; OLAP-friendly; 5-20× compression, vectorised execution.
+- **OLTP vs OLAP** — transactional (point ops, ms latency) vs analytical (aggregate scans, seconds OK).
+- **Object storage (S3)** — 11 nines durability, strongly consistent reads since 2020, ~tens of ms latency, dirt cheap.
+- **Storage tiers** — Standard → IA → Glacier → Deep Archive; retrieval cost vs storage cost tradeoff.
+- **Polyglot persistence** — multiple databases for different workloads; expensive, increasingly avoidable.
+
+**Why interviewers ask this**
+
+Two signals. (1) **Tooling justification** — staff candidates can defend "we used Cassandra" or "we used ClickHouse" with quantitative thresholds (write rate, query pattern, multi-region requirement). The wrong answer is "Cassandra because it scales"; the right answer names the specific Postgres ceiling you hit. (2) **Anti-overengineering instinct** — 2026 interviews increasingly reward the candidate who picks Postgres for a 1TB workload and explains *when* they'd reach for Cassandra or ClickHouse, vs the candidate who reflexively reaches for polyglot persistence. Modern Postgres handles JSON + full-text + GIS + pgvector + Citus extensions, scales to ~10-50TB, ~10k writes/sec sustained, ~100k reads/sec with replicas. Reaching for specialist tools before you hit a *specific* Postgres limit is a junior tell.
+
+**Common confusions**
+
+- "LSM is always faster than B-tree" — for writes, yes; for reads, often slower due to multi-SSTable lookups; bloom filters mitigate but don't eliminate.
+- "Column stores replace row stores" — no; OLTP point updates are catastrophic on column stores (every column file changes).
+- "S3 is a database" — it isn't; high latency, no atomic multi-object ops, no transactions. Use for blobs, data lakes, backups.
+- "Cassandra is the obvious scale-out choice" — only if you can design schema-per-query upfront; ad-hoc queries are unforgiving.
+- "Postgres tops out at 100GB" — modern Postgres on a tuned box handles TBs comfortably; the wall is workload-specific, not size-specific.
+- "Eventual consistency in S3" — was true historically; since 2020 S3 provides strong read-after-write consistency.
+
+**What follows from this topic**
+
+Storage foundations feed directly into Database Scaling Patterns (the scaling ladder for Postgres, sharding strategies, replication), Caching (cache-aside on top of which engine), CAP/PACELC (Cassandra is AP/EL, Spanner is CP/EC, Postgres single-region is CP), and Search (Elasticsearch when Postgres FTS hits its wall). The "just Postgres" instinct is the senior-engineer humility move that the rest of the primer repeatedly returns to.
+
 ### Q21. B-tree vs LSM — what's the practical difference and when do you pick each?
 
 **B-tree** (Postgres, MySQL InnoDB): in-place updates, balanced tree of pages, **optimised for reads** — point lookups are 3-4 page hits. Write goes through WAL first, then to the page. **LSM-tree** (RocksDB, Cassandra, ScyllaDB, BigTable): append-only memtables flushed to immutable sorted SSTables on disk, periodic **compaction** merges levels. **Write-optimised** — sequential writes, no in-place updates. Reads can hit multiple SSTables (read amplification), mitigated by bloom filters and tiered/leveled compaction. Pick B-tree for OLTP read-heavy; LSM for write-heavy time-series or high-ingest workloads.
@@ -150,6 +314,48 @@ Way more often than candidates think. Modern Postgres scales to: ~10-50 TB total
 ---
 
 ## Database Scaling Patterns
+
+### Summary
+
+**What this topic covers**
+
+The disciplined order of escalation for scaling a relational database from "single box" to "horizontally sharded across regions", and the bugs each rung introduces. Seven questions: (1) the **scaling ladder** — vertical → read replicas → query optimisation → caching → functional partitioning → table partitioning → sharding, and why each step is a one-way door; (2) **read replicas and replication lag** — the read-your-writes bug and its three escalating fixes; (3) **sharding strategies** — hash, range, lookup service, geographic — and the killer flaw of each; (4) the **whale problem** — 1% of users having 90% of the data and how to isolate them; (5) **quorum math** — the `W + R > N` rule and the 3-replica sweet spot from DynamoDB / Cassandra; (6) **single-leader vs multi-leader vs leaderless** replication topologies and when each fits; and (7) a staff-tier diagnostic on handling 30 seconds of replication lag without papering over the root cause.
+
+**Mental model**
+
+Database scaling is a **ladder, not a buffet**. Every step adds operational complexity that doesn't compose down — once you shard, you don't un-shard; once you go multi-leader, you inherit conflict resolution forever. The discipline is to climb only as high as you must, and to exhaust the cheap rungs before reaching the expensive ones. The second mental shift: **replication is async by default**, which means **eventual consistency between primary and replicas is a fact**, not a bug — read-your-writes is the standard application-level concern. Async replication scales (one primary, N replicas, no coordination); synchronous replication trades throughput for durability (Postgres `synchronous_commit`, Spanner-style cross-region). The third mental shift: **uneven data is more common than uneven keys**. Hash sharding distributes keys evenly but doesn't distribute load evenly — Twitter has celebrities, Slack has Salesforce-sized customers, payments has whales who post 1000× the merchant volume. Production sharding designs always have a whale story.
+
+**Key terms**
+
+- **Vertical scaling** — bigger box; 24 TB RAM / 200+ cores available on modern instances; the right first step.
+- **Read replica** — async streaming replica; reads to replica, writes to primary; lag is the bug pattern.
+- **Replication lag** — ms to minutes; drives read-your-writes routing or causal consistency tokens.
+- **Functional partitioning (federation)** — split databases by feature (users DB, orders DB); independent scaling.
+- **Sharding** — horizontal partitioning across multiple primaries; one-way door.
+- **Hash sharding** — `hash(key) % N`; even key distribution; range queries hit every shard.
+- **Range sharding** — contiguous key ranges; easy range scans; hotspots on recent data.
+- **Lookup service (directory)** — key → shard map via metadata service; flexible, SPOF risk.
+- **Whale problem** — skewed tenants concentrate load; mitigate via secondary partitioning or dedicated shards.
+- **Quorum (W + R > N)** — guarantees read sees latest write; 3-replica W=2/R=2 is the standard.
+- **Single-leader / multi-leader / leaderless** — Postgres-style / Aurora multi-master / Dynamo-style; each picks different consistency tradeoffs.
+- **Read-your-writes** — session guarantee: you see your own writes; fixed via primary routing or causal tokens.
+
+**Why interviewers ask this**
+
+Two signals. (1) **The order of escalation matters more than the destination**. Staff candidates climb the ladder in order — "we'd start with vertical scaling, then read replicas, then caching, then federation, then sharding" — and only reach for the next rung when the current one demonstrably failed. Junior candidates jump straight to sharding because "scale". (2) **Replication lag is the canonical hidden bug**. The 30-second-lag senior question has three user-visible bugs (vanished writes on next read, double-charge if retried, stale UI) and the right answer names all three plus the long-term fix ("investigate why lag is 30s, don't just paper over"). The whale question is the second-most-asked diagnostic; the right answer is "the question isn't how to distribute evenly, it's how to isolate impact".
+
+**Common confusions**
+
+- "Sharding is the goto answer at scale" — modern Postgres on a tuned box handles 10TB and 10k writes/sec; most teams shard 3-5 years too early.
+- "Consistent hashing solves the whale problem" — it solves topology change; it doesn't solve uneven *load per key*.
+- "Quorum reads guarantee linearizability" — only against concurrent writes; doesn't prevent stale reads under leader failover.
+- "Multi-leader is just multi-region active-active" — it inherits conflict resolution: LWW (lossy), CRDTs (mergeable), or app-level merge.
+- "Read replicas eliminate read load on the primary" — they shift it, but replication lag is now your application's problem.
+- "Functional partitioning is a microservices thing" — no, it's a database pattern; you can do it inside a monolith just fine.
+
+**What follows from this topic**
+
+Scaling patterns feed Caching (caching is rung 4 on the ladder), CAP/PACELC (replication topology choices map to PACELC labels), Consensus (single-leader fail-over is what Raft solves), Messaging (CDC reads the WAL, depends on knowing replication mechanics), and Anti-patterns (premature sharding is the canonical smell). The discipline of "earn each rung" generalises to the rest of system design.
 
 ### Q26. Walk me through the scaling ladder — what do you try in order?
 
@@ -183,6 +389,48 @@ Three user-visible bugs to think about: (1) **Vanished writes on next read** —
 
 ## Caching
 
+### Summary
+
+**What this topic covers**
+
+The patterns and pathologies of putting a cache in front of a slow data source. Six questions covering (1) the **four cache-update patterns** — cache-aside, read-through, write-through, write-back — and the practical tradeoffs in race conditions, freshness, and durability; (2) **cache stampedes** — the thundering-herd failure when a hot key expires and 1000 concurrent misses hit the database, plus the four mitigations (single-flight locks, stale-while-revalidate, XFetch probabilistic refresh, cache warming); (3) the **hot key problem** — one viral post or celebrity user generating 100× the load of others, and the five fixes from client-side replication to broadcast trees; (4) **eviction policies** — LRU vs LFU vs **W-TinyLFU** (Caffeine's admission filter that empirically beats both); (5) **Redis-specific scaling traps** — the single-threaded data plane, hash slots, pipelining, Lua scripts, persistence trade-offs; and (6) the staff-tier diagnostic: cache hit rate dropped from 95% to 70% after a deploy — triage.
+
+**Mental model**
+
+A cache is **an optimisation layered on top of a source of truth**, never the source of truth itself. The instant you start treating Redis as the durable store, you've signed up for data-loss failure modes (eviction under memory pressure, async replication losing writes on failover, AOF persistence not equivalent to a real WAL). The second mental shift: **caching changes failure modes, it doesn't eliminate them**. The cache turns "every read hits the database" into "rare reads hit the database with massive amplification at the wrong moment" — stampedes are the canonical example. Production caches are designed against the stampede shape: stale-while-revalidate so the cache is never *empty* for hot keys, probabilistic early refresh (XFetch) so 1000 clients don't simultaneously notice expiry, and per-key single-flight locking so the first miss serves the rest. The third mental shift: **hot keys break uniform-hashing assumptions**. One celebrity user can melt one cache shard's CPU while the other 99 sit idle; the fix is per-key replication or sharding-by-suffix, not "buy a bigger Redis box". Caffeine's W-TinyLFU is the canonical example of cache-quality engineering — admission filters out scans, frequency sketch tracks long-term heat.
+
+**Key terms**
+
+- **Cache-aside (lazy)** — app reads cache, falls through to DB on miss, populates cache; the default pattern.
+- **Read-through** — cache fronts DB and knows how to load on miss; cleaner code, opaque debugging.
+- **Write-through** — write to cache + DB synchronously; always-fresh cache, slower writes.
+- **Write-back (write-behind)** — write to cache, async to DB; fastest writes, data loss risk.
+- **TTL (time-to-live)** — expiry timer; balance freshness vs hit rate.
+- **Cache stampede** — hot key expires, N concurrent misses hit the DB simultaneously.
+- **Single-flight (per-key locking)** — first miss acquires lock, others wait for populated value.
+- **Stale-while-revalidate** — serve expired value while background refresh runs; smooths expiry cliff.
+- **XFetch** — probabilistic early refresh based on TTL + last fetch time; eliminates synchronised expiry.
+- **W-TinyLFU** — Caffeine's eviction policy; admission window + frequency sketch; beats LRU/LFU on real workloads.
+- **Hot key problem** — single key receives 100× load of others; melts one cache shard.
+- **Hash slots (Redis Cluster)** — 16,384 slots; multi-key commands require same-slot keys via `{hashtag}` syntax.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Stampede awareness** — cache stampedes are the canonical "expected outage" most teams under-engineer until it bites them. Staff candidates name single-flight + stale-while-revalidate + probabilistic refresh without prompting. (2) **Production triage** — the "cache hit rate dropped to 70% after a deploy" question is graded on suspect ordering: key format change (most common), TTL change, deploy invalidation, working set growth, request-scoped value bug. The right answer names the diagnostic ("log a hash of the cache key per request"). (3) **Redis-specific operational knowledge** — knowing that `KEYS *` and `LRANGE 0 -1` block every other client on a single-threaded data plane separates candidates who've operated Redis from candidates who've only used it. Pipelining, Lua scripts, hash slot constraints, RDB vs AOF persistence — these are operational facts, not theory.
+
+**Common confusions**
+
+- "Cache invalidation is the hard part" — it's hard, but stampedes are usually what kills you first.
+- "Bigger cache = higher hit rate" — only up to the working set size; past that, working-set-rotation breaks LRU.
+- "Write-through is always safer than write-back" — only against cache failure; against DB failure, both have data loss windows.
+- "Redis is multi-threaded now" — Redis 6+ has multi-threaded I/O, but command execution is still single-threaded.
+- "Stale-while-revalidate breaks freshness guarantees" — it's the right answer for almost all user-facing reads; tighten only where freshness is a hard requirement.
+- "LRU is always good enough" — it's vulnerable to scans (one batch job wipes the working set); W-TinyLFU is empirically better.
+
+**What follows from this topic**
+
+Caching feeds CDN behaviour (Networking), eviction policies cross-reference Memory Management, hot key handling parallels the whale problem in Database Scaling, and stampedes are the canonical example of "what fails first under correlated load". Materialised views (Data Modelling) are a cousin of write-through caching — pre-compute on write, read-optimised storage of the answer.
+
 ### Q33. Cache-aside vs read-through vs write-through vs write-back — what's the practical difference?
 
 **Cache-aside (lazy)**: app reads cache → on miss, reads DB → populates cache. Most common, app controls the contract. Race condition: two writers updating + invalidating in interleaved order. **Read-through**: cache fronts DB, knows how to load on miss. Cleaner code, hides DB. Harder to debug (cache is now a service). **Write-through**: write to cache *and* DB synchronously. Always-fresh cache, slower writes. **Write-back (write-behind)**: write to cache, async to DB. Fastest writes, **data loss risk on cache failure** before flush. The default for most apps: cache-aside with TTL + explicit invalidation on write.
@@ -211,6 +459,48 @@ Suspects in order: (1) **Key format change** — new deploy generates different 
 
 ## CAP, PACELC & Consistency Models
 
+### Summary
+
+**What this topic covers**
+
+The vocabulary distributed-systems engineers use to talk precisely about what their system actually guarantees under normal operation and under network partition. Six questions covering (1) **CAP** stated precisely — the choice between consistency and availability *only* applies during a partition, not always; (2) **PACELC** — the everyday extension that adds "else latency or consistency" so you can talk about the partition-free case (PA/EL systems like Cassandra and DynamoDB vs PC/EC systems like Spanner and HBase); (3) the **consistency hierarchy** from strict linearizability through sequential, causal, session guarantees (read-your-writes, monotonic reads), to eventual consistency; (4) **CRDTs** — conflict-free replicated data types that merge deterministically without coordination (Figma's multiplayer canvas, Automerge, Linear); (5) why **Spanner needs TrueTime** — bounded clock uncertainty + commit-wait gives external consistency globally; and (6) the senior interview angle — never just say "strongly consistent", always qualify with "for X operations under Y conditions".
+
+**Mental model**
+
+CAP is a **partition-time tradeoff**, not an always-on choice. The misrepresentation "pick 2 of 3" is wrong because outside partitions you get all three; the question is what you do *when* partitioned. PACELC is more useful day-to-day because it names the **always-on tradeoff** between latency (return fast from a local replica) and consistency (wait for global agreement). Most production systems live in the "else" clause most of the time — DynamoDB tables choosing eventually-consistent reads for 2× the throughput, Postgres replicas serving stale reads to lower primary load. The second mental shift: **consistency is a lattice, not a binary**. Linearizable is the strongest single-key guarantee; serializable extends to transactions; sequential is weaker; causal is weaker still; session guarantees layer on top of any of these. Eventual consistency is the floor — replicas converge if writes stop. Production systems pick a level per operation: payment writes might be linearizable, profile reads eventually consistent. The third mental shift: **time itself is a distributed-systems problem**. Spanner's TrueTime — GPS + atomic clocks giving a *bounded uncertainty interval* — exists because without a global clock, you can't tell which of two writes happened first. The commit-wait latency is the price of external consistency at planetary scale.
+
+**Key terms**
+
+- **CAP** — under partition, choose Consistency or Availability. The "P" is unavoidable, the choice is C vs A.
+- **PACELC** — extends CAP: if Partition then A or C, Else Latency or Consistency. Captures everyday tradeoff.
+- **Linearizable** — appears atomic, single-copy illusion; the strongest single-object consistency.
+- **Serializable** — strongest transactional consistency; result equivalent to some serial order.
+- **Sequential consistency** — total order, same on every node, not necessarily real-time.
+- **Causal consistency** — causally related ops seen in order; concurrent ops can be seen in any order.
+- **Session guarantees** — read-your-writes, monotonic reads, monotonic writes, writes-follow-reads.
+- **Eventual consistency** — replicas converge if writes stop; no order guarantees during convergence.
+- **CRDT** — conflict-free replicated data type; merges deterministically; G-Counter, PN-Counter, OR-Set, LWW-Set, RGA.
+- **External consistency (Spanner)** — linearizability across globally distributed transactions.
+- **TrueTime** — Google's GPS+atomic-clock service returning `[earliest, latest]` uncertainty intervals.
+- **Commit-wait** — Spanner waits out timestamp uncertainty before acking, ensuring monotonic ordering.
+
+**Why interviewers ask this**
+
+Two signals. (1) **Precision of language**. Staff candidates never say "strongly consistent" without qualifying; they say "linearizable for X within a single region, eventually consistent with up to 100ms lag on cross-region reads". They name PACELC labels with reasons — "PA/EL: we accept stale reads to keep p99 < 10ms in normal operation". (2) **Knowing the production systems**. Naming Spanner, DynamoDB, Cassandra, Redis CRDT modules, Figma's collaborative canvas, Automerge — and explaining what consistency model each implements — proves you've read past the textbook chapter. CRDTs are the test case for whether you've actually built multi-region active-active: G-Counter for grow-only counters, OR-Set for observed-remove sets, LWW-Element-Set for last-write-wins, RGA for collaborative text. Production deployments are Linear, Figma, Notion, Redis CRDT.
+
+**Common confusions**
+
+- "CAP says pick 2 of 3" — wrong; partition is given, the choice is C vs A *during* partition.
+- "Eventually consistent = wrong" — eventual is fine for counters, feeds, notifications, search; reserve stronger guarantees for money and identity.
+- "Strong consistency requires Spanner" — no; single-leader Postgres in one region is strongly consistent. Spanner is for *global* strong consistency.
+- "CRDTs solve all multi-region writes" — they solve mergeable structures; complex business invariants still need coordination.
+- "Linearizability and serializability are the same" — linearizability is single-object real-time order; serializability is multi-object transactional order. Different axes.
+- "Read-your-writes is automatic in async replication" — explicitly the opposite; you need primary-routing or causal tokens.
+
+**What follows from this topic**
+
+Consistency vocabulary feeds Consensus (Raft provides linearizability), Database Scaling (replication topology maps to PACELC), Messaging (exactly-once requires application-level idempotence on top of at-least-once delivery), and Tradeoff Vocabulary (the consistency-vs-availability axis is named explicitly). The discipline of qualifying consistency claims with operation + condition generalises to all senior interview answers.
+
 ### Q39. CAP — explain it precisely.
 
 Under network **partition** (P), a distributed system must choose between **consistency** (C — every read sees the latest write) and **availability** (A — every request gets a non-error response). Most popular misrepresentation: "you must pick 2 of 3." Wrong — CAP only applies during partitions; outside partitions, you can have both C and A. The real choice is: *when partitioned, do I refuse writes (CP, like Spanner) or accept potentially-stale reads/writes (AP, like Cassandra)?* And outside partitions, **PACELC** captures the everyday tradeoff.
@@ -238,6 +528,49 @@ Never just say yes. The right answer: *"strongly consistent for X operations und
 ---
 
 ## Distributed Consensus & Coordination
+
+### Summary
+
+**What this topic covers**
+
+How a group of nodes agrees on a single answer when answers must not diverge — leader election, distributed locking, atomic commit, cluster metadata, unique ID allocation. Eight questions across (1) **why consensus is needed at all** — wherever divergent answers cause irreversible harm; (2) **Raft explained to implementation depth** — followers / candidates / leaders, election with random timeouts, log replication, commit on majority, safety via the up-to-date-log rule; (3) **Paxos vs Raft** — same guarantees, dramatically different understandability; (4) **split-brain** and the **fencing token** discipline — STONITH, epochs, monotonic tokens — and Kleppmann's "Redlock isn't safe" argument; (5) **distributed locks** stratified by criticality — `SETNX` for best-effort, etcd/ZooKeeper/Consul for serious work, idempotent design when correctness matters; (6) **when you need consensus vs accepting eventual** — the 80/20 between control plane and data plane; (7) **two-phase commit's failure mode** and why sagas largely replaced it; and (8) **gossip protocols** (SWIM, Cassandra cluster membership, Consul Serf) that converge in O(log N) without central coordination.
+
+**Mental model**
+
+Consensus is **expensive**, so the senior discipline is to **minimise where you use it**. Push consensus to the edges of the system — leader election, configuration changes, cluster membership transitions — and keep the data plane local. Every Raft round trip costs you a network RTT to majority; every distributed lock acquisition is a coordination point that can break under partition; every consensus dependency is an availability dependency. Production systems converge on a layered pattern: **etcd / Consul / ZooKeeper for the control plane** (a tiny amount of metadata coordinated rigorously), **gossip for membership** (eventually consistent, scales horizontally), and **app logic for the data plane** (idempotent operations, deduplication, local consistency). The second mental shift: **clocks are not synchronisation**. Distributed locks based on TTLs can dual-grant under clock skew + GC pause + network delay — fencing tokens are how you get safety from a stale leader (the resource itself rejects writes with an older token). Kleppmann's canonical Redlock critique is mandatory reading. The third shift: **2PC is dead for cross-service work** — coordinator failure between prepare and commit blocks participants indefinitely. Modern designs use sagas with compensating actions, or pull cross-service work back to single-shard transactions.
+
+**Key terms**
+
+- **Consensus** — agreement on a single value across a quorum of nodes; survives `f` failures with `2f+1` total.
+- **Raft** — Diego Ongaro's understandable consensus algorithm; etcd, Consul, CockroachDB, TiKV, MongoDB.
+- **Paxos** — foundational consensus algorithm; Google Chubby, Spanner; famously hard to understand.
+- **Leader election** — single node serves as coordinator; failover via randomised election timeouts.
+- **Log replication** — leader appends entries, replicates to majority, commits when acknowledged.
+- **Term / epoch** — monotonic generation number; protects against stale leaders accepting writes.
+- **Split-brain** — two nodes both think they're leader; classic consequence of network partition + missing fencing.
+- **STONITH** — Shoot The Other Node In The Head; power-level fencing of a suspected stale leader.
+- **Fencing token** — monotonic token issued with each lease; resource rejects writes with stale tokens.
+- **Distributed lock** — coordination primitive; tier by criticality (best-effort SETNX vs Raft-backed leases).
+- **Two-phase commit (2PC)** — coordinator-driven atomic commit; blocks on coordinator failure.
+- **Saga** — multi-step workflow with compensating actions; replaces 2PC for cross-service consistency.
+- **Gossip protocol** — epidemic state propagation; SWIM, Cassandra, Consul Serf; O(log N) convergence.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Raft implementation depth** — "explain Raft well enough that I'd believe you could implement it" is the canonical filter; the right answer names follower/candidate/leader states, election timeouts (150-300ms randomised), AppendEntries, majority-commit, and the up-to-date log safety rule. (2) **Production-grade lock answer** — naming three tiers (best-effort SETNX, etcd/ZooKeeper for serious work, idempotent design for correctness-critical) and referencing the Antirez/Kleppmann debate proves you've read past Redis tutorials. (3) **Consensus avoidance instinct** — the right framing is "where in this design do we *need* consensus vs accept eventual + reconcile?" Staff candidates push coordination to the edges; juniors sprinkle distributed locks throughout the design.
+
+**Common confusions**
+
+- "Raft is faster than Paxos" — same guarantees, similar performance; the win is understandability, not speed.
+- "Distributed locks work like local mutexes" — they don't; clock skew, GC pauses, and network delay create dual-grant windows.
+- "Redlock is safe if you use multiple Redis instances" — Kleppmann showed it isn't, due to missing fencing tokens.
+- "2PC is fine if the coordinator is reliable" — coordinator failure between phases blocks every participant; no clean recovery.
+- "Gossip is unreliable" — gossip is eventually correct; for membership, that's the right tradeoff.
+- "We need consensus for every cross-service operation" — most cross-service work is sagas + idempotency, not 2PC.
+
+**What follows from this topic**
+
+Consensus feeds Database Scaling (Raft underpins CockroachDB, TiKV, Spanner's Paxos groups), Messaging (KRaft replaces ZooKeeper in Kafka), Resilience (idempotency keys + fencing tokens are the alternative to locks), Sagas (the modern 2PC replacement), and Anti-patterns (coordination on the hot path is a smell). The discipline of "consensus at the edges, eventual at the core" generalises to all distributed designs.
 
 ### Q45. Why do we need consensus at all?
 
@@ -275,6 +608,48 @@ Epidemic-style state propagation: each node periodically picks a few peers at ra
 
 ## Messaging, Queues & Streaming
 
+### Summary
+
+**What this topic covers**
+
+The async substrate that connects services together when synchronous chains stop scaling. Eight questions across (1) the precise distinctions between **queues** (SQS, RabbitMQ — point-to-point, consumed once), **logs** (Kafka, Pulsar, Kinesis, Redpanda — append-only, replayable, retention-based), and **pub/sub** (Redis pub/sub, Google Pub/Sub — fan-out, often ephemeral); (2) **at-least-once vs exactly-once** and the senior truth that exactly-once is at-least-once + idempotency across system boundaries; (3) the **outbox pattern** for solving the dual-write problem (DB + Kafka in the same transaction); (4) **Change Data Capture** (Debezium, Maxwell, AWS DMS) as the WAL-streaming alternative to dual writes; (5) **Kafka mechanics** — partitions as the unit of ordering and parallelism, consumer groups, the `hash(key) % partitions` placement rule; (6) **backpressure** — bounded queues with explicit policies (block, drop, shed) as the alternative to unbounded OOM-bound queues; (7) the senior diagnostic on consumer-falls-behind-by-an-hour catch-up; and (8) **stream processing** — stateless vs stateful, windowing types, the event-time vs processing-time distinction, and watermarks.
+
+**Mental model**
+
+Messaging shifts the **coupling axis** from spatial (service A calls service B's IP) to temporal (A produces an event when convenient, B consumes when capable). That's the operational win: A doesn't fail when B is down, B can be scaled or replaced without A noticing. The cost: **delivery semantics become an application concern**. At-least-once is the default for serious systems; exactly-once is a marketing claim across system boundaries. The right framing is "at-least-once delivery + idempotent consumers = effective exactly-once". The second mental shift: **logs replaced queues for most modern workloads**. A queue throws away the message after ack; a log retains it for hours-to-days, lets consumers track their own offset, supports replay (reset to T-30min when a bug ships), and supports multiple consumer groups reading the same stream independently. Kafka, Pulsar, Kinesis, Redpanda all share this shape; LinkedIn, Uber, Airbnb, Confluent built modern data platforms on it. The third shift: **stream processing is the natural OLAP-on-data-in-motion**. Flink and Kafka Streams turn the log into a continuously-updated view; watermarks let you finalise event-time windows in the face of late data; RocksDB-backed state stores hold the aggregations.
+
+**Key terms**
+
+- **Queue** — point-to-point, consumed once, hard to replay. SQS, RabbitMQ, Celery.
+- **Log** — append-only ordered sequence, replayable, retention-based deletion. Kafka, Pulsar, Kinesis, Redpanda.
+- **Pub/sub** — fan-out broadcast, often without persistence. Redis pub/sub, Google Pub/Sub.
+- **At-least-once** — retry until acked; may duplicate; the production default with idempotent consumers.
+- **Exactly-once** — within-Kafka via transactions + idempotent producers; across systems, requires app-level idempotency.
+- **Outbox pattern** — write business state + event to outbox table in one DB txn; publisher reads outbox.
+- **CDC (Change Data Capture)** — stream DB WAL/binlog changes to Kafka. Debezium, Maxwell, DMS.
+- **Partition** — Kafka's unit of ordering and parallelism; `hash(key) % partitions` placement.
+- **Consumer group** — set of consumers; each partition consumed by exactly one within the group.
+- **Backpressure** — propagate slowness from consumer to producer; bounded queues with block/drop/shed policies.
+- **Watermark** — event-time threshold for finalising stream windows in the face of late data.
+- **Compacted topic** — Kafka retention by latest-per-key; powers KTable materialised views.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Delivery-semantics precision** — the candidate who claims "Kafka gives exactly-once" loses the room; the candidate who says "at-least-once with idempotent consumers, with Kafka transactional API for exactly-once *within Kafka*" wins it. (2) **The outbox pattern** is the canonical solution to the dual-write problem, and it's the test for whether you've actually shipped event-driven services. The right framing: "we wrote to the DB and Kafka in the same code path, one of them eventually failed, we hit inconsistency we couldn't recover from, we moved to outbox + idempotent consumers". (3) **Catch-up calculus** — partition count is the ceiling on consumer parallelism; that's a design-time decision you can't undo retroactively for existing data. The senior signal is naming this constraint without prompting.
+
+**Common confusions**
+
+- "Kafka is a queue" — it's a log; messages persist, consumers track offsets, replay is supported.
+- "Exactly-once is a Kafka feature" — only within Kafka; cross-system exactly-once doesn't exist without idempotency.
+- "CDC replaces application events" — partly; CDC events are tied to DB schema, harder to evolve than domain events.
+- "Unbounded queues are fine if you have memory" — they hide the imbalance until OOM; bound them.
+- "More consumers = more throughput" — only up to partition count; extra consumers in a group sit idle.
+- "Stream processing is just batch with smaller batches" — windowing, watermarks, and event-time semantics make it qualitatively different.
+
+**What follows from this topic**
+
+Messaging feeds Asynchronous & Event-Driven Patterns (EDA, event sourcing, CQRS all assume a reliable log), Resilience (backpressure replaces unbounded buffers, dead-letter queues handle poison messages), Data Modelling (Lambda vs Kappa architectures), and Modern Frameworks (Kafka KRaft, Flink, Temporal). The outbox + idempotent consumer pattern shows up in every serious cross-service consistency design.
+
 ### Q53. Queue vs log vs pub/sub — what's the actual distinction?
 
 **Queue** (SQS, RabbitMQ, Celery brokers): point-to-point, message removed after ack, hard to replay (it's gone). Producer-consumer one-to-one or one-to-N-competing. **Log** (Kafka, Pulsar, Kinesis, Redpanda): append-only ordered sequence, retention-based deletion (time or size), consumers track their own offset, **replayable** (reset to an earlier offset). Broadcast by topic — multiple consumer groups read independently. **Pub/sub** (Redis pub/sub, Google Pub/Sub): fan-out broadcast, often **without persistence** — if the subscriber's offline, the message is lost. Pick: queue for "one worker handles each job", log for streaming/replay, pub/sub for fire-and-forget broadcasts.
@@ -310,6 +685,48 @@ When a fast producer outpaces a slow consumer, *something* has to give: queue gr
 ---
 
 ## Resilience & Failure Patterns
+
+### Summary
+
+**What this topic covers**
+
+The eleven patterns that turn a brittle distributed system into one that degrades gracefully under load and recovers cleanly from faults. Questions cover (1) **timeouts** — the rule that they must decrease as you go deeper; (2) **retries** — exponential backoff with full jitter, retry budgets, bounded attempts, error-class discrimination; (3) **circuit breakers** — closed/open/half-open states and the tuning trade-offs; (4) **bulkheads** — resource pool isolation per dependency or tenant; (5) **load shedding** — failing 10% fast vs 100% slow; (6) **rate limiting** — token bucket vs leaky bucket vs fixed window vs sliding window; (7) **hedged requests** — Google's "tail at scale" technique that doubles capacity for 1% of requests; (8) **idempotency keys** — the canonical Stripe pattern; (9) **sagas** — orchestration vs choreography for cross-service consistency; (10) the retry-storm diagnostic — synchronised retries amplifying a downstream blip into an outage; plus (11) Marc Brooker's exact framing of what backoff is *for* and his "deferring load doesn't work" argument.
+
+**Mental model**
+
+Resilience is **planning for partial failure as the steady state**, not the exception. The senior framing: every network call fails eventually, every dependency degrades, every retry strategy that doesn't include jitter will synchronise into a thundering herd, every queue without a bound is a future OOM. The right patterns compose: **timeouts** bound work, **retries with jitter** convert transient failures into success, **circuit breakers** fast-fail when retries won't help, **bulkheads** isolate failure to one dependency, **load shedding** drops work before queues build, **rate limits** stop one client from starving others. The second mental shift: **backoff has two purposes** (Brooker's framing) — let the downstream recover, and de-synchronise retries. Pure exponential gives you the first but not the second; jitter gives you the second. Capped exponential bounds the worst case. The third shift: **deferring load doesn't work**. If your offered load permanently exceeds capacity, queueing just defers pain — load shedding solves overload, backoff solves transient pain. AWS's Marc Brooker has written canonically on this; production teams who don't internalise it discover it during an outage. Hedged requests, idempotency keys, sagas — every modern resilience pattern is a specific composition of timeout + retry + circuit + bulkhead.
+
+**Key terms**
+
+- **Timeout ladder** — outer timeouts > inner timeouts; deepest call fails first, not last.
+- **Exponential backoff** — `base × 2^attempt`; classic shape; synchronises without jitter.
+- **Full jitter** — `random_between(0, min(cap, base × 2^attempt))`; AWS recommendation.
+- **Retry budget** — cap retries as % of original traffic; prevents 10× amplification storms.
+- **Circuit breaker** — closed (normal) / open (fast-fail) / half-open (probe). Hystrix, Polly, resilience4j.
+- **Bulkhead** — per-dependency resource pools (thread or semaphore); isolates failure blast radius.
+- **Load shedding** — drop work before queueing under overload; 503/429 fast over slow timeout.
+- **Token bucket** — refill at rate R, burst to capacity C; the standard rate-limit algorithm.
+- **Hedged requests** — fire to second replica at p95; eliminates tail amplification at 2× cost on slow tail.
+- **Idempotency key** — client-supplied unique key; server caches result; safe retry across the network.
+- **Saga** — multi-step transaction with compensating actions; orchestration (Temporal) vs choreography (events).
+- **Retry storm** — synchronised retries from missing jitter; canonical production outage shape.
+
+**Why interviewers ask this**
+
+Two signals. (1) **The retry storm question is the canonical filter**. Service A retries B with no jitter, B has a blip — what happens? The right answer names the storm, the synchronised intervals, the propagation upward as A becomes B's downstream's problem, and the three-part fix: full jitter, retry budget, circuit breaker. This is "the single most common production resilience failure" — staff candidates bring receipts from real outages. (2) **Brooker awareness** — citing Marc Brooker's AWS blog posts on backoff, load shedding, and the impossibility of deferring load is a 2026 staff-tier tell. The framing "backoff cannot solve long-term overload" separates engineers who've operated production from engineers who've read about it. (3) **Saga vs 2PC fluency** — knowing that orchestrated sagas (Temporal, Step Functions) handle complex cross-service workflows where 2PC is dead is the modern senior baseline.
+
+**Common confusions**
+
+- "Retries make systems more reliable" — only with jitter, budgets, idempotency, and circuit breakers. Naive retries amplify outages.
+- "Circuit breakers fix the downstream" — they protect *you* from the downstream; the downstream still needs fixing.
+- "Hedged requests are free" — they double capacity at the tail; reserve for idempotent reads with spare capacity.
+- "Idempotency keys are optional" — they're mandatory for any operation a client might retry across a network failure.
+- "Queues smooth bursts" — bounded queues do; unbounded queues hide the problem until OOM.
+- "Load shedding is giving up" — it's the discipline that keeps the system serving the requests it *can* serve.
+
+**What follows from this topic**
+
+Resilience patterns feed Anti-patterns (synchronous chains, unbounded queues, missing fencing tokens are the smells), Cost & Capacity (60-70% utilisation rule absorbs the headroom resilience needs), Observability (SLOs and error budgets quantify the resilience target), and Modern Frameworks (Temporal as the orchestrated-saga substrate). Bring one war story per pattern; they're the questions interviewers love most.
 
 ### Q61. What's the right way to set timeouts across a system?
 
@@ -363,6 +780,48 @@ A common naive defence against overload: "we'll buffer the excess requests and p
 
 ## Asynchronous & Event-Driven Patterns
 
+### Summary
+
+**What this topic covers**
+
+The three architectural ideas that are constantly confused and the operational discipline that makes them work at scale. Five questions across (1) **EDA vs event sourcing vs CQRS** — distinct ideas often conflated; EDA is about service-to-service communication via events, event sourcing makes events the source of truth, CQRS separates the read model from the write model; (2) **when event sourcing is actually worth it** — audit history requirements, multiple projections, time-travel debugging, against the real cost of schema evolution being permanent; (3) **the trigger for CQRS** — when read and write shapes diverge enough that one model serves both badly; (4) **materialised views** — pre-computed query results trading write cost for read latency (Postgres `MATERIALIZED VIEW`, ClickHouse, Kafka Streams `KTable`); and (5) **schema evolution maturity** — backward, forward, and full compatibility, schema registries (Confluent, Apicurio), Avro / Protobuf for binary efficiency plus schema enforcement.
+
+**Mental model**
+
+Asynchronous architectures are the **natural response to synchronous chains failing**. When A → B → C → D synchronously, latency multiplies, failure probability multiplies, and partial-failure handling is exponential in the number of hops. Event-driven decoupling lets each service own its own pace and failure model. The second mental shift: **events are forever**. Once you publish an event into Kafka with a topic retention of 7 days, you can no longer change its schema without thinking about every consumer that might replay it. Schema registries with backward + forward compatibility checks are how mature teams enforce this discipline — Confluent Schema Registry blocks breaking changes at publish time, Avro and Protobuf give binary efficiency plus typed contracts. The third shift: **event sourcing is not the default**. Most CRUD apps don't need replayable history; the trigger is genuine audit / regulatory / time-travel requirements, and the cost is permanent schema evolution discipline plus snapshots for replay performance. CQRS is similarly conditional — the trigger is genuine read/write shape divergence (reads do 10 joins because writes are normalised), and the cost is eventual consistency between write commit and read visibility. Materialised views (`CREATE MATERIALIZED VIEW`, Kafka Streams KTables, ClickHouse materialised views) are the practical CQRS substrate — denormalised pre-computed views fed by events.
+
+**Key terms**
+
+- **EDA (Event-Driven Architecture)** — services react to events; loose coupling; A emits "OrderPlaced", B reacts.
+- **Event sourcing** — events are the source of truth; state is derived by replay; audit is free.
+- **CQRS** — separate write model from read model; reads served from specialised projections.
+- **Materialised view** — pre-computed query result, persisted, refreshed on write or async.
+- **Projection** — derived read model built from an event stream; CQRS's read side.
+- **Snapshot** — checkpoint of derived state; speeds replay on large event streams.
+- **Schema evolution** — adding/removing/changing fields over time without breaking consumers.
+- **Backward-compatible** — new readers handle old data; the "add optional field" case.
+- **Forward-compatible** — old readers handle new data; the "ignore unknown field" case.
+- **Schema registry** — Confluent / Apicurio centralised schema versioning + compatibility enforcement.
+- **Avro / Protobuf** — binary serialisation + schema enforcement; the production default.
+- **Upcaster** — code that transforms old event shapes into new for consumers reading historic streams.
+
+**Why interviewers ask this**
+
+Two signals. (1) **Distinguishing the three concepts** — confusing EDA with event sourcing with CQRS in a senior interview is a junior tell. The right framing: "you can do EDA without event sourcing (most production EDA is just topic-driven pub/sub on top of mutable databases), you can do CQRS without event sourcing (read replicas are a degenerate CQRS), and event sourcing is the strongest commitment that often appears with CQRS but doesn't require it." (2) **The cost-aware adoption story** — staff candidates resist event sourcing for CRUD apps and reach for it only when audit, multiple projections, or time-travel debugging genuinely justifies the schema-evolution-forever cost. The same applies to CQRS — the trigger is read/write divergence, not "scale". Naming the cost (eventual consistency, schema-as-immutable-contract, snapshot logistics) is what separates someone who's deployed these from someone who's read about them.
+
+**Common confusions**
+
+- "Event sourcing = event-driven" — distinct; event sourcing is about storage semantics, EDA is about communication.
+- "CQRS doubles complexity" — only when separate models are warranted; degenerate CQRS (read replicas) is fine.
+- "Materialised views are always faster" — for reads yes, but write amplification can be brutal at high write rates.
+- "Schema evolution is just adding fields" — renames, removals, type changes all need versioning + upcasters.
+- "Event sourcing replaces databases" — it complements them; you still need projections for queries.
+- "JSON schemas are good enough" — for low-stakes, yes; for production EDA at scale, Avro/Protobuf with a registry pays off.
+
+**What follows from this topic**
+
+EDA primitives feed Messaging (the substrate), Data Modelling (Lambda/Kappa, Twitter timeline, materialised view dashboards), Search (CDC-fed search indexes), Real-Time (live projections via WebSocket/SSE), and Resilience (sagas as orchestrated event flows). The schema-evolution discipline is the test for whether your event-driven design is operationally mature.
+
 ### Q71. Event-driven architecture vs event sourcing vs CQRS — distinguish them.
 
 Three distinct ideas, often conflated. **EDA**: services react to events; loose coupling — service A emits "OrderPlaced", service B reacts. **Event sourcing**: events are the *source of truth*; state is derived by replaying. Past state is reconstructible; audit is free. **CQRS**: separate write model from read model; the read side has multiple specialised projections (one for the API, one for search, one for analytics). You can do EDA without event sourcing; you can do CQRS without event sourcing; you can do event sourcing without CQRS — but they often appear together because they reinforce each other.
@@ -387,6 +846,48 @@ Schemas change; events live forever. **Backward-compatible**: new readers handle
 
 ## Data Modelling & Aggregation Patterns
 
+### Summary
+
+**What this topic covers**
+
+The shape decisions that determine read latency, write amplification, and the operational complexity of an analytics tier. Four questions covering (1) **normalised vs denormalised** — facts stored once vs duplicated for read speed; default to normalised at the source of truth and denormalise in derived views; (2) the **Twitter timeline problem** — three canonical approaches (fanout-on-write, fanout-on-read, hybrid) and why the hybrid is the actual production answer; (3) **Lambda vs Kappa architecture** — Nathan Marz's batch-plus-speed dual-pipeline vs Jay Kreps's streaming-only single-pipeline, and why Kappa won most modern use cases; and (4) the staff-tier decision framework for **pre-computation vs on-demand** along three axes: read-write ratio, staleness tolerance, result size.
+
+**Mental model**
+
+Data modelling is a **read-vs-write tradeoff continuum**. Normalised storage minimises write amplification (each fact lives once, updates are localised) at the cost of read complexity (joins for queries). Denormalised storage minimises read latency (no joins, pre-computed answers) at the cost of write fanout (every update touches N copies) and the risk of inconsistency between copies. Production systems live in the middle: **normalised at the source of truth, selectively denormalised in derived views** (search indexes, caches, materialised views, read-optimised projections). The second mental shift: **fanout direction is a scale decision**. Twitter's timeline is the canonical example — push (fanout-on-write) means O(1) reads but catastrophic writes for celebrities with millions of followers; pull (fanout-on-read) means O(1) writes but slow reads for users following many people. The hybrid — push for normal users, pull for celebrities, merged on read — is the actual production answer at Twitter, Instagram, and every modern feed product. The third shift: **Kappa won for most workloads**. Lambda's dual batch + speed layer was right when streaming infrastructure was immature; modern Flink / Kafka Streams / Materialize / RisingWave gives you streaming accuracy without the dual-codepath cost. Lambda survives in legacy and where batch is genuinely cheaper.
+
+**Key terms**
+
+- **Normalised** — each fact stored once; updates localised; joins required for queries.
+- **Denormalised** — duplicated data; updates fan out; reads are fast.
+- **Fanout-on-write (push)** — write copies to all consumers at write time; O(1) reads, O(followers) writes.
+- **Fanout-on-read (pull)** — assemble at read time; O(1) writes, O(followers × posts) reads.
+- **Hybrid fanout** — push for normal users, pull for celebrities, merged on read; Twitter's actual approach.
+- **Lambda architecture** — batch layer (Hadoop, daily) + speed layer (Storm/Spark streaming) + serving layer.
+- **Kappa architecture** — streaming-only; reprocess from log when you need a different view.
+- **Materialised view** — pre-computed query result, persisted; trades write cost for read latency.
+- **Rollup pyramid** — pre-compute top-level aggregations, query on-demand for drill-downs.
+- **Star schema** — analytics shape; fact table + dimension tables; columnar warehouse convention.
+- **Selective denormalisation** — normalised source of truth + denormalised derived views; production default.
+- **Aggregation pre-computation** — trade storage for query-time CPU; the dashboard / leaderboard default.
+
+**Why interviewers ask this**
+
+Two signals. (1) **The Twitter timeline question is the canonical filter** for whether you understand fanout-direction tradeoffs at scale. The wrong answer picks one approach; the right answer names all three, identifies the celebrity threshold problem with pure push, identifies the slow-read problem with pure pull, and lands on the hybrid. Bonus points for naming the celebrity threshold (typically follower count > some N) as the explicit policy. (2) **The pre-computation framework** is the staff-tier 2026 signal — the three axes (read frequency vs write frequency, staleness tolerance, result size) plus the right answer ("rollup pyramids: pre-compute top-level, on-demand for drill-downs") prove you've designed analytics systems. Naming ClickHouse, Druid, Pinot for live OLAP vs Snowflake/BigQuery for batch warehousing earns trust.
+
+**Common confusions**
+
+- "Normalised is always cleaner" — only if reads are infrequent; for read-heavy systems, selective denormalisation is the right call.
+- "Fanout-on-write is more scalable" — only for users with bounded follower counts; breaks catastrophically for celebrities.
+- "Lambda is the modern shape" — Kappa replaced it for most workloads; Lambda survives in legacy.
+- "Pre-computation is always faster" — only when reads dominate writes; for sparse queries on huge data, on-demand wins.
+- "Materialised views are free" — write amplification can be brutal; refresh policy is a real tuning problem.
+- "Denormalisation breaks consistency" — only if not designed for it; events + projections give bounded eventual consistency.
+
+**What follows from this topic**
+
+Data modelling feeds Search (denormalised search indexes via CDC), Caching (materialised views are write-through caches with persistence), Database Scaling (read replicas are degenerate denormalisation), and Real-Time (live aggregates via streaming materialised views — Materialize, RisingWave, ClickHouse). The fanout-direction decision recurs in feed products, notifications, presence systems, and dashboards.
+
 ### Q76. Normalised vs denormalised — when do you pick which?
 
 **Normalised**: each fact stored once; updates are localised; joins required for queries. Default for OLTP systems with frequent writes and updates. **Denormalised**: duplicate data across tables/documents; updates fan out to all copies; reads are fast (no joins). Default for read-heavy systems, OLAP, document stores. Mixed reality: most systems are **selectively denormalised** — normalised at the source of truth, denormalised in derived views (search indexes, caches, read replicas with different schemas). Don't denormalise prematurely — joins are cheap until they're not.
@@ -406,6 +907,48 @@ Three axes. (1) **Read frequency vs write frequency** — if a query is run 1000
 ---
 
 ## Search
+
+### Summary
+
+**What this topic covers**
+
+How modern search engines actually find relevant documents, how relevance scoring evolved from TF-IDF to BM25 to hybrid lexical-plus-vector, and the operational threshold for graduating from Postgres FTS to dedicated search infrastructure. Four questions across (1) **Elasticsearch / OpenSearch internals** — inverted index, tokenisation chain, shards as self-contained Lucene indexes, near-real-time refresh, segment merges; (2) **BM25 vs TF-IDF** — the saturation and length-normalisation refinements that made BM25 the universal modern baseline; (3) **hybrid search in 2026** — BM25 for lexical precision plus vector ANN for semantic match, combined via Reciprocal Rank Fusion, with cross-encoder rerankers on top-K, now the standard for RAG and modern search; and (4) **when Postgres FTS stops being enough** — multilingual analysers, faceting at scale, write-rate ceilings, relevance tuning, hybrid lexical-plus-vector requirements.
+
+**Mental model**
+
+Search is the canonical **inverted-index problem**: given a query, find documents containing matching terms, then rank by relevance. The tokenisation chain — lowercase, stopword removal, stemming, synonyms — determines what counts as a match; the scoring function determines what counts as relevant. BM25 replaced TF-IDF because two empirical refinements proved out: **term frequency saturates** (doubling a word's count doesn't double relevance), and **document length normalises** (a short doc matching once is more relevant than a long doc matching once). Both are tunable via `k1` and `b` — production search teams tune these for their corpus. The second mental shift: **search in 2026 is hybrid**. Lexical search (BM25) is precise but misses paraphrases and synonyms; vector ANN search captures semantic similarity but misses exact matches and proper nouns. Running both and combining via **Reciprocal Rank Fusion** (`sum(1 / (k + rank))`) is robust and parameter-light. The top of the funnel is then reranked by a cross-encoder for quality. This is the standard RAG retrieval architecture, and it's the modern search-product architecture (Algolia, Elastic, Vespa). The third shift: **Postgres FTS handles 1M docs and basic relevance trivially** — the senior call is when to leave it for Elasticsearch / OpenSearch / Tantivy / Meilisearch / Typesense vs Vespa.
+
+**Key terms**
+
+- **Inverted index** — term → list of doc IDs; the foundational search data structure.
+- **Tokenisation chain** — lowercase + stopword removal + stemming + synonyms + n-grams.
+- **Shard** — partition of an index; self-contained Lucene index; fixed at index creation.
+- **Segment** — immutable Lucene file; merged in the background to keep count manageable.
+- **Refresh interval** — Elasticsearch's near-real-time visibility window (default 1s).
+- **TF-IDF** — term frequency × inverse document frequency; classic relevance scoring.
+- **BM25** — TF-IDF with saturation + length normalisation; modern default; `k1`, `b` tunable.
+- **Vector ANN search** — approximate nearest neighbour on embeddings; HNSW, IVF, ScaNN.
+- **Hybrid search** — BM25 + vector ANN; combined via Reciprocal Rank Fusion.
+- **Reciprocal Rank Fusion (RRF)** — `sum(1 / (k + rank_i))`; parameter-light, robust combiner.
+- **Cross-encoder reranker** — neural model rerank of top-K for quality; expensive but accurate.
+- **Postgres FTS** — `tsvector` / `tsquery` / GIN indexes; fine to ~1M docs and basic relevance.
+
+**Why interviewers ask this**
+
+Two signals. (1) **Hybrid search awareness** — 2026 staff-tier search answers default to "BM25 + vector ANN + RRF + cross-encoder rerank for top-K". Candidates who still say "Elasticsearch with BM25" without mentioning vectors are signalling they haven't tracked the field since 2023. The RAG section of this primer reinforces the same architecture. (2) **The Postgres-to-Elasticsearch threshold** — knowing when to leave Postgres FTS (multilingual, faceting at scale, relevance tuning, write rate, hybrid requirements) and when Postgres is still the right answer (under 1M docs, basic relevance) is the cost-aware-adoption signal. The right framing: "Postgres FTS until I hit a specific limit, then I'd evaluate Elasticsearch vs Vespa vs Typesense for my specific failure mode".
+
+**Common confusions**
+
+- "BM25 is the same as TF-IDF" — BM25's saturation + length normalisation are meaningful improvements.
+- "Vector search replaces lexical search" — it complements; exact-match precision is still BM25's domain.
+- "Reranking is optional" — top-K hybrid retrieval plus cross-encoder rerank is where modern search quality lives.
+- "Elasticsearch is always better than Postgres FTS" — under 1M docs, the operational cost rarely justifies the migration.
+- "Synonyms are easy" — multilingual synonyms, domain-specific synonyms, and synonym precision/recall trade-offs are hard.
+- "ANN search is exact" — it's approximate; recall trades against latency and memory via HNSW parameters.
+
+**What follows from this topic**
+
+Search feeds AI / LLM Infrastructure (RAG retrieval pipelines), Data Modelling (search indexes as denormalised CDC-fed projections), Real-Time (live indexing via Kafka Connect / Elasticsearch sink), and Cost & Capacity (Elasticsearch is operationally expensive — earn it). The hybrid lexical + vector + reranker stack is the 2026 reference architecture for any retrieval problem.
 
 ### Q80. Walk me through how Elasticsearch / OpenSearch actually works.
 
@@ -427,6 +970,48 @@ Postgres FTS is fine until: (1) **multilingual** — Postgres has per-language c
 
 ## Geospatial, Time-Series & Real-Time
 
+### Summary
+
+**What this topic covers**
+
+The spatial indexing systems and real-time push protocols that underlie ridesharing, delivery, social presence, and live-update products. Four questions: (1) the **three spatial indexing systems** — Geohash (recursive grid, Postgres/Redis-friendly), S2 (Google's hierarchical spherical cells, better near poles), and H3 (Uber's hexagonal grid with uniform neighbour distance); (2) the canonical **"drivers near me"** architecture — H3 cell + k-ring fetch + haversine distance ranking, with continuous WebSocket location updates decoupled from the matching engine; (3) **presence systems** — heartbeats every ~30s with TTL-based online/offline detection, debounced fanout to relevant audiences only; and (4) **real-time push to browsers** — SSE for one-way, WebSockets for bidirectional, FCM/APNs for offline mobile, composed appropriately rather than picking WebSockets reflexively.
+
+**Mental model**
+
+Spatial problems are **bucketing problems**. The earth's curvature, distortion at the poles, and the awkwardness of square cells (your neighbours are at distances varying by sqrt(2)) drive different cell systems. Geohash is the simplest (base-32 string, prefix matching is easy) but suffers polar distortion and uneven neighbour distance. S2 (Google Maps, Foursquare) uses spherical cells that perform better globally. H3 (Uber's invention, now industry standard for ridesharing) uses **hexagons** because every cell has exactly 6 equidistant neighbours — which matters when you're computing "nearby" for matching. The second mental shift: **location updates and matching are two different services**. Drivers push location to a high-write location service (Redis with GEO commands, or H3-cell → driver-set in Redis Sorted Sets); riders query a matching engine that pulls from the location service via cell lookups. Coupling them is a scale anti-pattern. The third shift: **presence is a fanout problem disguised as a state problem**. The bug everyone hits at million-user scale is broadcasting presence updates globally — DDoS-ing your own backend. Production presence systems debounce updates (only on transitions, not every heartbeat) and scope fanout to relevant audiences (followers, conversation participants), not the global user base.
+
+**Key terms**
+
+- **Geohash** — recursive grid encoded as base-32 string; prefix length = precision; Postgres/Redis-friendly.
+- **S2** — Google's hierarchical spherical cells; better near poles; foundation of Google's geo systems.
+- **H3** — Uber's hexagonal grid; uniform neighbour distance; dominant in ridesharing / delivery.
+- **k-ring** — H3 query: a cell plus its neighbours out to radius k; used for "find within R meters".
+- **Haversine distance** — great-circle distance on a sphere; the standard "as the crow flies" metric.
+- **GEOADD / GEORADIUS (Redis)** — geospatial commands; sorted sets keyed by location.
+- **Heartbeat** — periodic client → server ping; presence and connection-alive detection.
+- **TTL-based presence** — `user:123 → last_heartbeat`; online if `last > now - 60s`.
+- **Debounced fanout** — broadcast on state transitions or periodic intervals, not every heartbeat.
+- **SSE (Server-Sent Events)** — unidirectional server→client; browser-native auto-reconnect.
+- **WebSocket** — full-duplex; sticky load balancing required; pub/sub fanout via Redis or Kafka.
+- **APNs / FCM** — Apple/Google push notification services; survive app-not-running.
+
+**Why interviewers ask this**
+
+Two signals. (1) **The "drivers near me" question is canonical for ridesharing / delivery prompts** — the right answer names H3 cells + k-ring + haversine + WebSocket-driven location updates + decoupled matching engine. Saying "Redis GEORADIUS" without acknowledging the cell-based architecture is the junior answer. (2) **Presence at scale is the senior trap** — naïve "broadcast presence to everyone" designs DDoS themselves at million-user scale. The right framing: debounce updates, scope fanout to relevant audiences, accept some staleness on the indicator. Naming H3 (Uber), S2 (Google), and Geohash (simple Postgres apps) with reasons earns trust.
+
+**Common confusions**
+
+- "Geohash is good enough" — for simple proximity it's fine; for ridesharing-grade matching, H3's uniform neighbours matter.
+- "WebSockets are the default for live updates" — SSE is simpler and right more often than people think.
+- "Presence is just a boolean per user" — at scale, fanout dominates; debouncing and audience scoping are the real problems.
+- "Spatial queries belong in the main DB" — high-write location data should be in Redis or a dedicated geo store, not your OLTP primary.
+- "k-ring of 1 is enough" — depends on cell size vs radius; large radii need larger k or you miss candidates.
+- "FCM/APNs replace WebSockets" — they're for offline / background push; in-app live uses WS/SSE.
+
+**What follows from this topic**
+
+Geospatial primitives feed AI / LLM Infrastructure (vector indexes are conceptually similar — bucketing high-dimensional space), Search (geo-faceting in Elasticsearch), Real-Time messaging (WebSocket gateways + Kafka fanout), and Caching (per-cell driver lists in Redis). The presence-fanout discipline generalises to all "broadcast at scale" problems including feed updates and chat.
+
 ### Q84. Geohash vs S2 vs H3 — when do you pick which?
 
 **Geohash**: recursive grid encoded as a base-32 string; prefix length = precision. Easy, Postgres/Redis-friendly. Downside: distortion near poles, neighbours can be in non-prefix-adjacent cells. **S2** (Google): hierarchical spherical cells; better near poles; the foundation of Google's geo systems. **H3** (Uber): hexagonal grid; uniform neighbour distance (every cell has 6 equidistant neighbours, vs squares' awkward diagonals); dominant in ridesharing / density / delivery dispatch. Pick H3 for ride-share-style "nearby drivers"; S2 for global mapping; Geohash for simple Postgres-based proximity.
@@ -446,6 +1031,50 @@ For one-way push (notifications, live updates): **SSE** (Server-Sent Events) —
 ---
 
 ## Observability, SLOs & Operations
+
+### Summary
+
+**What this topic covers**
+
+The signal, language, and deploy primitives of operating a production system the way 2026 staff interviewers expect. Six questions across (1) the **three pillars of observability** — logs, metrics, traces — plus the **fourth pillar** of continuous profiling (Pyroscope, Datadog Continuous Profiler, Parca); (2) **trace context propagation** with W3C `traceparent` and the canonical bug of dropping context across async boundaries; (3) the **SLO / SLI / SLA / error budget** system from the Google SRE book; (4) **multi-window multi-burn-rate alerting** as the SRE-recommended pattern for catching both fast and slow degradations; (5) **deployment strategies** — blue/green vs canary vs rolling vs feature-flagged dark deploys; and (6) **shadow / dark traffic** for validating new versions against real production load before exposing users.
+
+**Mental model**
+
+Observability is **the ability to ask new questions about your system without redeploying**. Logs answer "what happened at time T" (high cardinality, expensive to query at scale), metrics answer "what's the trend" (low cardinality, cheap to query), traces answer "where did this specific request spend its time across services" (the right tool for distributed systems), and continuous profiles answer "which function is slow without me reproducing the issue". The fourth pillar matters because at scale, perf regressions are statistically detectable in flame graphs but invisible in metrics. The second mental shift: **SLOs are the language of risk**. The SLO is your reliability target (99.9% over 30 days), the error budget (`1 - SLO`) is the badness you're allowed to spend on deploys, experiments, and controlled risk-taking; when you burn it, you freeze. Multi-burn-rate alerts catch both acute spikes (14.4× burn over 1 hour = paging) and slow degradations (6× burn over 6 hours = ticket) without the noise of raw error counts. The third shift: **deploy strategy is risk management, not deployment plumbing**. Blue/green for safety-critical infrequent releases (instant rollback at 2× cost), canary for continuous deploy (catch regressions at 1%-25%-100% steps), rolling for stateless services. Feature flags (LaunchDarkly, Unleash, OpenFeature) decouple deploy from release — ship code dark, enable per-segment.
+
+**Key terms**
+
+- **Logs** — discrete timestamped events; ELK / Loki / OpenSearch / Datadog.
+- **Metrics** — aggregated numerics over time; Prometheus, Grafana, Datadog.
+- **Traces** — request flow across services with span breakdowns; OpenTelemetry, Jaeger, Tempo, Honeycomb.
+- **Continuous profiling** — production CPU sampling; Pyroscope, Parca, Datadog.
+- **W3C traceparent** — header carrying trace ID + parent span ID across HTTP/gRPC.
+- **SLI** — Service Level Indicator; what you measure.
+- **SLO** — Service Level Objective; the target (99.9% / 30 days).
+- **SLA** — Service Level Agreement; external commercial contract with penalties.
+- **Error budget** — `1 - SLO`; the badness you can spend on deploys + experiments.
+- **Multi-burn-rate alerting** — fast burn (14.4× / 1h) + slow burn (6× / 6h); SRE-book pattern.
+- **Blue/green** — two full environments, swap traffic via LB; instant rollback at 2× infra cost.
+- **Canary** — gradual traffic shift (1% → 5% → 25% → 100%) with per-step SLO checks.
+- **Shadow traffic** — copy production traffic to new version without serving response.
+- **Feature flags** — LaunchDarkly / Unleash / OpenFeature; decouple deploy from release.
+
+**Why interviewers ask this**
+
+Three signals. (1) **SLO fluency** — staff candidates use SLO / SLI / SLA / error budget precisely, never interchangeably. The right framing is "we have a 99.9% SLO over 30 days, current 30-day burn is 0.5%, our error budget allows X risk this month". (2) **Multi-burn-rate alerting awareness** — citing the SRE book's specific pattern (14.4× / 1h + 6× / 6h) separates candidates who've operated SLO-driven systems from candidates who've read about them. (3) **Deploy strategy reasoning** — picking blue/green vs canary vs rolling with explicit reasons (safety-critical vs continuous deploy vs cheap stateless) and naming feature flags as the deploy/release decoupling primitive is the modern staff baseline. Shadow traffic is the senior signal for validating major rewrites or model deployments — Stripe, Netflix, and Google all use it heavily.
+
+**Common confusions**
+
+- "Observability = monitoring" — monitoring is for known-unknowns; observability is for unknown-unknowns. You add observability before you need it.
+- "SLA = SLO" — SLA is external + contractual; SLO is internal + operational. SLA penalties drive SLOs, not the other way.
+- "Alerting on error count is enough" — too noisy on bad minutes, misses slow degradations; burn rate is the right metric.
+- "Canary always works" — only if you have enough traffic for the % sample to be statistically meaningful at each step.
+- "Feature flags = config" — they're a deployment pattern; ship dark, enable per-segment, kill instantly on regression.
+- "Continuous profiling is too expensive" — sampling at 1% is virtually free and catches regressions metrics miss.
+
+**What follows from this topic**
+
+Observability primitives feed every other topic — Resilience needs SLOs to set retry budgets and circuit thresholds, Cost & Capacity needs metrics to size capacity at 60-70% utilisation, Anti-patterns are diagnosed via traces and profiles, AI / LLM Infrastructure needs TTFT and TPOT metrics as first-class. SLO-driven operations is the modern staff baseline; everything else assumes it.
 
 ### Q88. The three pillars of observability — and the fourth?
 
@@ -475,6 +1104,48 @@ Alerting on raw error counts is noisy (one bad minute fires constantly) and miss
 
 ## Security at the System Level
 
+### Summary
+
+**What this topic covers**
+
+The security primitives every senior engineer is expected to reason about at the system level — not application-bug-level OWASP details, but the design choices that determine whether a system is breach-resistant by construction. Six questions across (1) **AuthN vs AuthZ** and the canonical 2026 OAuth flows (Authorization Code + PKCE for public clients, Client Credentials for M2M); (2) **JWT** — stateless wins and the no-revocation-until-expiry catch; (3) **mTLS** — when service-to-service certificate authentication is worth the operational cost, and how service meshes hide it; (4) **authorization models** — RBAC vs ABAC vs ReBAC (Google Zanzibar-style, the modern SaaS default); (5) the **OWASP API Top 10** with BOLA (Broken Object Level Authorization) as the universally bites-everyone bug; and (6) the senior diagnostic on **protecting a public API from abuse** — layered defence from WAF through DDoS protection through rate limiting through bot detection.
+
+**Mental model**
+
+Security is **defence in depth**, not a single layer. Every production system pays for breaches in proportion to how thin its top layer is — WAFs catch known signatures, DDoS scrubbing absorbs volumetric attacks, rate limits stop credential stuffing, auth checks stop unauthenticated access, authorization checks stop cross-tenant data leaks. The BOLA problem is canonical: an endpoint that accepts an object ID, looks it up, and returns it *without* verifying the caller owns that object lets any authenticated user read any tenant's data with a simple ID enumeration. The fix is systemic — ReBAC plus middleware enforcement — not per-endpoint discipline. The second mental shift: **JWT is a stateless wins / no-revocation tradeoff**. Stateless tokens scale beautifully and need no session store, but you can't invalidate a JWT until it expires. The mitigation is short-lived access tokens (5-15 min) plus refresh tokens, or a fast revocation list in Redis that defeats statelessness in exchange for instant revoke. The third shift: **mTLS is a service mesh feature in practice**. Without Istio / Linkerd / Consul Connect's automatic cert rotation, mTLS is operational pain — manual cert distribution, expiry monitoring, rotation. With a mesh, it's transparent and is the right default for zero-trust networks.
+
+**Key terms**
+
+- **AuthN (authentication)** — "who are you"; login, MFA, SSO.
+- **AuthZ (authorization)** — "what can you do"; role / policy / relationship checks.
+- **OAuth 2.0 Authorization Code + PKCE** — modern public-client flow; prevents intercepted code reuse.
+- **OIDC** — OpenID Connect; sits on OAuth 2.0; adds identity claims via the ID token.
+- **JWT** — JSON Web Token; signed, stateless, no revocation until expiry.
+- **Refresh token** — long-lived, exchanged for short-lived access tokens; revocable server-side.
+- **mTLS** — mutual TLS; both client and server present certs; service-mesh default for zero-trust.
+- **RBAC** — Role-Based Access Control; users have roles, roles have permissions.
+- **ABAC** — Attribute-Based; policies = function of user/resource/context attributes.
+- **ReBAC** — Relationship-Based (Google Zanzibar); permissions defined via subject ↔ object relations.
+- **BOLA** — Broken Object Level Authorization; the most common API bug; per-object access not checked.
+- **WAF** — Web Application Firewall; Cloudflare, AWS WAF; signature-based attack blocking.
+
+**Why interviewers ask this**
+
+Two signals. (1) **JWT trade-off awareness** — the candidate who says "JWTs are stateless and great" without naming the revocation problem is signalling junior. The right framing is "short-lived JWTs plus refresh tokens for normal use, or stateful sessions when instant revoke matters; pick based on threat model". (2) **ReBAC fluency** — Google Zanzibar's relationship-based authorization is the backbone of Notion, Carta, Linear, and modern multi-tenant SaaS. Naming AuthZed/SpiceDB, Oso, OpenFGA as production implementations earns trust. The BOLA answer is the test for whether you've shipped multi-tenant APIs — the right fix is systemic middleware that checks ownership on every object access, not per-endpoint code review.
+
+**Common confusions**
+
+- "JWT = secure" — JWTs are signed, not encrypted by default. Don't put secrets in claims unless using JWE.
+- "OAuth implicit grant is still fine" — deprecated; use Authorization Code + PKCE.
+- "RBAC scales to all our needs" — RBAC breaks on fine-grained per-object permissions ("can user X edit document Y").
+- "mTLS without a mesh is doable" — operationally it's miserable; cert rotation, expiry, distribution are the killers.
+- "BOLA is just authentication" — it's authorization at the object level, not the endpoint level.
+- "Bot detection is just rate limiting" — Cloudflare Bot Management, hCaptcha, BotID do behavioural fingerprinting beyond rate limits.
+
+**What follows from this topic**
+
+Security primitives feed Networking (mTLS terminates on the service mesh sidecar), Load Balancing (API gateways enforce authN/authZ at the edge), Resilience (rate limits are both anti-abuse and load-shedding), and AI / LLM Infrastructure (agent action budgets, tool sandboxing, prompt-injection defence are 2026 security additions). The layered-defence discipline generalises — no single layer is sufficient.
+
 ### Q94. AuthN vs AuthZ — and what's the canonical OAuth flow in 2026?
 
 **AuthN** = authentication = "who are you" (login). **AuthZ** = authorization = "what can you do" (permissions). **OAuth 2.0** flows for 2026: **Authorization Code + PKCE** for public clients (SPAs, mobile, native apps) — PKCE prevents intercepted authorization codes from being usable. **Client Credentials** for machine-to-machine. **Refresh tokens** to extend access without re-login. **Avoid**: implicit grant (deprecated, replaced by PKCE), password grant (anti-pattern — your app sees the user's password). OIDC sits on top of OAuth 2.0 and adds identity claims via the ID token.
@@ -502,6 +1173,48 @@ Layered defence: (1) **WAF** (Cloudflare, AWS WAF) — block known bad patterns,
 ---
 
 ## Cost & Capacity Engineering
+
+### Summary
+
+**What this topic covers**
+
+The cost and capacity discipline that 2026 staff interviewers grade explicitly — gone are the days when system design rounds ignored AWS bills. Seven questions across (1) **cloud cost dimensions in priority order** — compute, memory, storage, egress bandwidth, per-request fees, managed-service premiums; (2) **spot / preemptible instances** at 60-90% discount for stateless fault-tolerant workloads; (3) the **autoscaling trap** — scale-out fast, scale-in slow, reactive lags real load by minutes; (4) **cross-region data transfer** as the silent budget killer at $0.02-0.09/GB; (5) **capacity planning** — the 60-70% utilisation rule grounded in queueing theory; (6) the staff-tier diagnostic on **estimating monthly cloud cost of your design**; and (7) the **operational maturity tiers** framework that defines what "staff-level" actually looks like in 2026 interviews (functional → scalable → production-ready → operationally mature → war-story fluent).
+
+**Mental model**
+
+Cost is **the fifth non-functional requirement**, alongside latency, throughput, availability, and durability. Every design decision has a cost shape: managed RDS is 2-3× DIY Postgres but absorbs ops overhead; cross-region replication trades $0.02/GB egress for failover safety; pre-computed materialised views trade storage for query-time CPU. The senior framing is "I'm trading $X/month for Y benefit; here's why that's worth it at our scale". The second mental shift: **utilisation has tail behaviour**. Running at 90% mean utilisation puts you at 100% with significant probability — queueing theory says queue length approaches infinity as utilisation approaches 1. The 60-70% rule is not waste; it's the headroom that absorbs surge, failover, and growth. The third shift: **egress is the silent killer**. Compute and storage costs scale predictably; cross-region egress at $0.02-0.09/GB explodes silently when a "small" service moves 100GB/day cross-region. Mitigations: colocate compute and data, compress (zstd / brotli), batch, replicate locally instead of querying remotely, edge cache for read-heavy. The fourth shift: **operational maturity is a tier system**. 2026 staff interviews explicitly grade beyond "correct" and "scalable" into "production-ready" (SLOs + error budgets + capacity headroom), "operationally mature" (runbooks, on-call, chaos, cost models), and "war-story fluent" (Netflix solves this by X, here's the lesson). Hitting tier 1-2 alone is a senior signal, not staff.
+
+**Key terms**
+
+- **Compute cost** — CPU-hours; usually the largest line; right-sized via instance type + count.
+- **Egress bandwidth** — cross-region/AZ transfer at $0.02-0.09/GB; the silent budget killer.
+- **Per-request fees** — DynamoDB RCU/WCU, API Gateway, Lambda invocations, S3 PUT/GET.
+- **Managed-service premium** — 2-3× DIY infra cost; bought for ops simplicity.
+- **Spot / preemptible** — 60-90% off; reclaimable on 30-120s notice; for stateless fault-tolerant workloads.
+- **Reactive autoscaling** — CPU > threshold → add; lags by minutes.
+- **Predictive autoscaling** — historical pattern-based; scales ahead of load.
+- **Scale-out vs scale-in** — out is fast, in is slow (connection drain, deregister, handoff).
+- **60-70% utilisation rule** — tail-aware capacity target; absorbs surge + N+1 failover.
+- **N+1 redundancy** — capacity to lose one instance and still serve peak.
+- **Tier framework** — functional / scalable / production-ready / operationally mature / war-story fluent.
+- **Right-sizing** — most prod is over-provisioned 2-10×; first lever in cost optimisation.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Cost reasoning at design time** — 2026 staff candidates can give "this design costs ~$50k/month at 1M DAU, ~$2M at 100M DAU" within 30 seconds of estimation, with assumptions written down. Knowing the rough numbers ($0.05/hour small instance, $0.50 mid, $3-5 GPU, $0.023/GB-month S3, $0.10 EBS, $0.20 RDS) is a memorisation task that pays off. (2) **The 60-70% utilisation rule** with the queueing-theory justification ("utilisation → 1 means queue → infinity") proves you understand why over-provisioning is a feature, not waste. (3) **Operational maturity tier awareness** — naming the Hello Interview / Exponent tier framework and self-locating ("I'd hit tier 4 by adding chaos engineering, runbooks, and a cost model") is the staff-tier 2026 signal that separates candidates who know they're being graded on operations from candidates who think system design is just architecture.
+
+**Common confusions**
+
+- "Cloud is always cheaper than on-prem" — for variable load yes; for steady-state heavy workloads, dedicated hardware can win.
+- "Right-sizing is one-time" — workloads drift; right-sizing is a continuous discipline.
+- "Spot saves 90% always" — only with proper fleet diversification + retry logic for reclaims.
+- "Autoscale on CPU is enough" — queue depth, request latency, and custom metrics often work better.
+- "90% utilisation is efficient" — it's the precursor to outage; queue length explodes as utilisation → 1.
+- "Egress doesn't matter" — until you accidentally move 100GB/day cross-region for a year.
+
+**What follows from this topic**
+
+Cost discipline feeds every design choice — Caching is partly cost optimisation (avoid DB requests at $0.0001 each), CDN coverage is cost optimisation (avoid cross-region egress), spot fleets are cost optimisation for stateless workers, and GPU autoscaling in AI / LLM Infrastructure is the new frontier because GPU idle cost is brutal. The "estimate the monthly cost" question now appears in 30%+ of staff system design rounds.
 
 ### Q100. What are the cost dimensions in a cloud system, in priority order?
 
@@ -535,6 +1248,48 @@ Tier framework (Hello Interview / Exponent style): (1) **functional correctness*
 
 ## Data Structures for System Design
 
+### Summary
+
+**What this topic covers**
+
+The six probabilistic and tree-shaped data structures that appear constantly in production system design at scale. Six questions across (1) **bloom filters** — probabilistic set membership with no false negatives and bounded false positives, at ~10 bits per element; (2) **HyperLogLog** — cardinality estimation in O(1) memory (~12KB for billion-element cardinality at 1% error); (3) **Count-Min Sketch** — frequency estimation with bounded error for top-K and heavy-hitter detection; (4) **Merkle trees** — hash trees enabling efficient comparison of large datasets (Git, blockchain, Dynamo anti-entropy, Certificate Transparency); (5) **skip lists** — probabilistic sorted structures used in Redis sorted sets and some LSM memtables; and (6) **tries / radix trees** — prefix-query structures behind autocomplete, IP routing tables, and Postgres GIN indexes.
+
+**Mental model**
+
+These six structures share a theme: **trade exact answers for sub-linear memory or sub-linear comparison**. Bloom filters give you "definitely not in set" or "probably in set" at ~10 bits per element regardless of element size — Cassandra and HBase use them per SSTable to skip reads that would miss. HyperLogLog answers "how many distinct things" with 12KB regardless of cardinality — Redis `PFCOUNT` is the production face. Count-Min Sketch answers "how many of this thing" with bounded error in sub-linear memory — DDoS detection, hot key tracking, query optimisers. The second theme: **structural identity via hashing**. Merkle trees hash children up to a root, so two replicas can compare roots in O(1) and only descend where they differ — the basis of Dynamo-style anti-entropy, Git's content-addressable storage, blockchain block hashes, and Certificate Transparency. The third theme: **prefix structures for prefix problems**. Tries (or compressed radix trees) make "what words start with 'sys'" an O(prefix length) operation regardless of corpus size; the Linux kernel's IP routing table is a radix tree, Postgres GIN indexes use them, autocomplete services use them. The senior signal is matching the data structure to the question shape — "unique users at scale" → HLL, "set membership at scale" → bloom, "sync two replicas" → Merkle.
+
+**Key terms**
+
+- **Bloom filter** — probabilistic set membership; no false negatives; tunable false positive rate; ~10 bits per element.
+- **HyperLogLog (HLL)** — cardinality estimation; ~12KB for billions of distinct elements; Redis `PFADD` / `PFCOUNT`.
+- **Count-Min Sketch (CMS)** — frequency estimation; upper-bound counter; tunable accuracy/memory; Apache DataSketches.
+- **Heavy hitters** — top-K frequent items detected via CMS; DDoS, hot key, query optimisation.
+- **Merkle tree** — tree of hashes; root hash uniquely identifies contents; O(differences × log N) comparison.
+- **Anti-entropy** — periodic replica reconciliation via Merkle tree diffs; Cassandra, Riak, Dynamo.
+- **Skip list** — probabilistic sorted linked list with skip levels; O(log N) ops; Redis sorted sets.
+- **Trie (prefix tree)** — character-per-node tree; O(prefix length) prefix queries.
+- **Radix tree (compressed trie)** — single-child chains merged; space-efficient; Linux kernel routing.
+- **GIN index (Postgres)** — Generalized Inverted Index; trie-backed; full-text search, JSON containment, array operations.
+- **Probabilistic data structure** — trades accuracy for sub-linear memory; lossy by design.
+- **Pre-filter** — bloom filter as a cheap gate before expensive lookups (DB, cache, disk).
+
+**Why interviewers ask this**
+
+Two signals. (1) **Pattern matching from prompt to data structure** — when the prompt mentions "unique users at scale", staff candidates reach for HyperLogLog without prompting; "set membership cheaply" → bloom filter; "sync two replicas efficiently" → Merkle tree; "fast autocomplete" → trie. Recognising these is the test for whether you've internalised the catalogue. (2) **Production naming** — Cassandra/HBase/LevelDB bloom filters, Redis HyperLogLog, Apache DataSketches CMS, Git/blockchain/Dynamo Merkle trees, Redis ZSET skip lists, Linux kernel radix tree routing. Naming where they actually run in production turns "I read about this" into "I've thought about how this is used".
+
+**Common confusions**
+
+- "Bloom filters have false negatives" — they don't; they only have false positives. Get this wrong and you've lost the room.
+- "HyperLogLog gives exact counts" — it's lossy; ~1% error is typical, no `PFREMOVE` exists, but merges are clean.
+- "Count-Min Sketch counts exactly" — it gives an upper bound; underestimates are impossible, overestimates are bounded.
+- "Merkle trees are blockchain-only" — they predate blockchain by decades; Git, Cassandra, Dynamo, S3 all use them.
+- "Skip lists are obsolete" — Redis sorted sets use them; LSM memtables sometimes do; they're alive in production.
+- "Tries are slow because of pointer chasing" — radix trees compress single-child chains; production implementations are cache-friendly.
+
+**What follows from this topic**
+
+Data structures feed Caching (bloom filter as negative-cache gate), Database Scaling (Merkle anti-entropy for replica sync), Search (tries for autocomplete, inverted indexes for full-text), Real-Time (skip lists for sorted sets, leaderboards), and Cost & Capacity (HLL and CMS save orders of magnitude of memory vs exact counts). The "match the shape of the question to the data structure" discipline is the canonical pattern-recognition test in senior interviews.
+
 ### Q105. Bloom filter — what is it and where do you actually use one?
 
 **Probabilistic set membership**: tells you "definitely not in set" or "probably in set" — no false negatives, controlled false positive rate. **Tiny memory**: ~10 bits per element for ~1% false positive rate, regardless of element size. Uses: (1) **Avoid DB lookups for likely-misses** — Cassandra, HBase, LevelDB use bloom filters per SSTable to skip reads. (2) **Avoid cache lookups for keys you've never cached**. (3) **Click fraud detection** — "have I seen this user-action pair?". (4) **Web crawlers** — "have I seen this URL?". Senior pattern: bloom filter as a cheap gate before expensive lookups.
@@ -562,6 +1317,48 @@ A linked list with multiple "skip levels" — each level is a sparser linked lis
 ---
 
 ## Anti-patterns & Smells
+
+### Summary
+
+**What this topic covers**
+
+The nine architectural smells that signal a senior engineer "this design is going to hurt you". Questions cover (1) the **distributed monolith** — microservices coupled by shared deploy / data / synchronous chains; worse than a real monolith because you get operational pain plus deployment coupling; (2) **synchronous chains A → B → C → D** where latency multiplies, failure probability multiplies, and partial-failure handling is exponential; (3) **shared databases between services** breaking schema ownership, coordination, and failure isolation; (4) **unbounded queues** that hide imbalance until OOM; (5) **dual writes** to DB + Kafka in the same code path inevitably failing in inconsistent ways; (6) **cache as source of truth** with all four failure modes (eviction, crash, replication lag, invalidation bugs); (7) **premature sharding** as a one-way door that's hard to reverse; (8) **microservices without operational maturity** — distributed tracing, log aggregation, service catalogue, schema versioning are prerequisites; and (9) **coordination on the hot path** as the canonical availability hazard.
+
+**Mental model**
+
+Anti-patterns are **shapes of regret**. Each one starts as a reasonable-looking decision and compounds into something painful you can't easily reverse. The recurring theme: **complexity that doesn't earn its cost**. Microservices are right when team independence + operational maturity + clear bounded contexts justify them; distributed monoliths are what you get when you split the code but not the data. Synchronous chains are right when latency + failure budgets allow them; they're catastrophic when one hop's blip cascades through four. Sharding is right when a tuned Postgres on a 24TB-RAM box has demonstrably hit its ceiling; it's a one-way door that adds operational complexity dwarfing imagined scale benefits. The second mental shift: **smells share solutions**. Outbox + idempotent consumers solves dual writes; sagas + compensations solve synchronous chains for cross-service workflows; database-per-service solves shared databases; bounded queues with explicit policies solve unbounded queues; coordination at the edges (initialisation, config) solves hot-path coordination. The third shift: **the modular monolith is the modern starting point**. The honest senior take is "start with a modular monolith with clear bounded contexts; extract services only when team / scale / independence pain justifies the operational cost". Premature microservices is the dominant 2026 anti-pattern.
+
+**Key terms**
+
+- **Distributed monolith** — microservices coupled by shared deploy / data / sync calls; worst of both worlds.
+- **Synchronous chain** — A → B → C → D over the network; latency + failure multiply.
+- **Shared database** — multiple services on one schema; coupling, contention, no clear ownership.
+- **Unbounded queue** — no max depth; hides imbalance until OOM.
+- **Dual writes** — DB + Kafka in same code path; one will fail; no clean recovery.
+- **Outbox pattern** — DB + event row in one txn; publisher reads outbox; the dual-write fix.
+- **Cache as source of truth** — Redis treated as durable; eviction / crash / replication lag / invalidation bugs.
+- **Premature sharding** — sharding before exhausting vertical / replicas / caching / partitioning; one-way door.
+- **Modular monolith** — single deployable with clear bounded contexts; extract to services only when justified.
+- **Coordination on the hot path** — distributed locks / consensus per request; availability dependency.
+- **Bounded context** — DDD term; a clear scope of language and ownership; the prerequisite for service extraction.
+- **Microservices prerequisites** — tracing, log aggregation, service catalogue, schema versioning, deploy automation, observability per service, mTLS, retries everywhere.
+
+**Why interviewers ask this**
+
+Three signals. (1) **The "modular monolith first" instinct** — 2026 staff candidates resist microservices for small teams and reach for them only when team independence + operational maturity + bounded context clarity all justify the cost. Naming "modular monolith with clear bounded contexts" as the modern starting point is the senior signal. (2) **The dual-write → outbox migration** as a war story — candidates who can recite "we used to write to DB and Kafka in the same code path, hit inconsistency we couldn't recover from, moved to outbox + idempotent consumers" are signalling production experience. (3) **The premature-sharding diagnostic** — the right order of escalation (vertical → replicas → caching → query opt → table partitioning → functional partitioning → sharding) is a discipline question; staff candidates climb it in order, juniors jump to the destination.
+
+**Common confusions**
+
+- "Microservices are better than monoliths" — only with operational maturity; without it, the inverse is true.
+- "Synchronous chains are fine if everything is fast" — until one hop blips and the cascade takes 4 services down.
+- "Shared databases are pragmatic at small scale" — they ossify into coupling; pay the database-per-service cost early.
+- "Unbounded queues smooth bursts" — they smooth bursts up to OOM; bound them.
+- "Cache crashes are rare" — eviction under memory pressure is constant; treating cache as truth loses data routinely.
+- "Sharding is just adding boxes" — it's a schema-design + routing + rebalancing + ops one-way door.
+
+**What follows from this topic**
+
+Anti-patterns feed every other section as cautionary tales — Database Scaling's order of escalation is the cure for premature sharding, Messaging's outbox pattern is the cure for dual writes, Caching's "DB is source of truth" is the cure for cache-as-truth, Consensus's "edges not data plane" is the cure for hot-path coordination. Bring receipts on these — interviewers love war stories about avoiding (or surviving) each smell.
 
 ### Q111. Distributed monolith — why is it worse than a real monolith?
 
@@ -602,6 +1399,48 @@ Every distributed lock, every consensus step, every coordination point is a pote
 ---
 
 ## Tradeoff Vocabulary
+
+### Summary
+
+**What this topic covers**
+
+The meta-skill that separates senior from staff in system design interviews — naming every design choice as an explicit tradeoff axis with a chosen endpoint, instead of saying "we'll use X". Five questions across (1) **how to frame a design choice** in senior language ("I'm choosing consistency over availability for this feature because…"); (2) the **ten classic tradeoff axes** with examples (consistency vs availability, latency vs consistency, read vs write throughput, storage vs compute, push vs pull, sync vs async, coupling vs coordination, cost vs performance, simplicity vs scale, generality vs optimisation); (3) the **"one DB for all" vs "polyglot persistence"** debate and how the 2020s reversed the 2012 polyglot orthodoxy; (4) a **pattern-recognition cheat sheet** mapping prompt signals to canonical patterns; and (5) the staff-tier framework for **structuring a 45-minute system design interview** (requirements 5min → capacity estimation 5min → high-level design 10min → data model 5-10min → deep dive 10-15min → wrap-up 5min).
+
+**Mental model**
+
+Every senior system design answer is **a sequence of explicit tradeoffs**. The phrasing "we trade Y for Z by using X" alone moves you a level — "we trade strong consistency for low latency by serving reads from local replicas with up to 100ms staleness". The opposite ("we'll use Redis") is the junior tell. The second mental shift: **the cheat sheet is internalised pattern recognition**, not a lookup table. When the prompt mentions "real-time updates", the senior reflex is "WebSocket / SSE + pub/sub fanout + CRDTs if collaborative". When it mentions "rate limit", the reflex is "token bucket in Redis with a Lua script for atomicity". When it mentions "long-running workflow", the reflex is "orchestrated saga via Temporal / Step Functions". This recognition is what makes a 45-minute interview tractable — you compose familiar patterns rather than inventing from scratch. The third mental shift: **the polyglot pendulum has swung back**. Pramod Sadalage's 2012 polyglot persistence argument made sense when Postgres was relational-only; modern Postgres handles JSON + FTS + vectors + geo + analytics-via-Citus in one engine. The 2026 senior default is "start with just Postgres; reach for specialist engines only when a specific workload genuinely outgrows it". This is the cost-aware-adoption discipline applied to data infrastructure.
+
+**Key terms**
+
+- **Tradeoff axis** — named dimension along which design choices live; explicit endpoints both visible.
+- **Consistency vs availability** — under partition, refuse writes (CP) or accept stale reads/writes (AP).
+- **Latency vs consistency** — local replica fast read vs global agreement; PACELC's "else" clause.
+- **Push vs pull** — fanout-on-write vs fanout-on-read; Twitter timeline is canonical.
+- **Sync vs async** — request/response vs event-driven; coupling vs throughput.
+- **Coupling vs coordination** — choreography (events) vs orchestration (workflow engine).
+- **Cost vs performance** — cold storage vs hot in-memory; S3 Glacier vs Redis.
+- **Simplicity vs scale** — vertical scale vs horizontal sharding; defer the latter.
+- **Polyglot persistence** — multiple DBs for multiple workloads; expensive ops, sometimes justified.
+- **Pattern-recognition cheat sheet** — prompt signal → canonical pattern mapping.
+- **Bring receipts** — name production examples to ground every tradeoff claim.
+- **Interview structure** — requirements → capacity → high-level → data model → deep dive → wrap-up.
+
+**Why interviewers ask this**
+
+Two signals. (1) **Tradeoff phrasing alone moves you a level**. The candidate who says "I'm trading X for Y because Z" wins the room over the candidate who says "I'll use Redis". This is a habit, not knowledge — practice it until it's reflexive. (2) **The 45-minute interview structure** — junior candidates dive into boxes-and-arrows without clarifying requirements; staff candidates spend the first 5 minutes on functional + non-functional requirements (scale, SLOs, consistency expectations, dominant access patterns) and the last 5 on wrap-up (tradeoffs reviewed, what they'd revisit, what they'd monitor). The cheat sheet earns trust at the high-level design stage — "this prompt smells like a fanout-on-write problem with a celebrity-pull hybrid" is the recognition that buys you airtime for the deep dive.
+
+**Common confusions**
+
+- "Just say what you'd build" — without naming the tradeoff, you sound like a junior dev picking from memory.
+- "Polyglot persistence is best practice" — it was in 2012; modern Postgres makes "just Postgres" the right starting point.
+- "Patterns are scripts to recite" — they're tools to compose; recognition is the skill, not memorisation.
+- "Strong consistency is always better" — only when you need it; most user-visible data tolerates eventual.
+- "Cost optimisation is later" — 2026 staff interviews evaluate cost reasoning at design time.
+- "Coupling is bad" — only when it's accidental; deliberate coupling for transactional consistency is sometimes correct.
+
+**What follows from this topic**
+
+Tradeoff vocabulary is the **meta-topic** that frames every other section — Caching is read-latency vs write-cost, Database Scaling is simplicity vs scale, Consensus is availability vs correctness, Sagas vs 2PC is loose vs strict consistency. The cheat sheet plus interview structure plus polyglot pendulum awareness is the modern senior baseline; everything else in this primer is the catalogue you draw from when applying these axes.
 
 ### Q120. How do you frame a design choice in a senior interview?
 
@@ -663,6 +1502,48 @@ Name the axis and the endpoint you're picking. "I'm choosing **availability over
 
 ## AI & LLM Infrastructure
 
+### Summary
+
+**What this topic covers**
+
+The 2026 reality that ~50% of staff-level system design rounds include an ML-adjacent question, and the patterns specific to LLM serving / RAG / agent infrastructure that don't reduce to traditional web service design. Eight questions across (1) **designing 10k concurrent LLM requests** with 2-8s latency on $3/hr GPUs — queue with priority tiers, token-level streaming, queue-depth autoscaling, batch inference (vLLM, TensorRT-LLM, Triton); (2) **GPU autoscaling** with 3-7 minute cold starts, no partial scale, brutal idle cost; (3) **RAG architecture** — ingestion (chunk + embed + vector DB) plus query path (hybrid search + reranker + LLM generation with citations); (4) **AI agent safety** — tool sandboxing, action budgets, human-in-the-loop, audit logs, capability boundaries; (5) **token-level streaming response** — SSE / WebSocket / HTTP/2 streaming, cancellation propagation, time-to-first-token as a first-class metric; (6) **distributing a 100GB model** to 1000 inference machines via P2P + tiered caching + compression; (7) **feature stores** — train/serve consistency, offline + online stores (Feast, Tecton, Vertex AI); and (8) **LLM inference latency breakdown** — TTFT, TPOT, and the levers (quantisation, prompt caching, speculative decoding, prefix sharing).
+
+**Mental model**
+
+LLM serving breaks three traditional assumptions. (1) **Latency is seconds, not milliseconds** — a request takes 2-8s, sometimes more. Active connections live for the full inference duration; thread / connection pool sizing changes radically (Little's Law says 10k RPS × 5s service time = 50k concurrent in-flight). (2) **Compute is expensive** — GPUs cost 30-100× CPU instances; you can't over-provision casually. Spot interruption costs you 3-7 minutes of cold start to replace. (3) **Output is variable-length** — a request emits 50 tokens or 5000; you can't pre-allocate response buffers. The production response is a different shape from web serving: **token-level streaming** so users see something at 200ms instead of 5s, **batch inference at the model layer** to amortise GPU memory bandwidth, **queue with priority tiers** so paid users get low-latency lanes, **autoscale on queue depth + GPU utilisation** rather than CPU. The second mental shift: **RAG is hybrid by default in 2026** — BM25 plus vector ANN plus reranker, not pure vector. The third shift: **agent safety is an unsolved research problem**; production deployments over-rotate to human review for irreversible actions. Tool sandboxing (Firecracker / gVisor), action budgets, capability boundaries, and audit logs are the layered defence — analogous to defence-in-depth for traditional security but with prompt injection as the new attack surface.
+
+**Key terms**
+
+- **TTFT (Time-To-First-Token)** — prompt processing latency; proportional to input length; 50-500ms on 7B, seconds on 70B+.
+- **TPOT (Time-Per-Output-Token)** — 10-50ms per token typically; total = TTFT + TPOT × output length.
+- **Continuous batching** — vLLM PagedAttention; multiple requests per forward pass; amortises memory bandwidth.
+- **Token streaming (SSE)** — emit tokens as generated; reduces perceived latency dramatically.
+- **RAG (Retrieval-Augmented Generation)** — retrieve relevant context → assemble → LLM generates with citations.
+- **Vector DB** — pgvector, Pinecone, Weaviate, Milvus; ANN search over embeddings.
+- **Hybrid search** — BM25 + vector ANN combined via RRF; the 2026 retrieval default.
+- **Cross-encoder reranker** — neural rerank of top-K (10-50) for quality; expensive but accurate.
+- **Prompt caching** — Anthropic / OpenAI APIs cache prefix; slashes TTFT for chatbots.
+- **Speculative decoding** — small model proposes tokens, large model verifies; 2-3× speedup.
+- **Quantisation** — 4-bit / 8-bit weights (GPTQ, AWQ); 2-3× faster, mild quality loss.
+- **Feature store** — single feature definition for training + serving; Feast, Tecton, Vertex AI; train/serve consistency.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Awareness that LLM serving is different** — staff candidates who treat a 10k-concurrent-LLM-request prompt like a web service prompt lose the room. The right answer names queue + streaming + batch + GPU-aware autoscaling within 60 seconds. (2) **Hybrid RAG fluency** — saying "vector DB and an LLM" is 2023-vintage; saying "BM25 + vector ANN + RRF + cross-encoder reranker for top-K + LLM with citation grounding" is the 2026 staff baseline. (3) **Cost-aware GPU reasoning** — knowing GPUs cost $3/hour, that 30-100× CPU pricing means over-provisioning hurts immediately, and that spot interruption costs you 3-7 minutes of cold-start time, is the test for whether you've operated ML serving. The 100GB-model-distribution question is a 2026 staff favourite — naming BitTorrent-style P2P (Meta Torchcache, Uber Petastorm, Dragonfly) + tiered caching + zstd compression separates engineers who've shipped from engineers who haven't.
+
+**Common confusions**
+
+- "LLM serving is just web serving with bigger boxes" — variable latency + GPU cost + variable output length break traditional assumptions.
+- "Vector search is enough for RAG" — hybrid (lexical + vector) plus reranker is the modern default.
+- "GPU autoscaling is CPU autoscaling with GPUs" — cold starts are 10× longer, no partial scale, idle cost is brutal.
+- "Agents can be deployed like services" — irreversible action requires human-in-the-loop; agent safety is unsolved.
+- "Streaming is a UI optimisation" — it's an architectural choice; connection lifetime, cancellation, observability all change.
+- "Pull the model from S3 on each box" — at 100GB × 1000 boxes, you'll DDoS your own S3; use P2P + tiered caching.
+
+**What follows from this topic**
+
+AI / LLM infrastructure feeds Search (RAG is hybrid retrieval), Resilience (priority-tier queues, streaming-cancellation propagation), Cost & Capacity (GPU economics are the new frontier), Observability (TTFT, TPOT, embedding drift, citation accuracy as new metrics), and Security (prompt injection, agent action sandboxing). This section grows year-over-year; expect more depth in 2027 interviews.
+
 ### Q125. Design a system that handles 10,000 concurrent requests to an LLM with 2-8s inference latency on $3/hour GPUs. Walk me through it.
 
 Three big shifts from traditional serving. (1) **Long, variable latency** — each request takes seconds, not ms. Active connections grow until you hit pool limits. (2) **Expensive compute** — GPUs cost 30-100× a CPU instance; you can't over-provision casually. (3) **Variable output length** — a request might emit 50 tokens or 5000; can't pre-allocate. Architecture: **request queue with priority tiers** (paid users → low-latency lane, free users → standard lane), **token-level streaming response** (start emitting tokens as soon as they're generated — don't wait for full completion), **autoscaling on queue depth + GPU utilisation** (not just CPU), and **batch inference** at the model layer (process multiple requests per forward pass to amortise GPU memory bandwidth). Tools: vLLM / TensorRT-LLM for batching, Ray Serve / KServe / Triton for orchestration.
@@ -698,6 +1579,48 @@ The bug: training computes features one way (batch pipeline, Pandas, last week's
 ---
 
 ## Modern Frameworks: Kafka, Flink, Temporal
+
+### Summary
+
+**What this topic covers**
+
+The platforms and frameworks that 2026 senior interviewers expect you to name by version + capability, not just by category. Eight questions across (1) **KRaft** — Kafka's internal Raft-based metadata cluster replacing ZooKeeper, default since 3.5+; (2) **Kafka exactly-once semantics** via transactional API + idempotent producers, plus the cross-system honest answer; (3) **Flink vs Kafka Streams** — embedded library vs separate cluster, when each fits; (4) **Temporal** — durable replayable workflow engine replacing hand-rolled state machines + cron + queue glue; (5) **AWS Step Functions vs Temporal vs Cadence** decision matrix; (6) **Sidekiq / Celery / Hangfire / Bull** as the lighter "background job" tier; (7) **real-time data warehouse shape** — streaming ETL via Flink / Materialize / RisingWave / ClickHouse + Kafka engine; and (8) **edge functions** — Cloudflare Workers, Vercel Edge, AWS Lambda@Edge, Deno Deploy, and when V8-isolate-constrained runtime pays off.
+
+**Mental model**
+
+Modern data infrastructure is **stratified by latency, state size, and operational complexity**. At the messaging layer, Kafka with KRaft is the universal default; Pulsar / Kinesis / Redpanda compete on specific axes. At the stream processing layer, Kafka Streams is the lightweight embedded option (deploys with your app), Flink is the heavy-state heavy-latency-correctness option (separate cluster, RocksDB-backed state, event-time watermarks, exactly-once across complex pipelines). At the workflow layer, Sidekiq / Celery / Hangfire / Bull are the "send-email, generate-report" tier; Temporal / Step Functions / Cadence are the "long-running multi-step workflow with compensations and human-in-the-loop" tier. The mistake is using Sidekiq for what should be Temporal — ending up rebuilding workflow state in job code. The second mental shift: **the real-time data warehouse replaced batch ETL for many workloads**. Old shape: nightly batch into Snowflake / BigQuery / Redshift; analysts query yesterday's data. New shape: streaming ETL via Flink / Kafka Connect / Materialize / RisingWave continuously populating ClickHouse / Druid / Pinot, with dashboards reflecting 1-second-stale data. The distinction matters: batch warehouse for ad-hoc analytics, real-time OLAP for live dashboards, operational store (Postgres) for app data. The third shift: **edge compute pays off for specific shapes** — personalised CDN responses, API aggregation, A/B routing without origin round trips. It doesn't replace backend services for heavy compute or stateful workloads.
+
+**Key terms**
+
+- **KRaft** — Kafka Raft metadata cluster; replaces ZooKeeper since 3.5+; faster failover, more partitions.
+- **Kafka transactional API** — exactly-once within Kafka via `beginTransaction` / `commitTransaction`.
+- **Idempotent producer** — `enable.idempotence=true`; dedupes producer retries via sequence numbers.
+- **Kafka Streams** — embedded library; deploys with your app; good for lightweight stateful processing.
+- **Flink** — separate streaming cluster; event-time watermarks, RocksDB state, exactly-once.
+- **Temporal** — durable replayable workflow engine; code-defined; Go/Java/TS/Python SDKs.
+- **Cadence** — Uber's predecessor to Temporal; similar capabilities; less momentum in 2026.
+- **AWS Step Functions** — serverless JSON-defined workflows; deep AWS integration; vendor lock-in.
+- **Sidekiq / Celery / Hangfire / Bull** — job queue tier; single-step async work; not for long workflows.
+- **Materialize / RisingWave** — streaming SQL engines; incremental view maintenance over Kafka.
+- **ClickHouse / Druid / Pinot** — real-time OLAP; live dashboards over minutes-to-second-fresh data.
+- **Edge functions** — Cloudflare Workers, Vercel Edge, Lambda@Edge, Deno Deploy; V8 isolates; sub-50ms global latency.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Version-aware naming** — saying "Kafka with KRaft" (default since 3.5+, ZooKeeper deprecated) earns trust over "Kafka with ZooKeeper". Same for "Temporal" over generic "workflow engine". (2) **Tier-appropriate framework picks** — Sidekiq for single-step jobs, Temporal for multi-step long-running workflows, Flink for stateful streaming at scale, Kafka Streams for in-app real-time enrichment. The wrong pick is the junior tell. (3) **Real-time warehouse fluency** — knowing the line between batch warehouse (BigQuery / Snowflake), real-time OLAP (ClickHouse / Druid / Pinot), and operational store (Postgres) and *not confusing them* is the 2026 staff-tier signal. Materialize and RisingWave are 2026 mentions worth knowing — streaming SQL with incremental view maintenance is the modern shape.
+
+**Common confusions**
+
+- "Kafka exactly-once works across systems" — only within Kafka; cross-system needs idempotent consumers + at-least-once.
+- "Flink and Kafka Streams are interchangeable" — Flink for heavy state + complex windowing; Streams for lightweight in-app.
+- "Temporal is just a job queue" — it's a workflow engine; durable replayable execution, not single-step jobs.
+- "Step Functions are framework-agnostic" — they're AWS-locked; complex logic in JSON gets ugly fast.
+- "Edge functions replace backends" — they don't; heavy compute, stateful workloads, large deps don't fit V8 isolates.
+- "ClickHouse is a data warehouse" — it's real-time OLAP; different shape from BigQuery / Snowflake.
+
+**What follows from this topic**
+
+Modern frameworks are the **production-grade implementations** of patterns introduced earlier — Kafka realises the Messaging section's log abstraction, Temporal realises the Resilience section's orchestrated saga, Flink realises the stream-processing watermarks of Messaging Q60, edge functions realise the Networking section's "compute at the POP" ideal. This section is where the patterns become deployable systems with specific operational characteristics.
 
 ### Q133. What's KRaft and why did Kafka replace ZooKeeper with it?
 
