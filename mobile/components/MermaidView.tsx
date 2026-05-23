@@ -2,13 +2,12 @@ import { useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { WebView } from "react-native-webview";
 import type { Palette } from "../lib/theme";
-import { useSettings } from "../lib/settings";
 import { MermaidModal } from "./MermaidModal";
 
 interface Props {
   /** Raw mermaid diagram source (no surrounding ```mermaid fences). */
   source: string;
-  /** App theme — drives mermaid's colour palette on the screen profile. */
+  /** App theme — drives mermaid's colour palette. */
   scheme: "dark" | "light";
   /** Surface colour from the app palette so the SVG blends in. */
   palette: Palette;
@@ -18,12 +17,6 @@ export interface BuildHtmlOptions {
   source: string;
   palette: Palette;
   scheme: "dark" | "light";
-  /**
-   * "eink": fit-to-width, pure black-on-white palette, no horizontal scroll,
-   *         thicker strokes for e-ink legibility.
-   * "screen": native size, theme-aware palette, horizontal scroll on overflow.
-   */
-  profile: "eink" | "screen";
   /**
    * When true the viewport meta + WebView setSupportZoom let the user
    * pinch-zoom the diagram (used by the fullscreen modal only).
@@ -46,47 +39,12 @@ export function buildHtml({
   source,
   palette,
   scheme,
-  profile,
   allowZoom,
 }: BuildHtmlOptions): string {
   const cdn = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
 
-  // E-ink ignores app theme and pins everything to high-contrast b/w.
-  // Screen profile follows the theme so dark mode gets the dark mermaid theme.
-  const themeName =
-    profile === "eink" ? "base" : scheme === "dark" ? "dark" : "default";
-  const themeVarsLiteral =
-    profile === "eink"
-      ? `, themeVariables: {
-          background: "#ffffff",
-          primaryColor: "#ffffff",
-          primaryBorderColor: "#000000",
-          primaryTextColor: "#000000",
-          secondaryColor: "#ffffff",
-          tertiaryColor: "#ffffff",
-          lineColor: "#000000",
-          textColor: "#000000",
-          edgeLabelBackground: "#ffffff",
-          fontSize: "14px"
-        }`
-      : "";
-
-  const useMaxWidth = profile === "eink";
-  const bgColor = profile === "eink" ? "#ffffff" : palette.codeBg;
-  const overflowX = profile === "eink" ? "hidden" : "auto";
-  const svgMaxWidthRule =
-    profile === "eink"
-      ? `#wrap svg { max-width: 100%; height: auto; }`
-      : `#wrap svg { max-width: none !important; height: auto; }`;
-  const eInkStrokeRule =
-    profile === "eink"
-      ? `#wrap svg path, #wrap svg line, #wrap svg polyline {
-            stroke-width: 2px !important;
-          }
-          #wrap svg .node rect, #wrap svg .node polygon, #wrap svg .node circle {
-            stroke-width: 2px !important;
-          }`
-      : "";
+  // Theme follows the app palette so dark mode gets the dark mermaid theme.
+  const themeName = scheme === "dark" ? "dark" : "default";
 
   const viewportMeta = allowZoom
     ? `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4, user-scalable=yes" />`
@@ -109,19 +67,18 @@ export function buildHtml({
     html, body {
       margin: 0;
       padding: 0;
-      background: ${bgColor};
-      color: ${profile === "eink" ? "#000" : palette.text};
+      background: ${palette.codeBg};
+      color: ${palette.text};
       font-family: system-ui, -apple-system, sans-serif;
     }
     #wrap {
       padding: 12px;
-      overflow-x: ${overflowX};
+      overflow-x: auto;
       overflow-y: hidden;
       box-sizing: border-box;
       -webkit-overflow-scrolling: touch;
     }
-    ${svgMaxWidthRule}
-    ${eInkStrokeRule}
+    #wrap svg { max-width: none !important; height: auto; }
     .err {
       color: ${scheme === "dark" ? "#f8b3b3" : "#b00020"};
       font-family: Courier, monospace;
@@ -160,8 +117,8 @@ export function buildHtml({
           startOnLoad: false,
           theme: ${JSON.stringify(themeName)},
           securityLevel: "loose",
-          flowchart: { htmlLabels: true, useMaxWidth: ${useMaxWidth} },
-          sequence: { useMaxWidth: ${useMaxWidth} }${themeVarsLiteral}
+          flowchart: { htmlLabels: true, useMaxWidth: false },
+          sequence: { useMaxWidth: false }
         });
         var el = document.getElementById("diagram");
         var src = el.textContent;
@@ -182,26 +139,17 @@ export function buildHtml({
 }
 
 /**
- * Inline mermaid renderer. E-ink mode forces shrink-to-fit + monochrome.
- * Screen mode renders at native size; tapping opens a fullscreen modal
- * with pinch-zoom + pan so wide flowcharts are properly readable.
+ * Inline mermaid renderer. Renders at native size; tapping opens a
+ * fullscreen modal with pinch-zoom + pan so wide flowcharts are readable.
  */
 export default function MermaidView({ source, scheme, palette }: Props) {
-  const { eInkMode } = useSettings();
   const html = useMemo(
-    () =>
-      buildHtml({
-        source,
-        palette,
-        scheme,
-        profile: eInkMode ? "eink" : "screen",
-        allowZoom: false,
-      }),
-    [source, palette, scheme, eInkMode],
+    () => buildHtml({ source, palette, scheme, allowZoom: false }),
+    [source, palette, scheme],
   );
   const [height, setHeight] = useState(360);
   const [modalOpen, setModalOpen] = useState(false);
-  const styles = useMemo(() => makeStyles(palette, eInkMode), [palette, eInkMode]);
+  const styles = useMemo(() => makeStyles(palette), [palette]);
 
   const body = (
     <View style={[styles.container, { height }]}>
@@ -209,10 +157,8 @@ export default function MermaidView({ source, scheme, palette }: Props) {
         originWhitelist={["*"]}
         source={{ html, baseUrl: "https://cdn.jsdelivr.net/" }}
         style={styles.web}
-        // E-ink: scroll disabled (ghosting). Screen: keep horizontal scroll
-        // so the inline view stays useful while the modal handles zoom.
-        scrollEnabled={!eInkMode}
-        nestedScrollEnabled={!eInkMode}
+        scrollEnabled
+        nestedScrollEnabled
         javaScriptEnabled
         domStorageEnabled
         setSupportMultipleWindows={false}
@@ -231,11 +177,8 @@ export default function MermaidView({ source, scheme, palette }: Props) {
     </View>
   );
 
-  // E-ink: plain render, no tap-to-zoom (modal animation ghosts on e-ink).
-  if (eInkMode) return body;
-
-  // Screen: wrap in a Pressable that pops the fullscreen modal. The "↗"
-  // badge in the top-right hints at the interaction.
+  // Wrap in a Pressable that pops the fullscreen modal. The "↗" badge in
+  // the top-right hints at the tap-to-zoom interaction.
   return (
     <>
       <Pressable onPress={() => setModalOpen(true)} style={styles.pressable}>
@@ -255,13 +198,13 @@ export default function MermaidView({ source, scheme, palette }: Props) {
   );
 }
 
-function makeStyles(p: Palette, eInk: boolean) {
+function makeStyles(p: Palette) {
   return StyleSheet.create({
     container: {
-      backgroundColor: eInk ? "#ffffff" : p.codeBg,
+      backgroundColor: p.codeBg,
       width: "100%",
     },
-    web: { flex: 1, backgroundColor: eInk ? "#ffffff" : p.codeBg },
+    web: { flex: 1, backgroundColor: p.codeBg },
     pressable: { position: "relative" },
     zoomBadge: {
       position: "absolute",

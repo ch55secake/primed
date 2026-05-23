@@ -21,9 +21,7 @@ interface Props {
 }
 
 /**
- * Fullscreen pinch-zoom view for a mermaid diagram. Mounted only by the
- * phone profile of MermaidView (e-ink mode skips the modal so the fade-in
- * animation doesn't trail across the panel).
+ * Fullscreen pinch-zoom view for a mermaid diagram.
  *
  * Inside the modal we rebuild the HTML with allowZoom = true, set the
  * WebView's `setSupportZoom` prop, and let the user pinch + pan the SVG
@@ -41,14 +39,7 @@ export function MermaidModal({
   const styles = useMemo(() => makeStyles(palette), [palette]);
 
   const html = useMemo(
-    () =>
-      buildHtml({
-        source,
-        palette,
-        scheme,
-        profile: "screen",
-        allowZoom: true,
-      }),
+    () => buildHtml({ source, palette, scheme, allowZoom: true }),
     [source, palette, scheme],
   );
 

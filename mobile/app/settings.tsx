@@ -72,24 +72,6 @@ export default function SettingsScreen() {
         />
       </Section>
 
-      <Section title="E-ink mode" palette={palette}>
-        <View style={styles.row}>
-          <View style={styles.rowText}>
-            <Text style={styles.hint}>
-              Turn off screen animations, silence haptics, and render mermaid
-              diagrams in monochrome. Designed for Boox / Kindle-style e-ink
-              devices.
-            </Text>
-          </View>
-          <Switch
-            value={settings.eInkMode}
-            onValueChange={(eInkMode) => update({ eInkMode })}
-            trackColor={{ false: palette.border, true: palette.accent }}
-            thumbColor={palette.surface}
-          />
-        </View>
-      </Section>
-
       <Section title="Auto-reveal Summary" palette={palette}>
         <View style={styles.row}>
           <View style={styles.rowText}>
