@@ -468,6 +468,48 @@ class A {
 
 ## Modern Java (Java 8+)
 
+### Summary
+
+**What this topic covers**
+
+Everything that arrived in the language after the long Java-7 freeze, and everything that's arrived since under the six-month release cadence (Java 9 onwards). Three concern areas: (1) the **functional turn** — lambdas, method references, `Optional`, streams, functional interfaces, the `java.util.function` package; (2) the **data and pattern modernisation** — records, sealed types, pattern matching for `instanceof` and `switch`, switch expressions, text blocks, `var` inference; and (3) the **runtime and concurrency modernisation** — virtual threads (Loom), `StructuredTaskScope`, the new `HttpClient`, sequenced collections, and the previews still cooking (Valhalla value types, Leyden AOT, Panama FFM, Vector API). The 26 questions cover the surface; what an interviewer is really probing is whether you've shipped code on a recent LTS (17 or 21) or whether your Java is frozen at 8.
+
+**Mental model**
+
+Pre-Java-8 Java was an OO language with verbose anonymous-inner-class boilerplate everywhere collections needed transformation. Java 8 grafted a functional layer onto that core — lambdas are syntactic sugar for `invokedynamic` + `LambdaMetafactory` calls that synthesise instances of single-abstract-method interfaces at runtime, streams are a pipeline DSL on top of `Spliterator`. From Java 9 onwards the language has accreted *features designed to make data modelling cheap*: records collapse 60 lines of equals/hashCode/toString into one, sealed types make exhaustiveness checking possible, pattern matching turns nested `instanceof` casts into expressions. The third evolution — Loom — quietly upended the JVM concurrency story: a virtual thread is a continuation parked on a *carrier* platform thread, so you can write blocking, sequential code and get reactive-grade scalability without callbacks. The unifying theme: Java is gradually closing the gap with Kotlin/Scala without breaking source compatibility.
+
+**Key terms**
+
+- **Functional interface** — interface with exactly one abstract method; the type of a lambda. `Function`, `Predicate`, `Consumer`, `Supplier`, `Runnable`, `Callable`.
+- **Lambda** — `(x) -> x + 1`; compiled to an `invokedynamic` site that lazily creates an implementing class.
+- **Stream** — lazy pipeline over a source; intermediate ops are deferred until a terminal op fires.
+- **`Optional<T>`** — explicit absence; an API return type, not a field type, not a parameter type.
+- **Record** — final, immutable data carrier; canonical / compact / custom constructors; gets equals/hashCode/toString for free.
+- **Sealed type** — `sealed interface` / `sealed class` with a `permits` clause; enables exhaustive pattern matching.
+- **Pattern matching** — `if (x instanceof Foo f)`, `switch` with type patterns and record deconstruction patterns (Java 21).
+- **Switch expression** — `switch` that *returns a value*; `->` arms; no fall-through.
+- **Text block** — `"""..."""` multi-line literal with smart indentation stripping.
+- **`var`** — local-variable type inference; not `dynamic`, still statically typed.
+- **Virtual thread** — lightweight thread scheduled by the JVM onto carrier threads; cheap to create millions of.
+- **`StructuredTaskScope`** — Java 21+ API for treating concurrent subtasks as a single unit with shared lifetime and cancellation.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Recency** — anyone can list Java 8 features; only a candidate writing modern Java this year talks fluently about records, sealed types, pattern matching, virtual threads. The gap between "I know Java 8" and "I ship on Java 21" is huge. (2) **Idiom mastery** — `Optional` as a return type is fine; `Optional` fields and `Optional` parameters are anti-patterns. `flatMap` vs `map`, intermediate vs terminal ops, why `Stream.peek` is for debugging only — these are everyday correctness questions. Stream misuse turns up in code review every week. (3) **Concurrency direction of travel** — if you ask a senior candidate whether to use reactive or virtual threads for a new I/O-bound service in 2026 and they don't have an opinion, that's a red flag. Loom changes the answer for most non-streaming workloads and the candidate should know it.
+
+**Common confusions**
+
+- "Lambdas are anonymous inner classes" — they're not; `invokedynamic` + `LambdaMetafactory` produces a *different* bytecode shape with no captured `this` unless required.
+- "`Optional` should be used everywhere" — no. Return types yes, fields and parameters no. Don't serialise `Optional` over the wire.
+- "Streams are always faster" — they're often *slower* than a plain `for` loop for small collections; the win is readability and parallelisation, not raw throughput.
+- "`var` is dynamic typing" — it isn't. The compiler infers a single static type at the declaration site.
+- "Virtual threads make `synchronized` safe again" — they don't. `synchronized` *pins* the virtual thread to its carrier, defeating the scalability win; use `ReentrantLock` instead.
+- "Records are just data classes" — they're more: canonical equality, exhaustive deconstruction in patterns, and a contract that the components *are* the state.
+
+**What follows from this topic**
+
+Modern Java sets the idiom baseline for everything later in the primer. Streams + `Optional` show up in Collections. Virtual threads + `StructuredTaskScope` reshape Concurrency. Records + sealed types are the building blocks of Design Patterns (algebraic data types, state machines). Pattern matching changes how you write defensive code in Common Pitfalls. If your Java mental model is frozen at 8, modernise here before going further — interviewers can tell within two minutes.
+
 ### Q16. What are the main features introduced in Java 8?
 
 - **Lambdas** — `(x, y) -> x + y`
@@ -1036,6 +1078,47 @@ try (Arena arena = Arena.ofConfined()) {
 
 ## Collections
 
+### Summary
+
+**What this topic covers**
+
+The Java Collections Framework — the day-to-day data structures every backend service runs on, plus the iteration, comparison, and concurrency machinery wrapped around them. Three concern areas live here: (1) the **hierarchy** — `Collection` (`List`, `Set`, `Queue`, `Deque`) and `Map` and how the implementations differ; (2) the **performance characteristics** — Big-O of each operation, when `ArrayList` beats `LinkedList`, what `HashMap` actually does on collision, what `ConcurrentHashMap` does differently, when initial capacity matters; and (3) the **idioms** — `Comparable` vs `Comparator`, fail-fast vs fail-safe iterators, immutable collection flavours, advanced stream collectors (`groupingBy`, `partitioningBy`, `toMap`), the three forms of `reduce`. The 23 questions cluster around picking the right structure, knowing why it's fast, and writing the idiomatic Java that uses it well.
+
+**Mental model**
+
+Think of collections as a two-axis matrix. One axis is **shape**: ordered list, unordered set, key-value map, FIFO queue, LIFO stack, double-ended deque, priority queue. The other axis is **implementation tradeoff**: hash-based (O(1) average, no order) vs tree-based (O(log n), sorted) vs array-backed (O(1) indexed, O(n) insert mid) vs linked-node (O(1) insert at ends, O(n) indexed). Then a third dimension overlays: **concurrency model** — unsynchronised (`ArrayList`, `HashMap`), externally-synchronised wrappers (`Collections.synchronizedList`), or built-for-concurrency (`ConcurrentHashMap`, `CopyOnWriteArrayList`, `ConcurrentLinkedQueue`). Default choices in 2026: `ArrayList` for lists, `HashMap` for maps, `HashSet` for sets, `ArrayDeque` for stacks and queues. Reach for the alternatives when you have a specific reason — predictable iteration order (`LinkedHashMap`), sorted iteration (`TreeMap`), thread safety (`ConcurrentHashMap`), bounded blocking queue (`LinkedBlockingQueue`). Knowing the matrix lets you justify every choice; not knowing it leads to `LinkedList` ending up in production where `ArrayList` belonged.
+
+**Key terms**
+
+- **`ArrayList`** — array-backed list; O(1) indexed access, amortised O(1) append, O(n) middle insert.
+- **`LinkedList`** — doubly-linked list and `Deque`; O(1) ends, O(n) indexed. Almost always wrong; `ArrayDeque` is better for queue/stack uses.
+- **`HashMap`** — open-addressed hash table since Java 8; converts long collision chains to red-black trees at threshold 8.
+- **`LinkedHashMap`** — `HashMap` + doubly-linked list of entries for predictable iteration; powers LRU caches via `removeEldestEntry`.
+- **`TreeMap`** — red-black tree, sorted by natural order or `Comparator`; O(log n) ops.
+- **`ConcurrentHashMap`** — lock-striped (Java 7) / CAS + synchronised-bucket (Java 8+) thread-safe map; `compute`/`merge` for atomic check-and-act.
+- **`Comparable` vs `Comparator`** — natural order on the class vs external ordering strategy.
+- **Fail-fast vs fail-safe iterator** — `ArrayList`/`HashMap` iterators throw `ConcurrentModificationException` on structural change; `ConcurrentHashMap` iterators are weakly consistent.
+- **PECS** — `producer extends, consumer super`; the wildcard rule for generic collections.
+- **Three immutable flavours** — `Collections.unmodifiableXxx` (view, source still mutable), `List.of` / `Set.of` (truly immutable, null-hostile), `Collectors.toUnmodifiableList` (stream terminal).
+- **`groupingBy` / `partitioningBy` / `toMap`** — the three collectors you reach for daily; `toMap` blows up on duplicate keys unless you pass a merger.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Defaults and tradeoffs** — pick the wrong collection and you'll pay 100× in cache misses, allocation, or contention. A candidate who picks `LinkedList` for "fast inserts" without thinking about cache locality is signalling textbook knowledge, not production experience. (2) **HashMap internals** — every Java interview asks about HashMap because it tests three things at once: hashing, equality contract, and the Java-8 treeification optimisation. Get the contract right and your `equals`/`hashCode` answers in Core Java pay off here. (3) **Stream collectors** — `groupingBy`/`partitioningBy`/`toMap` are the daily-bread of data transformation in modern Java services. If you can't write a `Map<Customer, List<Order>>` reduction with `groupingBy(Order::customer)` on a whiteboard, you don't write modern Java. Senior candidates also know the *failure modes*: duplicate keys in `toMap`, ordering loss in `groupingBy` without a downstream `LinkedHashMap` supplier.
+
+**Common confusions**
+
+- "`LinkedList` is faster than `ArrayList` for inserts" — only at the ends, and `ArrayDeque` beats both. In the middle, `ArrayList`'s `System.arraycopy` is faster than walking node pointers because of cache locality.
+- "`HashMap` is O(1)" — *amortised average*; O(n) worst case on adversarial keys before Java 8 treeification, O(log n) worst case after.
+- "`Collections.synchronizedMap` is the same as `ConcurrentHashMap`" — it isn't. `synchronizedMap` locks the entire map; `ConcurrentHashMap` locks per bucket and supports concurrent iteration.
+- "Iterating a `HashMap` while removing is fine if you call `map.remove`" — it isn't; only `iterator.remove()` is safe.
+- "`Optional<T>` belongs in collections" — don't put `Optional` into a `Map`; use `containsKey`/`getOrDefault`.
+- "Initial capacity doesn't matter" — it does for hot-path maps with known size; resize-and-rehash is expensive. Use `Maps.newHashMapWithExpectedSize(n)` or `new HashMap<>((int)(n / 0.75f) + 1)`.
+
+**What follows from this topic**
+
+Collections is the spine of every later topic. `ConcurrentHashMap` previews Concurrency primitives. The fail-fast / fail-safe distinction previews thread-safety reasoning. `equals`/`hashCode` here pays off in JPA entity design (Database). Stream collectors recur in System Design (aggregations) and Common Pitfalls (the `toMap` duplicate-key bug). If a candidate can't reason about Collections fluently, every later answer will leak.
+
 ### Q26. Explain the Java Collections hierarchy.
 
 ```
@@ -1488,6 +1571,48 @@ Single global lock = poor concurrency, single point of contention. Legacy.
 ---
 
 ## Concurrency
+
+### Summary
+
+**What this topic covers**
+
+Multi-threaded programming on the JVM — the hardest part of Java to interview well on, and the part where senior candidates separate themselves most clearly. Four concern areas: (1) the **primitives** — `Thread`, `Runnable`, `Callable`, `synchronized`, `volatile`, `wait`/`notify`, atomic classes, `Lock` interface, `ReadWriteLock`, `StampedLock`; (2) the **abstractions** — `ExecutorService`, thread pools, `Fork/Join`, `CompletableFuture`, `CountDownLatch`, `CyclicBarrier`, `Phaser`, `Semaphore`; (3) the **memory model** — happens-before, release-acquire, memory barriers, `volatile` semantics, false sharing, ABA, `VarHandle`; and (4) the **modern picture** — virtual threads, structured concurrency, reactive vs Loom, lock-free data structures (Treiber stack, Michael-Scott queue, LMAX Disruptor). The 38 questions are the most numerous in the primer for a reason: this is where bugs hide and where senior judgment shows.
+
+**Mental model**
+
+Concurrency in Java is three stacked layers. (1) The **JVM Memory Model (JMM)** — a specification, not a thing in the runtime — that defines which writes by thread A are guaranteed visible to thread B. The happens-before relation is the *only* tool for reasoning about visibility; `volatile`, `synchronized`, `Lock`, `Thread.start`/`join`, and `final` field freezes are the constructs that establish it. (2) The **synchronisation primitives** built on top — intrinsic locks (`synchronized`), explicit locks (`ReentrantLock`, `ReadWriteLock`, `StampedLock`), atomics (`AtomicLong`, `AtomicReference`, `LongAdder`), CAS via `VarHandle`. Pick wrong and you get either deadlock or sluggishness. (3) The **task abstractions** — `ExecutorService` pools, `CompletableFuture` for async composition, virtual threads (Java 21+) for blocking-style I/O at scale. The unifying principle: never share mutable state without a memory-model story. Either don't share (thread confinement, immutability), or share through a synchronisation primitive that establishes happens-before, or use a concurrent data structure that wraps the synchronisation for you. Anything else is a bug waiting for production.
+
+**Key terms**
+
+- **Thread vs process** — threads share heap and method area; processes don't.
+- **`synchronized`** — intrinsic lock on the object monitor; reentrant; establishes happens-before on entry/exit.
+- **`volatile`** — single-variable visibility guarantee; reads/writes establish happens-before but don't provide atomicity for compound actions.
+- **Atomic classes** — `AtomicInteger`/`AtomicLong`/`AtomicReference`; CAS-based, lock-free; `LongAdder` better under high contention.
+- **`ThreadLocal`** — per-thread storage; leaks if not `remove()`-d in pool threads.
+- **`ExecutorService`** — task submission API; `Executors.newFixedThreadPool`, `newCachedThreadPool`, `newScheduledThreadPool`, `newVirtualThreadPerTaskExecutor`.
+- **`CompletableFuture`** — async composition; `thenApply`, `thenCompose`, `handle`, `exceptionally`.
+- **Happens-before** — the JMM ordering relation; if A happens-before B, A's writes are visible to B.
+- **Virtual thread** — JVM-scheduled lightweight thread; cheap; pinned by `synchronized` and JNI.
+- **`StructuredTaskScope`** — Java 21+ scoped concurrent tasks with shared lifetime.
+- **False sharing** — two threads writing different fields in the same cache line, ping-ponging the line; fixed with `@Contended` or padding.
+- **ABA problem** — CAS sees the same value but state changed in between; `AtomicStampedReference` carries a version stamp.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Do you understand the JMM?** — junior candidates write `synchronized` reflexively; senior candidates can explain *why* it works (happens-before on monitor exit/enter), what `volatile` alone does and doesn't guarantee, and why double-checked locking needs `volatile`. The `wait`/`sleep` distinction, the `volatile` flag idiom, the `synchronized(boxedBoolean)` bug — all probe this. (2) **Do you reach for the right tool?** — `ConcurrentHashMap` over `Collections.synchronizedMap`; `LongAdder` over `AtomicLong` under contention; `ReentrantLock` over `synchronized` when you need `tryLock` or fairness; `CompletableFuture` over manual `Future`. (3) **Where are you on the Loom transition?** — in 2026, a senior Java engineer should be able to articulate when to use virtual threads vs reactive vs platform-thread pools. "We're rewriting our reactive code on Loom because the team can't debug `Flux` chains" is a credible 2026 answer.
+
+**Common confusions**
+
+- "`volatile` makes operations atomic" — it doesn't; `i++` on a `volatile int` is still a race.
+- "`synchronized` and `Lock` are interchangeable" — they aren't; `Lock` gives `tryLock`, fairness, interruptible acquisition, multiple condition variables, and (crucially in 2026) doesn't pin virtual threads.
+- "Double-checked locking works without `volatile`" — it doesn't; the JMM allows reordering of the construction.
+- "More threads = faster" — true only up to the bottleneck (CPU cores for compute, connection pool size for I/O); beyond that, contention dominates.
+- "`CompletableFuture.get()` is fine in a controller" — it blocks a request thread; with virtual threads this is now acceptable, with platform threads it isn't.
+- "Virtual threads make all blocking calls cheap" — they make most cheap; `synchronized` and JNI still pin, so virtual-thread code should prefer `ReentrantLock` and avoid native calls in hot paths.
+
+**What follows from this topic**
+
+Concurrency is where every later topic stress-tests itself. The JMM underpins JVM Memory & Performance. Thread pools size against HikariCP and Tomcat connector pools in Database and Spring. Virtual threads change the answer to System Design's "how do we scale this service" question. `CompletableFuture` patterns recur in Resilience (timeout, retry, circuit breaker). If concurrency feels shaky, this is the highest-leverage section to drill — interviewers spend disproportionate time here because it's where production bugs come from.
 
 ### Q36. What is the difference between process and thread?
 
@@ -2519,6 +2644,48 @@ Use `Callable` when you need the result or expect failures you want to surface t
 
 ## JVM, Memory & Performance
 
+### Summary
+
+**What this topic covers**
+
+How the JVM actually runs the code — and how to make it run faster, leak less, and crash less. Four concern areas: (1) **garbage collection** — generational GC, the collectors (Serial, Parallel, G1, ZGC, Shenandoah), tuning knobs, and what each generation costs; (2) **memory** — heap vs stack, the JVM memory areas (heap, metaspace, code cache, native, direct), reference types (strong/soft/weak/phantom), memory leaks, OOM diagnosis; (3) **JIT and execution** — class loading, parent delegation, C1/C2 tiered compilation, escape analysis, scalar replacement, compressed OOPs, TLABs, intrinsics, deoptimisation; and (4) **tooling** — JFR, jcmd, jdeps, jlink, jpackage, async-profiler, heap dumps, JMH. The 33 questions span "what does GC do" entry-level material through tuning G1 for a 16GB low-latency service.
+
+**Mental model**
+
+The JVM is a *virtual* machine in the literal sense: a runtime that translates bytecode into native instructions and manages memory for you, hiding both behind tunable abstractions. Memory is split into **young generation** (Eden + two survivor spaces, where most objects die quickly), **old generation** (long-lived objects), **metaspace** (class metadata, native memory since Java 8), and **off-heap** (direct buffers, native libs, code cache, thread stacks). GC runs **minor** collections on the young gen (cheap, frequent) and **full/concurrent** collections that touch the old gen (expensive, rare). G1 is the default since Java 9, splitting the heap into regions and tracking which ones are mostly garbage; ZGC and Shenandoah are concurrent collectors with sub-millisecond pauses for very large heaps. Execution starts interpreted, then the JIT promotes hot methods to **C1** (fast compile, basic optimisation), then **C2** (slow compile, aggressive optimisation: inlining, escape analysis, scalar replacement, intrinsics). If profiling assumptions are violated, C2 **deoptimises** back down. Most performance "problems" are allocation rate, GC pauses, or contention; tooling (JFR + async-profiler) tells you which.
+
+**Key terms**
+
+- **Generational GC** — weak generational hypothesis: most objects die young, so collect young gen frequently and cheaply.
+- **G1 (Garbage First)** — region-based, default since Java 9; targets pause goals via `-XX:MaxGCPauseMillis`.
+- **ZGC / Shenandoah** — concurrent collectors; sub-ms pauses on heaps from 8GB to multi-TB.
+- **Metaspace** — native memory holding class metadata; replaced PermGen in Java 8; can leak via classloader leaks.
+- **TLAB (Thread-Local Allocation Buffer)** — per-thread slab of Eden; allocation is a pointer bump, no synchronisation.
+- **Reference types** — strong (default), soft (cleared on memory pressure), weak (cleared on next GC), phantom (post-mortem hook).
+- **JIT (C1/C2)** — tiered compilation: interpret → C1 quick compile → C2 full optimisation.
+- **Escape analysis** — compiler determines if an object can escape its allocating method; if not, scalar replace it on the stack.
+- **Compressed OOPs** — 32-bit object pointers on 64-bit JVMs up to ~32GB heaps; halves pointer overhead.
+- **JFR (Java Flight Recorder)** — built-in profiler; near-zero overhead; events for allocation, GC, locks, I/O.
+- **async-profiler** — sampling profiler that avoids the safepoint bias of `jstack`-based tools.
+- **jcmd / jlink / jpackage** — diagnostic commands, custom runtime images, native installers.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Operational maturity** — anyone can recite "Eden, Survivor, Old"; only operational engineers have actually tuned a G1 collector, read GC logs, and diagnosed a `Metaspace` OOM. A candidate who has shipped JVM services to production has done this; a candidate who hasn't can't fake it. (2) **Diagnostic instinct** — when interviewers ask "how would you debug a memory leak", they want to hear *a sequence*: enable JFR or take a heap dump, load it in Eclipse MAT, find the dominator tree, find the GC roots holding the leaked object. Junior candidates say "look at logs"; senior candidates name the tools and the steps. (3) **Performance literacy** — escape analysis, scalar replacement, biased locking (and why it was removed), compressed OOPs, intrinsics — these are how senior engineers reason about *why* their micro-benchmark looks weird. JMH gotchas (`@State`, `Blackhole`, dead-code elimination) catch out candidates who think benchmarking is `System.nanoTime()`.
+
+**Common confusions**
+
+- "GC tuning means messing with `-Xmx`" — that's heap sizing; tuning is collector choice, pause goal, region size, concurrent thread counts.
+- "OutOfMemoryError means raise the heap" — sometimes; often it's a leak, a misconfigured cache, an unbounded collection, or a classloader leak in a redeployed app.
+- "WeakReference and SoftReference are similar" — they aren't; weak refs clear on next GC, soft refs hang on until memory pressure. Use soft for memory-sensitive caches, weak for canonical-instance maps.
+- "Stack stores primitives, heap stores objects" — closer to right than wrong, but escape analysis can scalarise objects onto the stack; method-local primitives may live in registers, never touching the stack.
+- "Metaspace can't OOM" — it can. Classloader leaks (every reload of a webapp without cleanup) accumulate metadata indefinitely.
+- "JIT compiles everything to native at startup" — it doesn't; it warms up. Use AOT (Leyden, GraalVM native-image) if startup matters more than peak throughput.
+
+**What follows from this topic**
+
+JVM internals underpin every operational answer in the primer. GC pauses feed System Design (p99 latency budgets). Class loaders feed Spring (devtools restart leaks) and Build Tools (shaded jars). JFR and async-profiler are the tools you reach for in Cloud-Native Java (production diagnostics on Kubernetes). Memory model knowledge crosses straight back into Concurrency. If JVM tuning feels mystical, drill the diagnostic workflow first: most production "performance problems" turn out to be one of allocation, contention, or pause time.
+
 ### Q51. How does garbage collection work in Java?
 
 Automatic memory reclamation: GC identifies objects no longer reachable from GC roots and reclaims their memory.
@@ -3439,6 +3606,48 @@ asprof -d 30 --all-user -f profile.html <pid>
 
 ## Spring
 
+### Summary
+
+**What this topic covers**
+
+The framework most Java backend interviews assume you know cold. Three concern areas live here: (1) **the core IoC container** — dependency injection, bean lifecycle, scopes, configuration, profiles, `@ConfigurationProperties` vs `@Value`, application context layering, circular-dependency resolution; (2) **the Spring Boot value proposition** — auto-configuration, starters, Actuator endpoints, conditional beans, `META-INF/spring.factories` (or `AutoConfiguration.imports` in 2.7+), embedded servers; and (3) **the cross-cutting layer** — Spring AOP, `@Transactional`, `@Async`, event publishing, Bean Validation, Spring Security (sketch). Plus the modern members of the ecosystem: Spring Modulith for modular monoliths, Spring Batch for ETL, Spring Cloud Stream for messaging, the migration from Sleuth to OpenTelemetry. The 29 questions are about whether you understand *what Spring is doing for you*, not just what annotations to sprinkle.
+
+**Mental model**
+
+Spring is, at its core, a *bean container with cross-cutting hooks*. The `ApplicationContext` boots, scans for `@Component`/`@Service`/`@Repository`/`@Controller` (or processes `@Bean` methods in `@Configuration` classes), resolves dependencies between them, wires them together, then offers them up for use. Around that core sit two transformative ideas. (1) **Auto-configuration** — Spring Boot ships hundreds of `@AutoConfiguration` classes guarded by `@ConditionalOnClass`, `@ConditionalOnMissingBean`, `@ConditionalOnProperty`; the effect is "if Hibernate is on the classpath and the user hasn't defined their own `DataSource`, configure one". This is what makes a Spring Boot app start with three lines of code. (2) **AOP proxies** — `@Transactional`, `@Async`, `@Cacheable`, security annotations are all implemented by *wrapping the bean in a proxy* (CGLIB subclass for concrete classes, JDK dynamic proxy for interface beans). The proxy intercepts calls, opens the transaction / submits to executor / checks permission, then delegates. Everything weird about `@Transactional` — why it doesn't work on private methods, why self-invocation is broken — comes from this proxy mechanism. Internalise these two and Spring stops being magic.
+
+**Key terms**
+
+- **IoC / DI** — Inversion of Control: the framework calls your code, not vice versa. DI is the most common form.
+- **Bean** — an object whose lifecycle the container manages.
+- **`ApplicationContext`** — the IoC container; configuration metadata + bean registry + event publisher.
+- **Bean scope** — singleton (default, one per context), prototype (new on each lookup), request, session, application, websocket.
+- **Constructor vs setter vs field injection** — constructor preferred (immutability, fail-fast, testability).
+- **Bean lifecycle** — instantiate → populate → `BeanNameAware`/`BeanFactoryAware` callbacks → `BeanPostProcessor.postProcessBeforeInitialization` → `@PostConstruct` → `afterPropertiesSet` → custom init → `postProcessAfterInitialization` → ready → `@PreDestroy` → custom destroy.
+- **Auto-configuration** — conditional `@Configuration` classes triggered by classpath/property presence.
+- **`@Transactional`** — proxy-based transaction boundary; honours propagation and isolation; rolls back on unchecked exceptions by default.
+- **Spring AOP** — proxy-based aspect weaving; method-only, no field/constructor pointcuts; AspectJ for those.
+- **Profiles** — `@Profile("dev")` / `application-dev.yml`; activated via `SPRING_PROFILES_ACTIVE`.
+- **`@MockBean` vs `@SpyBean`** — replace bean with mock vs wrap real bean with spy; Spring-specific, slower than `@Mock`.
+- **Actuator** — `/health`, `/metrics`, `/info`, `/env`, `/loggers`, `/threaddump`, `/heapdump`.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Do you understand the proxy mechanism?** — every Spring "gotcha" question (`@Transactional` self-invocation, `@Async` not async, `@Cacheable` not cached) reduces to "the call didn't go through the proxy". Senior candidates know this immediately; junior candidates flail. (2) **Have you operated Spring services?** — Actuator endpoints, profile-based config, layered jars for Docker, graceful shutdown, `@ConfigurationProperties` over `@Value` — these are the muscle memory of someone who's shipped Spring to production. (3) **Do you know the ecosystem in 2026?** — Spring Boot 3 (Jakarta EE 9, Java 17 baseline), Spring Modulith for the post-microservices "modular monolith" trend, native-image with AOT processing, OpenTelemetry over Sleuth. "I haven't touched Spring Cloud Sleuth since 2022" is a *good* answer.
+
+**Common confusions**
+
+- "Field injection is fine" — it isn't; can't be `final`, hides dependencies, hostile to testing without a Spring context.
+- "`@Transactional` on a private method works" — it doesn't; the proxy can't intercept private calls.
+- "Calling `@Transactional` from another method in the same class works" — no; self-invocation bypasses the proxy. Inject `self` or refactor.
+- "`@Component` is for services, `@Service` is for business logic" — they're functionally identical; `@Service` is a stereotype for clarity.
+- "Spring Boot is Spring" — Boot is Spring's opinionated auto-configuration layer on top; you can use Spring without Boot, just rarely should.
+- "`@Async` works without `@EnableAsync`" — it doesn't; same with `@Scheduled` and `@EnableScheduling`.
+
+**What follows from this topic**
+
+Spring is the glue layer for the rest of the primer. `@Transactional` semantics extend into Database & JPA. Spring Security extends into Security. Spring Cloud Stream extends into Messaging (Kafka). Actuator + Micrometer underpin Cloud-Native operability. AOP returns in Design Patterns. If a candidate can't articulate the proxy mechanism, every later "why doesn't this work" question becomes a stumbling block.
+
 ### Q61. Explain dependency injection and inversion of control.
 
 - IoC is a design principle where **the control flow of a program is inverted** compared to traditional programming. Instead of your code controlling the flow and creating dependencies, a framework or container takes control.
@@ -4281,6 +4490,51 @@ class ApiExceptionHandler {
 
 ## Database, JPA & Hibernate
 
+### Summary
+
+**What this topic covers**
+
+The persistence layer — JPA as a specification, Hibernate as the dominant implementation, Spring Data JPA as the productivity layer on top, and the underlying relational database concerns that leak through. Four concern areas: (1) **JPA core** — entity lifecycle states (new, managed, detached, removed), the persistence context, `EntityManager`, save/persist/merge/update semantics, cascade types, fetch types; (2) **performance traps** — the N+1 problem, LazyInitializationException, fetch joins, flush modes, first- and second-level cache; (3) **transactions and locking** — `@Transactional` propagation, isolation levels, optimistic (`@Version`) vs pessimistic locking, MVCC, deadlock detection; and (4) **the SQL underneath** — index types (B-tree, hash, GIN, partial, covering), query plans, schema migrations (Flyway vs Liquibase), connection pooling (HikariCP sizing). The 22 questions are where senior backend engineers either shine or expose that "Spring Data does it for me" hasn't been enough.
+
+**Mental model**
+
+JPA is a *unit-of-work pattern* draped over JDBC. Inside a transaction, the `EntityManager` maintains a **persistence context** — a first-level cache mapping entity IDs to managed instances. Entities transition between four states: **new** (not yet associated), **managed** (in the context, changes auto-flushed), **detached** (was managed but the context closed), **removed** (scheduled for delete). On flush, Hibernate dirty-checks managed entities and emits the minimal SQL to sync the database — this is the source of "magic" (`entity.setName("x")` causes an UPDATE) and the source of pain (a stale managed entity quietly clobbers concurrent writes). Lazy loading is implemented by proxies that fetch on first access; if the session is closed by then, you get `LazyInitializationException`. The N+1 problem arises because lazy associations look like field access but emit one SELECT per parent. The fix is to think in *SQL* — every JPA operation has a SQL outcome, and you need to know what it is. Spring Data JPA sits on top, generating `Repository` implementations from method-name conventions and offering derived queries, JPQL, native queries, Specifications, and the Criteria API. The 2026 answer is "use JPA for CRUD, escape to jOOQ or plain JDBC for the gnarly read paths".
+
+**Key terms**
+
+- **JPA** — Jakarta Persistence API (formerly Java Persistence); spec, not implementation.
+- **Hibernate** — the dominant JPA implementation; predates the spec.
+- **Persistence context / first-level cache** — per-transaction identity map of managed entities.
+- **Second-level cache** — cross-transaction cache (Ehcache, Caffeine, Infinispan); read-mostly entities only.
+- **Entity states** — new, managed, detached, removed.
+- **`persist` vs `merge` vs `save`** — `persist` requires new entity, `merge` copies a detached entity's state into a managed copy, `save` (Spring Data) decides between them.
+- **Cascade types** — `PERSIST`, `MERGE`, `REMOVE`, `REFRESH`, `DETACH`, `ALL`. `REMOVE` is the foot-gun.
+- **Fetch type** — `EAGER` (load with parent) vs `LAZY` (load on access); default LAZY for `@OneToMany`/`@ManyToMany`, EAGER for `@ManyToOne`/`@OneToOne`.
+- **N+1** — 1 query for parents, N queries for children; fix with `JOIN FETCH`, entity graphs, `@BatchSize`.
+- **LazyInitializationException** — accessing a lazy association outside an open session.
+- **Optimistic vs pessimistic locking** — `@Version` retry-on-conflict vs `SELECT ... FOR UPDATE` block-others.
+- **Transaction propagation** — REQUIRED (default), REQUIRES_NEW, NESTED, SUPPORTS, NOT_SUPPORTED, NEVER, MANDATORY.
+- **Isolation levels** — READ_UNCOMMITTED, READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE; what each prevents (dirty/non-repeatable/phantom reads).
+- **HikariCP** — the de-facto connection pool; sized as `cores * 2 + spindles` typically; lower than people think.
+- **Flyway / Liquibase** — schema migration tools; Flyway is SQL-first, Liquibase is changelog-DSL-first.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Production scars** — the N+1 question is universal because everyone hits it in production once and never forgets. A candidate who solves it with `JOIN FETCH` and warns about pagination interaction is signalling experience; "use EAGER everywhere" is signalling the opposite. (2) **Transactional thinking** — propagation modes, isolation levels, optimistic vs pessimistic locking are how senior engineers reason about concurrent updates. The `@Transactional(propagation = REQUIRES_NEW)` to checkpoint an audit log during a failed business transaction is everyday knowledge. (3) **SQL fluency** — can you read a query plan? Do you know when an index helps and when it doesn't? Do you understand MVCC well enough to explain why Postgres' `SELECT` doesn't block writers? The senior candidate has thought below the ORM line.
+
+**Common confusions**
+
+- "`save()` and `persist()` are the same" — they aren't; `persist` is JPA spec (new entities only, returns void); `save` is Spring Data (decides between persist and merge, returns the persisted entity).
+- "Lazy is always better than eager" — lazy is the better *default*, but always-lazy + access patterns = N+1. Use entity graphs or fetch joins for the actual access shape.
+- "`@Transactional(readOnly = true)` makes queries read-only" — it's a *hint* to Hibernate (skip dirty checks) and to the database (route to read replica); it doesn't physically prevent writes.
+- "Cascade ALL is a sensible default" — it isn't; `CascadeType.REMOVE` on a `@ManyToOne` can delete a shared parent.
+- "Bigger Hikari pool = more throughput" — past the database's parallel-query capacity, more connections hurt; saturated DBs perform worse.
+- "Optimistic locking is for low-contention; pessimistic for high" — closer to right than wrong, but optimistic is *almost always* the better choice; you only reach for pessimistic when retry cost is prohibitive.
+
+**What follows from this topic**
+
+JPA is where Spring (`@Transactional`), Concurrency (isolation, locking), and Performance (N+1, query plans) intersect in the day-to-day. Outbox pattern (Design Patterns) plus exactly-once semantics (Messaging/Kafka) build on this transactional foundation. Sharded databases and read replicas (System Design) inherit the connection-pool sizing question. If JPA feels mystical, the cure is to log SQL (`spring.jpa.show-sql=true`, plus `org.hibernate.SQL=DEBUG`) and read what your code actually emits.
+
 ### Q71. What is ORM and its advantages?
 
 **ORM (Object-Relational Mapping)** maps relational tables ↔ object graphs. JPA is the spec; Hibernate, EclipseLink are implementations.
@@ -4902,6 +5156,50 @@ int cancelOldBookings(@Param("d") LocalDate d);
 
 ## Design Patterns & Architecture
 
+### Summary
+
+**What this topic covers**
+
+The structural vocabulary senior engineers use to discuss systems above the method level. Three concern areas: (1) **GoF patterns** — Singleton (and its thread-safe forms), Factory and Abstract Factory, Observer, Decorator, Adapter, Proxy, Chain of Responsibility, Strategy, Template Method, Builder; (2) **architectural styles** — Hexagonal / Ports & Adapters, Clean / Onion Architecture, Domain-Driven Design (DDD), microservices vs modular monoliths, the Strangler Fig migration pattern, Backend for Frontend (BFF); and (3) **anti-patterns and distributed patterns** — God class, anemic domain model, primitive obsession, feature envy, plus the Outbox pattern, event-driven architecture, and when those earn their complexity. The 16 questions are less about reciting GoF and more about whether you reach for the right *shape* for the problem.
+
+**Mental model**
+
+Design patterns are not a checklist; they're a *shared vocabulary* for tradeoffs. Junior engineers learn GoF and start sprinkling Singletons; senior engineers internalise that every pattern is a tradeoff between flexibility, performance, and cognitive load — and the right answer most of the time is "no pattern, just a function or a class". The valuable patterns in 2026 Java are the ones that survive contact with frameworks: **Strategy** (often expressed as a lambda or `Function<T,R>` field), **Decorator** (filters, interceptors, Spring AOP), **Builder** (Lombok `@Builder`, records' wither-style copies), **Adapter** (the gateway between hexagonal "ports" and external systems), **Observer** (Spring's `ApplicationEvent`, reactive `Publisher`/`Subscriber`). At the architecture tier the story is similar: Hexagonal/Clean/Onion are *the same idea* — push domain logic to the centre, push frameworks and I/O to the edges, depend inwards only. DDD gives you the language for that centre (aggregates, value objects, domain events, bounded contexts). Microservices give you organisational scaling — at the cost of distributed-system complexity that most teams underestimate. The 2026 backlash is the **modular monolith** (Spring Modulith, well-bounded packages) — the productivity of a monolith with most of the structural discipline of services. Knowing when to *not* split is the senior judgment call.
+
+**Key terms**
+
+- **Singleton** — exactly one instance; in Spring, every bean is a singleton by default, so don't write it manually.
+- **Factory / Abstract Factory** — encapsulate construction; Abstract Factory creates *families* of related products.
+- **Observer** — pub-sub; Java's `Observable` is deprecated, use `ApplicationEvent`, `Flow.Publisher`, or Reactor.
+- **Strategy** — interchangeable algorithm; in 2026 Java, often just a `Function` field.
+- **Decorator** — wraps a component to add behaviour; Spring AOP, Servlet filters, `BufferedReader`.
+- **Proxy** — stand-in that controls access; CGLIB/JDK dynamic proxies power Spring AOP and JPA lazy loading.
+- **Chain of Responsibility** — request flows down a chain; Spring Security filter chain is the canonical example.
+- **Builder** — fluent construction for objects with many optional fields; Lombok, records with companion builders.
+- **Hexagonal / Ports & Adapters** — domain at the centre, adapters at the edges (controllers, repositories, message handlers).
+- **Clean / Onion Architecture** — same shape as hexagonal; concentric dependency rule (inward only).
+- **DDD** — bounded contexts, aggregates, value objects, domain events, ubiquitous language.
+- **Strangler Fig** — incremental migration by intercepting traffic and gradually replacing the old system.
+- **BFF** — backend tailored to a specific client (web, mobile, partner); avoids one fat API trying to serve everyone.
+- **Outbox** — persist outgoing events in the same DB transaction as the state change; relay them to the broker asynchronously.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Vocabulary for tradeoffs** — senior engineers should be able to say "I'd use Strategy here, not inheritance, because the algorithms vary independently of the data". Junior candidates name the pattern; senior candidates explain *why this pattern over that one*. (2) **Architectural maturity** — given a system design problem, do you reach for microservices reflexively or do you ask whether a modular monolith would do the job? Do you know when *not* to apply DDD (a CRUD app with no real domain doesn't need aggregates)? Patterns over-applied are noise. (3) **Anti-pattern recognition** — recognising the anemic domain model (entities are bags of getters/setters, all behaviour in services), the primitive-obsession smell (`String customerId` everywhere instead of a `CustomerId` value object), the God service that's accumulated half the codebase — these are the smells that distinguish senior code review from junior.
+
+**Common confusions**
+
+- "Use Singleton for shared state" — in Spring you already have singleton beans; writing the GoF singleton is reinventing the wheel.
+- "Factory pattern means a class with `static create()` methods" — that's a static factory *method*; the Factory *pattern* is about decoupling construction from use, often with polymorphism.
+- "Hexagonal and Clean and Onion are different architectures" — they're the same idea with different vocabularies; the principle is "domain doesn't depend on infrastructure".
+- "Microservices solve coupling" — they distribute coupling. Bad boundaries become network calls.
+- "DDD means using `@Entity` everywhere" — DDD is a modelling discipline; JPA entities are a persistence mechanism. They can align but the latter is not the former.
+- "Anemic domain model is bad" — it's bad when you *meant* to have a rich domain. For a transactional script over CRUD, anemic is fine.
+
+**What follows from this topic**
+
+Patterns and architecture are the lens through which later topics make sense. Outbox + Strangler Fig connect to Messaging (Kafka) and migration in System Design. Hexagonal architecture frames Testing (it's easier to test pure domain logic than tangled service layers). DDD framing recurs in Database (aggregate boundaries = transaction boundaries). Senior candidates don't quote GoF chapter and verse — they recognise the *shape* of a problem and know which tools have worked for it before.
+
 ### Q79. Which design patterns have you used in your projects?
 
 (Adapt to your CV — these are the reliable ones to mention.)
@@ -5369,6 +5667,49 @@ Communication via events rather than synchronous request/response. Producer emit
 ---
 
 ## Testing
+
+### Summary
+
+**What this topic covers**
+
+How senior Java engineers think about correctness and confidence. Three concern areas: (1) **the testing tier** — unit vs integration vs end-to-end, the testing trophy/pyramid, what each tier is for, and where the boundaries belong; (2) **the JVM-specific tooling** — JUnit 4 vs JUnit 5 (Jupiter), parameterised tests, Mockito (`ArgumentCaptor`, `argThat`, `@Mock` vs `@Spy` vs `@MockBean` vs `@SpyBean`), AssertJ vs Hamcrest vs vanilla, Testcontainers, JMH for benchmarks; and (3) **the discipline** — TDD, the test-double taxonomy (dummy, stub, fake, spy, mock), mutation testing (Pitest), contract testing (Pact), property-based testing (jqwik), and quality gates (JaCoCo coverage thresholds). The 17 questions test whether you can articulate *why* you test what you test, and recognise when more tests would buy you less confidence.
+
+**Mental model**
+
+Tests exist to give you the confidence to change code. Every test costs to write, maintain, and run; the return is the cost it saves you in production bugs or fearful changes. Senior engineers think about that ROI explicitly. The classic **testing pyramid** (many fast unit tests, fewer integration tests, fewer still E2E) was the 2010s consensus; Kent C. Dodds' **testing trophy** rebalanced it toward integration tests, arguing that unit tests are cheap but give little confidence about *systems*. The 2026 Java equivalent: unit tests for pure domain logic, **`@SpringBootTest` + Testcontainers** for the integration surface (real DB, real broker, no mocks of your own code), and a thin end-to-end smoke layer. Mocks belong at *I/O boundaries* (HTTP clients, brokers) — not at your service-to-service boundaries inside the app, where they bind tests to implementation. Test doubles have a precise taxonomy (dummy, stub, fake, spy, mock); using "mock" for all of them is sloppy. The discipline questions — TDD, mutation testing, property-based testing, contract testing — are about whether you've actually shipped under those disciplines or merely heard the words.
+
+**Key terms**
+
+- **Unit test** — exercises a single unit (class, function) in isolation. Fast, no I/O.
+- **Integration test** — exercises a slice of the system including real dependencies (DB, broker, HTTP).
+- **End-to-end** — exercises the full system from outside; slow, brittle, high-confidence.
+- **JUnit 5 (Jupiter)** — `@ExtendWith`, `@ParameterizedTest`, `@Nested`, `@DisplayName`; replaces JUnit 4's `@RunWith` model.
+- **Mockito** — mocking framework; `mock()`, `when().thenReturn()`, `verify()`, `ArgumentCaptor`, `@MockBean` for Spring.
+- **AssertJ** — fluent assertion library; `assertThat(x).isEqualTo(y).hasSize(3)`. Strictly better than JUnit assertions.
+- **Testcontainers** — Docker-managed throwaway dependencies for integration tests; Postgres, Kafka, Redis, etc.
+- **TDD** — red, green, refactor; tests drive design.
+- **Test double taxonomy** — dummy (passed but unused), stub (canned response), fake (working in-memory impl), spy (real + recording), mock (verified expectations).
+- **JaCoCo** — coverage tool; useful as a *floor* (don't drop below X%), not a *goal*.
+- **Mutation testing (Pitest)** — mutate code, see if tests catch the mutation; measures test *quality* not coverage.
+- **Property-based testing (jqwik)** — declare properties, library generates inputs; finds edge cases humans miss.
+- **Contract testing (Pact)** — consumer publishes expectations, provider verifies them; catches API drift across services.
+
+**Why interviewers ask this**
+
+Three signals. (1) **What do you mock?** — a candidate who says "I mock the repository in service tests" reveals they're testing implementation. A candidate who says "I use Testcontainers for the DB so I'm testing what production runs" reveals operational maturity. The mock-everything style produces high coverage and low confidence; senior engineers know this. (2) **Do you use JUnit 5 idioms?** — `@ParameterizedTest` with `@CsvSource`, `@Nested` classes for context-grouping, `assertThrows` for exception assertions. Code stuck on JUnit 4 idioms reveals a legacy codebase that hasn't been refactored. (3) **Test discipline beyond unit tests** — mutation testing, contract testing, property-based testing, JMH. Most candidates have heard the words; few have used them. The candidate who can describe a mutation-test-discovered bug or a Pact-caught regression has done the work.
+
+**Common confusions**
+
+- "100% coverage means well-tested" — coverage measures *executed lines*, not *asserted behaviour*. Mutation testing exposes the gap.
+- "Mock everything for unit tests" — over-mocking makes tests brittle and meaningless. Mock at the I/O boundary, not the service boundary.
+- "Integration tests are slow, avoid them" — Testcontainers + parallel execution makes a 200-test integration suite run in 30s. The "slow" excuse is mostly outdated.
+- "`@SpyBean` and `@SpySpring` and `@Spy` are the same" — they aren't; Spring spies wrap the bean in the context (heavy), Mockito spies are standalone (light).
+- "TDD slows you down" — TDD changes *when* the design work happens, not how much. Done badly it slows you; done well it accelerates because you catch design problems before writing the implementation.
+- "Coverage gates fix quality" — they prevent regression in coverage, not in quality. Mutation gates fix quality.
+
+**What follows from this topic**
+
+Testing discipline underpins every later claim about correctness. Integration testing with Testcontainers feeds Database (real Postgres) and Messaging (real Kafka). `@SpringBootTest` slices show up in Spring topic gotchas. JMH connects to JVM Performance. If a candidate's testing answers are vague, treat their production-readiness claims with the same skepticism — untested code that "works" is a debt position, not an asset.
 
 ### Q87. What is your approach to unit testing?
 
@@ -5950,6 +6291,49 @@ class BookingApiIntegrationTest {
 
 ## System Design & Best Practices
 
+### Summary
+
+**What this topic covers**
+
+The "design a system on a whiteboard" tier of the interview, plus the standing best practices that apply to any service you build. Three concern areas: (1) **API design** — REST principles, HTTP method semantics, status codes, versioning, pagination, idempotency, HATEOAS (rarely earned); (2) **distributed concerns** — distributed transactions (Saga, 2PC), caching layers (in-process, distributed, write-through vs write-behind), idempotency for payments and other side-effecting calls, cache invalidation across JVMs, zero-data-loss requirements; and (3) **operational discipline** — logging, monitoring, configuration management, code review process, technical debt management, scaling to 10× traffic. The 13 questions are the open-ended ones interviewers reach for after the fundamentals to see how you think under ambiguity.
+
+**Mental model**
+
+System design at this level is *constrained design* — picking the smallest set of moving parts that satisfies the requirements you can elicit, plus the next 6-12 months of growth. The senior signal isn't knowing every distributed-systems pattern; it's asking the *right clarifying questions first*. What's the read:write ratio? What's the latency budget? What's the consistency requirement — eventual is fine, or strong only? What happens if a request is duplicated? What's the failure mode the business cares about most — wrong data or no data? Then design from constraints to architecture rather than reaching for microservices, Kafka, Redis, and Kubernetes reflexively. For payments and money flows the answer is **idempotency keys + outbox pattern + at-least-once with deduplication** — exactly-once is a marketing word; reality is at-least-once-plus-idempotent-consumer. For caching across JVMs the answer is *don't try to keep in-process caches consistent* — use a distributed cache (Redis) or accept eventual consistency with a TTL. For scaling, find the bottleneck before adding infrastructure: 90% of 10×-traffic answers start with "horizontal scaling and connection pool sizing", not "rewrite in Go".
+
+**Key terms**
+
+- **REST** — Resource-oriented, stateless, cacheable, uniform interface; URIs name resources, methods act on them.
+- **HTTP methods** — GET (safe, idempotent), POST (not idempotent), PUT (idempotent), DELETE (idempotent), PATCH.
+- **Status codes** — 2xx success, 3xx redirect, 4xx client error, 5xx server error; 422 vs 400 vs 409 are the senior distinctions.
+- **API versioning** — URI (`/v1/...`), header (`Accept: application/vnd.foo.v1+json`), query param. URI is simplest and most common.
+- **Idempotency key** — client-supplied unique key the server uses to deduplicate retries.
+- **Outbox pattern** — write events to a DB table in the same transaction as state; relay to broker asynchronously.
+- **Saga** — long-running distributed transaction as a series of compensatable local transactions.
+- **2PC (two-phase commit)** — prepare + commit; blocks resources, doesn't survive coordinator failure cleanly. Avoid in microservices.
+- **Cache invalidation strategies** — TTL, write-through, write-behind, explicit invalidation on update, event-driven.
+- **CAP theorem** — pick two of consistency, availability, partition-tolerance; in practice partition-tolerance is non-negotiable, so it's CP or AP.
+- **Horizontal vs vertical scaling** — more instances vs bigger instances; horizontal preferred for resilience.
+- **SLO / SLI / SLA** — measurable indicators, objectives you target, contracts you sign.
+- **Twelve-factor app** — config in env, stateless processes, disposability, dev/prod parity, etc.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Do you ask first?** — the candidate who launches into a microservices + Kafka + Redis architecture without asking the latency budget is failing the senior bar. The candidate who asks "what's the read:write ratio?" before drawing a box is passing it. (2) **Idempotency reasoning** — the "stop a payment from being processed twice" question is a litmus test. The full answer involves a client-supplied idempotency key, a uniqueness constraint on the DB, a deduplication window, and reasoning about what to do on conflict. Junior candidates say "check if it exists first" (the classic check-then-act race). (3) **Operational pragmatism** — when asked how to handle 10× traffic, the senior answer is profile, find the bottleneck, scale the bottleneck. The junior answer is "rewrite in Rust". Operational maturity is the most undervalued senior signal.
+
+**Common confusions**
+
+- "Exactly-once delivery exists" — it doesn't on a network; you can get exactly-once *processing* via idempotent consumers + at-least-once delivery.
+- "REST means JSON over HTTP with `/api/...` URLs" — that's REST-ish. Actual REST is constraints (stateless, cacheable, uniform interface); HATEOAS is the part everyone skips.
+- "Cache invalidation is solved by TTL" — TTL bounds staleness but doesn't help correctness; for write-heavy data you need invalidation events.
+- "Microservices fix coupling" — they distribute coupling and add latency, partial failure modes, and observability complexity. Use only when you've earned it.
+- "2PC is the way to do distributed transactions" — it isn't in 2026; Saga + outbox is the practical answer.
+- "Idempotency means safe to retry" — only if the *server* is idempotent for that operation. GET is naturally idempotent; POST needs an idempotency key.
+
+**What follows from this topic**
+
+System design is the cross-cutting topic — it pulls on JPA (transactions), Messaging (exactly-once, outbox), Resilience (retries, timeouts, circuit breakers), Security (auth at the edge), Cloud-Native (12-factor, probes). The senior signal in this topic is *restraint*: choose the simplest architecture that satisfies the constraints, and reach for distributed-systems complexity only when forced. If a candidate over-architects everything, they'll over-architect the actual job.
+
 ### Q92. How would you design a REST API?
 
 **Resource-oriented URLs** — nouns, not verbs:
@@ -6254,6 +6638,49 @@ Strict zero is impossible — what you target is RPO≈0 within a fault domain. 
 
 ## Security
 
+### Summary
+
+**What this topic covers**
+
+The application-security baseline every backend engineer is expected to clear, plus the protocol-level cryptography you should be able to sketch. Three concern areas: (1) **the threat catalogue** — OWASP Top 10 (injection, broken access control, cryptographic failures, SSRF, etc.), SQL injection prevention, XSS, CSRF; (2) **identity** — authentication vs authorization, JWT vs session cookies, OAuth2 flows (authorization code with PKCE, client credentials, device code, refresh tokens), password storage (Argon2, bcrypt, PBKDF2 — never SHA-256 alone, never MD5); and (3) **transport and secrets** — TLS at a high level (handshake, certificate validation, mutual TLS), secrets handling in Spring Boot (Vault, Kubernetes secrets, externalised config). The 10 questions are about whether you have the security reflexes that prevent the most common breaches.
+
+**Mental model**
+
+Security at the application layer is not "do we have HTTPS" — it's a *layered defence in depth*. The mental model has three tiers. (1) **Don't write the bug** — parameterised queries, not string concatenation; output encoding, not raw HTML interpolation; bound types, not stringly-typed IDs across trust boundaries. Most of the OWASP Top 10 reduces to this. (2) **Authenticate then authorize** — authentication answers "who are you", authorization answers "what can you do". Conflating them is the source of broken access control. JWT solves stateless authentication but introduces revocation problems (no server-side session to invalidate); session cookies solve revocation but require a session store. The 2026 default for web apps is *still session cookies* with same-site flags; JWT is for service-to-service and mobile-to-API. (3) **Defence in depth** — assume each layer fails. WAF + input validation + parameterised queries + least-privilege DB user + TLS + audit logging + monitoring + intrusion detection. The OWASP framing is useful because it forces you to think across all of these.
+
+**Key terms**
+
+- **OWASP Top 10** — the canonical web-app vulnerability list; 2021 update emphasises insecure design and SSRF.
+- **SQL injection** — fixed by *parameterised queries / prepared statements*; never string-concatenate user input into SQL.
+- **XSS (Cross-Site Scripting)** — injection of attacker-controlled script into the response; fix with output encoding (`<` → `&lt;`), CSP headers.
+- **CSRF (Cross-Site Request Forgery)** — tricking a logged-in user's browser into making a request; fix with CSRF tokens, SameSite cookies.
+- **SSRF (Server-Side Request Forgery)** — server fetches an attacker-controlled URL; fix with allowlist, block private IP ranges.
+- **Authentication** — proving identity (password, JWT, certificate).
+- **Authorization** — checking permission (RBAC, ABAC, policy-as-code).
+- **JWT** — JSON Web Token; signed (and optionally encrypted) claims; stateless; hard to revoke before expiry.
+- **OAuth2 flows** — Authorization Code (with PKCE for public clients), Client Credentials (service-to-service), Device Code (TVs), Refresh Token.
+- **Password hashing** — Argon2id (current best), bcrypt (still fine), PBKDF2 (acceptable). With salt. Never plain hash.
+- **TLS handshake** — ClientHello → ServerHello + cert → key exchange → finished; TLS 1.3 collapses to one round trip.
+- **mTLS (mutual TLS)** — both sides present certificates; common for service-to-service in zero-trust networks.
+- **Secrets management** — Vault, Kubernetes Secrets, AWS Secrets Manager / Parameter Store; never in source control.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Do you have the reflexes?** — when asked "how do you prevent SQL injection?", the senior answer is "parameterised queries everywhere; ORM defaults handle it; validate inputs as well but that's belt-and-braces". The junior answer is "escape special characters" (the historic, wrong, approach). (2) **JWT vs session cookies** — this question filters out candidates who repeat "JWT is stateless and scales better" without understanding the revocation cost. Senior candidates discuss when each fits and the hybrid (JWT access token + opaque refresh token in HttpOnly cookie). (3) **OWASP literacy** — naming SQL injection and XSS is junior; naming broken access control, insecure deserialization, SSRF, and security misconfiguration is senior. The candidate who has actually had a pentest finding talks differently from the candidate who has only read about them.
+
+**Common confusions**
+
+- "HTTPS makes my app secure" — TLS protects data in transit; it does nothing for input validation, authorization, or storage security.
+- "Hashing passwords with SHA-256 is fine" — it isn't; SHA-256 is fast, so it's vulnerable to brute force. Use Argon2id, bcrypt, or PBKDF2 with a high work factor.
+- "JWTs are encrypted" — they aren't by default; JWS (signed) is the common case, JWE (encrypted) is rare. Anyone can decode a JWT's payload.
+- "Stateless JWTs are universally better than sessions" — they're harder to revoke and force you to choose between long expiry (revocation risk) and short expiry (refresh complexity).
+- "Disabling CSRF is fine for REST APIs" — only if you're not using cookie-based auth. If your API auths via session cookies, you still need CSRF protection.
+- "I'll add security later" — security retrofitted is more expensive than security designed in; threat-modelling the design is cheap.
+
+**What follows from this topic**
+
+Security cross-cuts every layer. Spring Security (Spring topic) implements much of this. Database (parameterised queries, least-privilege user) implements injection prevention. Messaging (Kafka topic) needs mTLS and ACLs. Cloud-Native (12-factor secrets) inherits the secrets-management story. The candidate who can articulate the OWASP framing fluently has typically also done threat modelling on at least one production system.
+
 ### Q101. Explain the OWASP Top 10.
 
 The standard list of most critical web application security risks (current 2021 edition; 2025 update in progress):
@@ -6461,6 +6888,50 @@ spring.datasource.password: ${DB_PASSWORD:}
 
 ## Messaging (Kafka)
 
+### Summary
+
+**What this topic covers**
+
+Kafka as the dominant Java-ecosystem message log, and the patterns built around it for reliable async processing. Three concern areas: (1) **core concepts** — topics, partitions, offsets, brokers, replicas, ISR (in-sync replicas), producer acks, consumer groups, rebalancing; (2) **delivery semantics** — at-most-once, at-least-once, exactly-once (and what exactly-once actually means in Kafka), idempotent producers, transactional producers, consumer offset management (auto-commit vs manual commit vs commit-after-processing); and (3) **operational patterns** — dead-letter queues for failed messages, retries with backoff, deduplication for idempotent consumers, Kafka vs RabbitMQ vs SQS tradeoffs, partition key choice for ordering, and the financial-system "must not lose a message" pattern. The 9 questions are about whether you've actually run Kafka in production or just seen the slides.
+
+**Mental model**
+
+Kafka is a *distributed, partitioned, replicated, append-only log*. Each topic is split into **partitions**; each partition is an ordered, immutable sequence of messages identified by **offset**. Producers append to partitions; consumers read at their own pace, tracking their position via committed offsets. The unit of parallelism is the partition: within a partition, ordering is preserved; across partitions, it isn't. A **consumer group** distributes partitions across its members — one partition per consumer at most, so adding more consumers than partitions wastes them. This shapes everything: pick your **partition key** for the *ordering guarantee you need*. Order by `customerId`? Hash by customer ID. Need global ordering? You need a single partition (and lose horizontal scaling for that topic). **Delivery semantics** are configurable: `acks=0` (fire-and-forget, fastest, loses on broker failure), `acks=1` (leader ack, may lose on leader failure), `acks=all` (full ISR ack, durable). Kafka transactions plus idempotent producers give *transactional exactly-once* across producer→broker→consumer, but only within Kafka's boundaries — sending to Kafka *and* writing to your DB atomically requires the **outbox pattern**. Two phrases that should be in every senior answer: "**at-least-once + idempotent consumer**" and "**outbox pattern**".
+
+**Key terms**
+
+- **Topic** — a named stream; logically grouped messages.
+- **Partition** — the unit of parallelism and ordering within a topic.
+- **Offset** — per-partition position; consumers track their own.
+- **Broker** — a Kafka server; cluster has multiple brokers.
+- **Replication factor** — number of broker copies per partition; 3 is typical.
+- **ISR (In-Sync Replicas)** — replicas caught up to the leader; `acks=all` waits for these.
+- **Consumer group** — a set of consumers sharing the load on a topic; each partition goes to one consumer in the group.
+- **Rebalancing** — when group membership changes, partitions are reassigned; pauses processing briefly.
+- **Producer acks** — 0, 1, all (-1); the durability dial.
+- **Idempotent producer** — `enable.idempotence=true`; deduplicates retries within a producer session.
+- **Transactional producer** — `transactional.id`; enables atomic writes across multiple partitions and exactly-once with consumers in the same transaction.
+- **Consumer offset commit** — auto (every N ms, risk of duplicates or losses on crash), manual sync (slow but precise), manual async (fast, eventual consistency).
+- **DLQ (Dead Letter Queue)** — topic for messages that failed processing after retries.
+- **Outbox pattern** — write events to a DB table in the same transaction; relay process publishes to Kafka.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Do you understand the delivery-semantics tradeoff?** — exactly-once is the universal interview trap. The wrong answer is "Kafka supports exactly-once, enable it". The right answer is "exactly-once requires idempotent producers + transactional writes + transactional consumer offsets — and it only holds inside Kafka, not across a DB write, where you need the outbox pattern". (2) **Partition-key reasoning** — every Kafka system gets the partition key wrong at least once. The senior signal is articulating why you chose `customerId` over `orderId` (preserve ordering per customer) and what happens when one customer's traffic spikes (hot partition). (3) **Failure handling** — "a consumer throws on message #500; what do you do?" The mature answer talks about retry with backoff, a DLQ for poisonous messages, and *what business outcome* should occur (block the partition for ordering-critical events, skip and continue for fire-and-forget events). The junior answer is "retry forever".
+
+**Common confusions**
+
+- "Kafka guarantees exactly-once delivery" — it guarantees exactly-once *processing within Kafka boundaries* if configured correctly. Crossing into a DB requires outbox.
+- "More partitions = better throughput" — only up to broker capacity; partitions cost open file handles, memory, and rebalance time.
+- "Kafka and RabbitMQ are interchangeable" — Kafka is a *log* (retain, replay, multiple independent consumers); RabbitMQ is a *queue* (delete on consume, low-latency, complex routing). Different shapes.
+- "`acks=1` is fine" — it loses messages on leader failover. Use `acks=all` for anything important.
+- "Auto-commit is fine" — auto-commit fires on a timer regardless of whether processing succeeded; for at-least-once you must commit *after* successful processing.
+- "Consumer groups give you load balancing" — they do, *up to the partition count*. More consumers than partitions sit idle.
+
+**What follows from this topic**
+
+Messaging connects directly to Database (outbox pattern uses the DB transaction), System Design (idempotency keys), and Resilience (retries, DLQs, backpressure). The "exactly-once" line is the single most common Kafka interview gotcha; a candidate who articulates *what's guaranteed and where* in one breath has done the work. If Kafka is in the JD, expect at least one question about it.
+
 ### Q111. Explain Kafka's core concepts.
 
 **Kafka** = distributed append-only log, partitioned, replicated.
@@ -6622,6 +7093,50 @@ Disable auto-commit; commit offsets only after the handler succeeds. Retry trans
 ---
 
 ## Common Pitfalls & Spot-the-Bug
+
+### Summary
+
+**What this topic covers**
+
+The recurring bugs every senior Java engineer has seen, fixed, and now spots in a code review without reading the comment first. Two concern areas: (1) **language-level traps** — `BigDecimal` for money (and why `double` loses cents), `SimpleDateFormat` not being thread-safe, `String.getBytes()` without a charset depending on platform default, autoboxing performance pitfalls, string concatenation in loops creating O(n²) garbage; and (2) **concurrency and pattern bugs** — non-atomic counters, broken double-checked locking, `ConcurrentModificationException` from iteration-with-mutation, `Integer` caching surprises around the -128..127 boundary, `HashMap` with mutable keys, swallowed exceptions, `Optional` misuse, `BigDecimal` equality via `equals` vs `compareTo`, `synchronized` on a `Boolean` (locking the same boxed `Boolean.TRUE` everywhere). The 16 questions are the *interview pattern recognition* category — when you spot the bug in three seconds it signals years of production debugging.
+
+**Mental model**
+
+This topic is less about new concepts and more about *production-scarred instincts*. Every bug here has crashed someone's service at 3am at some point. The common thread is that they all look fine in code review until you know what to look for. Three meta-patterns: (1) **defaults are dangerous** — platform default charset, default locale, default time zone, default scale on `BigDecimal` arithmetic, default cascade on JPA relations. Anywhere Java picks a default for you, that default will eventually be wrong in some environment. (2) **mutability + sharing = bugs** — `HashMap` with a mutable key, `SimpleDateFormat` shared across threads, mutable static state. The fix is almost always immutability or thread-confinement. (3) **boxing has costs** — `Integer` equality (`==` vs `equals`), `Long` autoboxing in a tight loop allocating millions of boxed objects, `synchronized` on a `Boolean` accidentally creating a shared lock across unrelated code paths. Senior engineers internalise that *primitives and boxed types have different identity semantics*, and the bugs from confusing them are subtle. The spot-the-bug questions are an interview shortcut: a candidate who immediately points at `double money = 0.1 + 0.2` and says "not 0.3" without further prompting has seen the dragon.
+
+**Key terms**
+
+- **`BigDecimal` for money** — exact decimal arithmetic; never use `double`/`float` for currency.
+- **`BigDecimal.equals` vs `compareTo`** — `equals` requires same scale; `2.0` ≠ `2.00`. Use `compareTo(other) == 0` for value equality.
+- **`SimpleDateFormat` is not thread-safe** — keeps state in a `Calendar` field; use `DateTimeFormatter` (immutable) instead.
+- **`String.getBytes()`** — uses platform default charset; **always pass `StandardCharsets.UTF_8`**.
+- **String concatenation in a loop** — creates an intermediate `String` each iteration; use `StringBuilder`.
+- **Autoboxing in tight loops** — `Long sum = 0L; for (long x : xs) sum += x;` boxes per iteration; declare `long sum`.
+- **Integer cache** — `Integer.valueOf(127) == Integer.valueOf(127)` true; `Integer.valueOf(128) == Integer.valueOf(128)` false. Use `.equals()`.
+- **`HashMap` with mutable key** — mutating after `put` corrupts the bucket lookup; you can never retrieve it again.
+- **Concurrent modification** — iterating a `HashMap` or `ArrayList` while another thread (or the same iteration) mutates it.
+- **Double-checked locking without `volatile`** — JMM allows reordering; the half-constructed object can be visible.
+- **`synchronized` on `Boolean`** — `Boolean.TRUE` is shared across the JVM; you accidentally serialise *everything*.
+- **`Optional.get()` without `isPresent()` check** — throws `NoSuchElementException`; defeats the point of `Optional`.
+- **Exception swallowing** — `catch (Exception e) { /* nothing */ }`; the production lights go out and no one knows why.
+- **`try-with-resources` chained** — `new ZipOutputStream(new FileOutputStream(...))` — if the outer constructor throws, the inner isn't closed; declare both in the resource clause.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Have you been on call?** — these bugs are the production stories. A candidate who says "yes, I once had a production incident where `SimpleDateFormat` shared across threads corrupted parsed dates" has the scars; a candidate who recites the rule from a blog post doesn't. (2) **Code-review instincts** — spot-the-bug questions test the *speed* of recognition. Senior engineers see `synchronized(this.isReady)` and immediately think "you're locking on a `Boolean` autobox — every place in the codebase that locks on `Boolean.TRUE` is now serialised with this". (3) **Defensive habits** — does the candidate reach for `UTF_8.name()` explicitly, `BigDecimal.compareTo` for equality, `DateTimeFormatter` over `SimpleDateFormat`, `StringBuilder` in loops, immutable keys? These are the small habits that prevent the bug class entirely.
+
+**Common confusions**
+
+- "`BigDecimal(0.1)` is precise" — no; the constructor takes a `double` that's already imprecise. Use `new BigDecimal("0.1")` (String constructor).
+- "`Integer` caching is only an optimisation, can be ignored" — until your `==` accidentally works in dev (small numbers) and fails in prod (large IDs).
+- "Double-checked locking works in modern Java" — it works *with `volatile`* (since Java 5). Without `volatile` it's still broken.
+- "`Optional` solves null safety" — only if you don't `.get()` it without checking. And don't pass `Optional` parameters. And don't store `Optional` fields. And don't put `Optional` in a `Map`.
+- "`String.intern()` saves memory" — sometimes, but the pool sits in heap and degrades GC. JIT and G1 string dedup handle most cases.
+- "Catching `Exception` is fine if I rethrow" — fine *if* you rethrow with the cause. `catch (Exception e) { throw new RuntimeException(e.getMessage()); }` destroys the stack trace.
+
+**What follows from this topic**
+
+Common Pitfalls is the litmus test: a candidate who spots all the bugs has years of production muscle. The bug catalogue connects to Core Java (Integer caching, autoboxing), Concurrency (double-checked locking, `synchronized` on boxed Booleans), Modern Java (`Optional` misuse), and Database (BigDecimal scale in entity columns). Senior engineers spot these patterns at code-review time, before they ship.
 
 ### Q130. Why use BigDecimal for money?
 
@@ -6961,6 +7476,48 @@ synchronized (lock) { ... }
 
 ## Build Tools
 
+### Summary
+
+**What this topic covers**
+
+Maven and Gradle — the two build tools that compile, package, test, and ship every Java project. Three concern areas: (1) **Maven mechanics** — the build lifecycle phases (validate, compile, test, package, verify, install, deploy), dependency scopes (compile, provided, runtime, test, system, import), how Maven resolves dependency conflicts (nearest-wins, with override via `<dependencyManagement>`), BOM imports, multi-module projects with parent POMs; (2) **Gradle and the comparison** — Groovy/Kotlin DSL, task graph vs phase model, incremental builds, build cache, when each tool wins; and (3) **modern supply-chain concerns** — SBOM (Software Bill of Materials) generation with CycloneDX or SPDX, reproducible builds (deterministic outputs from identical inputs), dependency vulnerability scanning. The 8 questions are about whether you understand what's actually happening when you type `mvn clean install`.
+
+**Mental model**
+
+Maven and Gradle are both *dependency-resolving build orchestrators* — they fetch your transitive dependency graph, compile your code against it, run your tests, package the result, and (in a CI pipeline) publish artifacts to a repository. The mental models differ. **Maven** is *declarative + convention-over-configuration*: you tell it *what* (POM declares dependencies, packaging, plugins), it knows *how* via the standard lifecycle. Phases run in fixed order, each phase binds standard goals. The strength is uniformity — any Maven project looks the same. The weakness is rigidity — anything off the convention path is painful. **Gradle** is *imperative + task graph*: you build a graph of tasks with explicit dependencies, Gradle figures out execution order and runs in parallel where possible. Strengths: incremental builds, build cache (local + remote), Kotlin DSL with IDE autocomplete, fast on large multi-module projects. Weaknesses: less standardised, Groovy DSL is dynamic and error-prone, easy to write build logic that's hard to maintain. The 2026 reality: **Gradle wins on large multi-module Android/Kotlin projects; Maven still dominates Spring shops and most JVM library publishing because of its uniformity and tooling integration**. The dependency-management story is the same idea in both: BOMs (Bills of Materials) declare versions, downstream projects import the BOM and omit versions. The new supply-chain concerns (SBOM, reproducible builds, vulnerability scanning) layer on top and are increasingly mandatory in regulated industries.
+
+**Key terms**
+
+- **Maven lifecycle** — `validate` → `compile` → `test` → `package` → `verify` → `install` → `deploy`. Each phase binds standard plugin goals.
+- **Maven dependency scopes** — `compile` (default, everywhere), `provided` (compile but not runtime, e.g. servlet API), `runtime` (not compile, e.g. JDBC driver), `test` (test only), `system` (local jar path, deprecated), `import` (BOM only).
+- **Nearest-wins conflict resolution** — Maven picks the version closest to the root of the dependency tree.
+- **`<dependencyManagement>`** — declares versions centrally; child dependencies pick them up without specifying versions.
+- **BOM (Bill of Materials)** — POM with only `<dependencyManagement>`; imported with scope `import`.
+- **Multi-module project** — parent POM with `<modules>`; children inherit configuration and have a single build command.
+- **Gradle task** — a unit of work with inputs and outputs; the build is a DAG of tasks.
+- **Gradle Kotlin DSL** — `build.gradle.kts`; statically typed, IDE-friendly.
+- **Build cache** — Gradle (and Maven extensions like `maven-build-cache`) cache task outputs across builds and machines.
+- **SBOM** — machine-readable list of every dependency, version, and license in your artifact; CycloneDX or SPDX format.
+- **Reproducible build** — building the same source twice produces byte-identical artifacts; requires stable timestamps, sorted entries, deterministic dependency versions.
+- **Maven Shade plugin / Gradle Shadow plugin** — produce a "fat jar" with all dependencies repackaged.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Operational fluency** — every Java engineer has run `mvn clean install` a thousand times; few can explain what each phase does or why `clean install` is heavier than `install`. The candidate who knows the lifecycle has read the docs once. (2) **Dependency hygiene** — "how does Maven resolve when two transitive deps want different log4j versions?" The senior answer talks about nearest-wins, the dependency tree (`mvn dependency:tree`), `<dependencyManagement>` to force a version, and using BOMs (Spring Boot dependencies, Jackson BOM) to keep families aligned. (3) **Modern supply chain** — SBOM, vulnerability scanning (OWASP dependency-check, Snyk, Dependabot), and reproducible builds are increasingly compliance requirements. A candidate who has implemented these has felt the regulator/security-team pressure.
+
+**Common confusions**
+
+- "Maven and Gradle do the same thing" — same broad goal, very different mental models. You don't write a Gradle build like a Maven POM.
+- "`mvn clean` is mandatory" — it deletes `target/`; useful when you suspect stale state, wasteful otherwise. Incremental Maven builds work fine without it.
+- "`<dependency>` and `<dependencyManagement>` are the same" — `<dependencies>` declares a dependency; `<dependencyManagement>` declares the version *if used*. The latter doesn't force inclusion.
+- "Fat jars are best practice" — they're often necessary (Spring Boot, AWS Lambda) but layered Docker images and `jlink` runtimes can be better.
+- "Reproducible builds are a nice-to-have" — increasingly a compliance requirement (SLSA, supply-chain attacks); table stakes in regulated industries.
+- "Maven is dead" — it isn't; Spring publishes BOMs in Maven format, most JVM libraries publish to Maven Central, and most enterprise Java still uses Maven.
+
+**What follows from this topic**
+
+Build tools cross-cut every later operational topic. Multi-module projects support Design Patterns (hexagonal architecture maps cleanly onto modules). BOMs avoid the dependency-hell side of Spring (Spring Boot Dependencies BOM is the canonical case). Reproducible builds and SBOMs feed Cloud-Native (Docker layers, supply-chain attestation) and Security (vulnerability scanning). A candidate who hand-waves through Maven phases usually hand-waves through CI/CD too.
+
 ### Q212. Maven lifecycle phases — what runs in what order?
 
 Maven has three built-in lifecycles: **default**, **clean**, **site**. The default lifecycle has 23 phases, but you'll mostly care about these:
@@ -7217,6 +7774,48 @@ my-project/
 ---
 
 ## Cloud-Native Java
+
+### Summary
+
+**What this topic covers**
+
+Running Java in containers and Kubernetes — the operational story for every modern Java service. Three concern areas: (1) **the JVM in containers** — container-aware ergonomics (memory and CPU detection from cgroups since Java 10), `-XX:MaxRAMPercentage`, GraalVM native-image and when its small footprint earns its cold-start tradeoff, Spring Boot 3's AOT processing for native images; (2) **Docker mechanics** — multi-stage builds (build stage with JDK, runtime stage with JRE), Spring Boot layered jars (`spring-boot:build-image` or layered Dockerfile for cached dependency layers); and (3) **Kubernetes integration** — liveness probes (am I deadlocked?), readiness probes (am I ready for traffic?), startup probes (am I done warming up?), graceful shutdown (`SIGTERM` → drain in-flight requests → close → exit), and the 12-factor application principles applied to JVM services. The 9 questions are about whether you ship Java to production in 2026, not 2015.
+
+**Mental model**
+
+The mental shift required for cloud-native Java is from "long-lived JVM with stable memory" to "potentially short-lived process in a constrained box". (1) **The container is the unit**, not the host. Pre-Java-10 JVMs would read host RAM and host CPU count, ignoring cgroup limits, then OOM-kill themselves; modern JVMs respect the container. But you still need `-XX:MaxRAMPercentage=75.0` (or similar) so the JVM leaves headroom for native memory, metaspace, and the OS. (2) **Startup matters now.** Traditional JVMs warm up over seconds-to-minutes via the JIT; that's fine for long-lived services and terrible for scale-to-zero, FaaS, or aggressive autoscaling. The 2026 answers: GraalVM native-image (millisecond cold starts, smaller memory, lower peak throughput), Project Leyden (AOT compilation roadmap inside the JVM), checkpoint/restore (CRaC). Spring Boot 3 + AOT lets you build a native image from a normal Spring Boot app with minimal config changes. (3) **Kubernetes is a control plane**, and your service needs to play nice with it. Liveness probe failure restarts the pod; readiness probe failure pulls it from the service mesh. Graceful shutdown via `SIGTERM` handling drains in-flight requests, returns 5xx-quietly for new ones, then exits — done badly, you get dropped requests on every deployment. **12-factor** is the unifying framework: config from env, stateless processes, port binding, disposability, dev/prod parity.
+
+**Key terms**
+
+- **Container-aware JVM** — reads CPU and memory from cgroups; default since Java 10 (with `-XX:+UseContainerSupport`).
+- **`-XX:MaxRAMPercentage`** — heap as percentage of *container* RAM; replaces hardcoded `-Xmx`.
+- **GraalVM native-image** — compiles a Java program to a native executable; closed-world assumption, slow to build, fast to start, smaller memory, lower peak throughput.
+- **Spring Boot 3 AOT** — `spring-boot:process-aot` generates reflection/proxy hints for native-image compatibility.
+- **Multi-stage Docker build** — `FROM eclipse-temurin:21 AS build` … `FROM eclipse-temurin:21-jre` — separate build and runtime stages keep the final image small.
+- **Layered jar** — Spring Boot 2.3+ feature; splits dependencies, snapshots, resources, and application classes into separate Docker layers for cache efficiency.
+- **Liveness probe** — Kubernetes restarts the pod if it fails; for "is the JVM still alive and not deadlocked".
+- **Readiness probe** — Kubernetes removes the pod from service endpoints if it fails; for "am I ready to serve traffic right now".
+- **Startup probe** — first-stage probe that disables liveness/readiness until startup completes; for slow-starting JVMs.
+- **Graceful shutdown** — on `SIGTERM`: stop accepting new requests, drain in-flight, close resources, exit.
+- **12-factor app** — config in env, stateless, disposable, port-binding, log to stdout, etc.
+- **Sidecar / init container** — auxiliary containers in the same pod; Envoy proxy, secrets fetcher, log shipper.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Operational currency** — a 2026 Java engineer should know that pre-Java-10 JVMs in containers without `-XX:+UseContainerSupport` would OOM-kill themselves. The candidate who still hardcodes `-Xmx512m` instead of `-XX:MaxRAMPercentage=75.0` is signalling outdated practice. (2) **Native-image positioning** — when does GraalVM native-image earn its keep? Cold start matters (Lambda, scale-to-zero, CLIs), memory-constrained edges, short-running batch jobs. When doesn't it? Long-lived high-throughput services where peak JIT-optimised throughput beats native-image's static optimisation. Senior candidates have an opinion. (3) **Graceful shutdown** — most candidates have never implemented it. The ones who have can explain the `SIGTERM` flow, the Spring Boot `server.shutdown=graceful` setting, the `preStop` hook coordination with Kubernetes' `terminationGracePeriodSeconds`. This is the difference between "we drop requests on deploy" and "we don't".
+
+**Common confusions**
+
+- "JVM ignores container memory limits" — true until Java 10; respected by default since Java 11.
+- "GraalVM native-image is always faster" — *starts* faster, *uses less memory*; peak throughput is often *lower* than JIT-optimised HotSpot.
+- "Liveness and readiness probes are the same" — they're not; liveness failure restarts, readiness failure isolates. Most pods need both, with different criteria.
+- "Just hit `/health` for both probes" — Spring Boot Actuator exposes `/actuator/health/liveness` and `/actuator/health/readiness` distinctly for a reason.
+- "Containers should be stateless" — closer to right than wrong, but "stateless processes" means *the process holds no state across restarts*, not "the app has no state". State lives in DBs, caches, object stores.
+- "Layered jars are only for Docker" — they're useful in any caching context; even CI build caches benefit.
+
+**What follows from this topic**
+
+Cloud-Native ties together JVM (container ergonomics, native image), Build Tools (multi-stage Docker, layered jars), Spring (Actuator endpoints, graceful shutdown), and Resilience (probes coordinate with circuit breakers). It also previews the operational dimension of System Design — "how do you ship this" is as important as "how do you design this". The candidate who can articulate the SIGTERM-drain-shutdown sequence has shipped at least once.
 
 ### Q220. JVM in containers — what's special?
 
@@ -7493,6 +8092,48 @@ Wire to Alertmanager → PagerDuty/Slack. Add a `for: 5m` clause so transient sp
 
 ## Networking & Protocols
 
+### Summary
+
+**What this topic covers**
+
+The protocol-level fluency expected of a senior backend engineer who has to make IPC decisions and debug network issues. Three concern areas: (1) **HTTP evolution** — HTTP/1.1's pipelining and head-of-line blocking, HTTP/2's multiplexing over a single TCP connection with binary framing and header compression (HPACK), HTTP/3's move to QUIC over UDP to escape TCP's head-of-line blocking; (2) **TLS** — the handshake (TLS 1.2 took two round trips, TLS 1.3 collapses to one), certificate validation, mutual TLS for service-to-service identity; and (3) **service-to-service options** — REST vs gRPC tradeoffs (HTTP/JSON vs HTTP/2/protobuf, broad client support vs strict typing and streaming), WebSocket vs SSE vs long-polling for real-time push, HTTP caching primitives (`Cache-Control`, `ETag`, `Last-Modified`, `If-None-Match`), and what a reverse proxy (Nginx, Envoy, Traefik) does. The 6 questions probe whether you understand the wire, not just the framework.
+
+**Mental model**
+
+Think of network protocols as a *layered stack with tradeoffs*. At the transport layer, TCP gives ordered reliable bytes (with head-of-line blocking — if packet N is lost, packets N+1, N+2 wait), while UDP gives best-effort packets (no order, no reliability, no congestion control). HTTP/3's QUIC builds reliability *back on top of UDP* — same guarantees as TCP but per-stream, so a lost packet on stream 1 doesn't stall stream 2. At the application layer, HTTP/1.1 was simple but inefficient (one request at a time per connection, browsers open six per origin); HTTP/2 multiplexes many streams over one connection with binary framing and HPACK header compression — huge wins for browsers, modest wins for service-to-service; HTTP/3 then fixes the remaining TCP-level head-of-line blocking. TLS sits between transport and application; TLS 1.3 is the modern default, faster, with weak ciphers removed. **gRPC** rides on HTTP/2 with protobuf payloads, giving you bidirectional streaming, strict schemas, and lower wire overhead — at the cost of weaker browser support and a steeper debugging curve. **REST over HTTP/1.1 or 2 with JSON** is still the right default for internet-facing APIs because of tooling and language support. **WebSocket / SSE / long-polling** address real-time push: WebSocket is full-duplex but heavyweight, SSE is server-to-client only but simple and works over HTTP, long-polling is the fallback for ancient clients. **HTTP caching** with `Cache-Control` + `ETag` is wildly underused; correctly cached responses are the cheapest performance win available.
+
+**Key terms**
+
+- **HTTP/1.1** — text protocol, one in-flight request per connection (pipelining never deployed widely due to head-of-line blocking).
+- **HTTP/2** — binary framing, multiplexed streams over a single TCP connection, HPACK header compression, server push (mostly deprecated in practice).
+- **HTTP/3** — HTTP over QUIC (UDP); independent streams, faster handshake, no TCP head-of-line blocking.
+- **TLS 1.3** — modern TLS; one round trip handshake, weak ciphers removed, forward secrecy by default.
+- **mTLS** — both sides present certificates; common in service meshes (Istio, Linkerd) for service identity.
+- **gRPC** — HTTP/2 + protobuf; supports unary, server-streaming, client-streaming, bidirectional streaming.
+- **REST** — resource-oriented HTTP API; usually JSON; broadly tooled.
+- **WebSocket** — full-duplex bidirectional channel over a long-lived TCP connection upgraded from HTTP.
+- **SSE (Server-Sent Events)** — server-to-client stream over HTTP/1.1 (or 2); browsers auto-reconnect.
+- **`Cache-Control`** — directives for HTTP caches (`public`, `private`, `max-age`, `s-maxage`, `no-cache`, `no-store`).
+- **`ETag` / `If-None-Match`** — opaque revalidation tokens; server returns 304 Not Modified if matched.
+- **Reverse proxy** — TLS termination, load balancing, routing, header rewriting; Nginx, Envoy, Traefik, HAProxy.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Protocol literacy** — senior engineers can articulate *why* HTTP/2 is faster than HTTP/1.1 (multiplexing, binary framing, header compression) without hand-waving. The candidate who confuses pipelining with multiplexing is signalling shallow knowledge. (2) **gRPC vs REST tradeoff** — gRPC is the right answer for internal service-to-service when teams own both ends; REST is the right answer for public APIs and polyglot environments. A candidate who picks gRPC for an external partner API is missing the tooling-and-debugging cost. (3) **HTTP caching** — the "make the API faster" question is often best answered with `Cache-Control` + `ETag` rather than infrastructure. Senior candidates reach for caching primitives first. The 304 Not Modified response is free bandwidth.
+
+**Common confusions**
+
+- "HTTP/2 makes everything faster" — for browsers yes; for service-to-service over a LAN with HTTPS and persistent connections, often marginal.
+- "HTTP/2 server push is great" — was theoretically great, in practice browsers struggled to use it well; Chrome removed support in 2022.
+- "TLS is encryption" — TLS is also *authentication* (server identity via certificate) and *integrity* (MAC); encryption is one of three guarantees.
+- "gRPC is always more efficient than REST" — at the wire yes (binary vs text, smaller headers); at the developer-time level, REST often wins on debuggability and tooling.
+- "WebSocket is the only way to do real-time" — SSE is simpler when you only need server-to-client; long-polling is a fallback. Pick the simplest that works.
+- "Reverse proxies just load-balance" — they also terminate TLS, rewrite headers, enforce rate limits, do canary routing, and run authn/authz at the edge.
+
+**What follows from this topic**
+
+Networking underpins System Design (latency budgets across hops), Security (TLS, mTLS), Cloud-Native (service mesh sidecars), and Messaging (Kafka's protocol is its own TCP-based wire format). Reverse proxies are the gateway between Kubernetes services and the outside world; their behaviour affects every observability and routing question. A candidate who can sketch an HTTP/2 frame layout and explain HPACK has the protocol literacy senior systems need.
+
 ### Q228. HTTP/1.1 vs HTTP/2 vs HTTP/3 — what changed?
 
 **HTTP/1.1 (1997, still everywhere)**
@@ -7698,6 +8339,51 @@ A **reverse proxy** sits in front of your services, terminating client connectio
 ---
 
 ## Resilience Patterns
+
+### Summary
+
+**What this topic covers**
+
+The patterns that keep a Java service alive when its downstream dependencies fail — the daily reality of distributed systems. Three concern areas: (1) **failure containment** — circuit breakers (closed/open/half-open) to stop hammering a failing dependency, bulkheads to isolate failure domains (separate thread pools per downstream so one slow callee doesn't drown the others), timeouts at every boundary (connect, read, total), fallbacks to degrade gracefully; (2) **retry strategy** — exponential backoff with jitter (full jitter is the standard in 2026), retry budgets, retrying only on idempotent operations, distinguishing transient errors (network blip, 503, timeout) from permanent (400, 401, 422); and (3) **rate limiting** — token bucket (allows bursts up to bucket size), leaky bucket (smooth output rate), sliding window (precise per-time-period limits). The 7 questions are about whether you've built a service that survives a downstream brown-out, not just one that works on the happy path.
+
+**Mental model**
+
+Resilience patterns are the *production-engineering* counterpart to system design. A correct happy-path implementation will still take down your service when the database has a slow night, when a downstream API starts returning 503s, when one customer DOSes you accidentally. The mental model is **"hope is not a strategy"** — every external call is a potential failure, and your service must have an answer for each. (1) **Timeouts everywhere** — no I/O without a deadline. The HikariCP connection acquire, the JDBC statement, the HTTP client connect, the HTTP client read — every one of these has a default of "infinity" if you don't set it, and infinity means "your thread is gone until the OS gives up". Reasonable defaults: 1-3 seconds for inter-service calls in a datacenter, longer for external APIs. (2) **Circuit breakers + bulkheads** — once a downstream is unhealthy, *stop calling it* (open the breaker) so you don't queue up requests that will time out. Bulkhead each downstream into its own thread pool (Resilience4j or Hystrix style) so slow callee A can't exhaust the pool callee B needs. (3) **Retries with backoff + jitter** — retries are dangerous; thundering herds amplify a brief outage into a sustained one. Always exponential backoff (2x per attempt), always with jitter (randomise the delay), always bounded retry count. Only retry idempotent operations or operations behind an idempotency key. (4) **Fallbacks** — what's the answer when the downstream is unavailable? Cached value, default value, partial response, 503 with retry-after — anything but propagating a 5xx blindly.
+
+**Key terms**
+
+- **Circuit breaker** — three states: closed (calls pass through), open (calls fail fast), half-open (probe to see if it's healthy again).
+- **Bulkhead** — isolate resources (threads, connections) per dependency so one failure doesn't drown the system.
+- **Timeout** — fail an operation after a deadline; never `Thread.sleep(infinity)`.
+- **Connect timeout** — time to establish the TCP/TLS connection.
+- **Read timeout** — time between bytes; doesn't bound total request time.
+- **Total / request timeout** — time to complete the whole call; the one you actually want.
+- **Exponential backoff** — wait 2^attempt seconds (capped); doubles delay per retry.
+- **Jitter** — randomise the backoff to avoid synchronised retries (thundering herd).
+- **Full jitter** — `random(0, backoff)` (AWS-recommended) vs equal jitter (`backoff/2 + random(0, backoff/2)`).
+- **Retry budget** — max retries per request *and* a global rate cap on retries to prevent retry storms.
+- **Fallback** — degrade-gracefully behaviour when the primary fails (cached value, default, partial response).
+- **Token bucket** — N tokens added per second to a bucket of size B; each request consumes one. Allows bursts.
+- **Leaky bucket** — fixed-rate output; bursts queue and drain at the rate.
+- **Sliding window** — count requests in a moving time window; precise but stateful.
+- **Resilience4j** — the modern Java library; replaced Hystrix (Netflix archived it). Lightweight, composable decorators.
+
+**Why interviewers ask this**
+
+Three signals. (1) **"How do you stop one slow downstream from killing the whole service?"** — this is the resilience question. The senior answer is bulkhead (isolated thread pool or virtual-thread group per dependency) + circuit breaker (fail fast when error rate exceeds threshold) + timeout (fail in seconds, not minutes) + fallback (degrade to cached data). Junior answer is "scale up". (2) **Retry discipline** — naive retries amplify outages. The senior answer always includes (a) exponential backoff, (b) jitter, (c) bounded attempts, (d) retry-only-idempotent. A candidate who says "just retry until it works" has caused at least one production outage. (3) **Knowing the modern library** — in 2026 you should reach for Resilience4j (or Spring Cloud Circuit Breaker abstraction). Mentioning Hystrix without acknowledging it's archived is dated.
+
+**Common confusions**
+
+- "Retries fix transient failures" — only if they're truly transient *and* idempotent *and* with backoff. Otherwise they amplify.
+- "Circuit breakers are for catastrophes" — they're for *any* dependency with elevated error rate; trip thresholds are tunable.
+- "Timeouts should be long to avoid false positives" — they should be tight; long timeouts make your service slow to fail and drain capacity into a black hole.
+- "Bulkheads are over-engineering" — until one slow caller eats all your threads. Then they're not.
+- "Exponential backoff is enough" — without jitter, all retrying clients re-fire at the same moment. Always add jitter.
+- "Rate limit per IP" — usually wrong; rate limit per identity (API key, user, tenant). IP is a poor proxy in NAT'd environments.
+
+**What follows from this topic**
+
+Resilience cross-cuts every other system topic. Timeouts feed Concurrency (don't block forever). Circuit breakers wrap downstream calls in Messaging and Networking. Rate limits live at the reverse proxy (Networking) and in the application (Spring filter). Resilience is also the diagnostic lens: most production incidents involve a downstream getting slow, retries piling on, thread pool exhaustion, cascading failure. Knowing the patterns means knowing how to *prevent* the cascade.
 
 ### Q234. Circuit breaker — what does it do and when?
 
@@ -7923,6 +8609,48 @@ Five concurrent patterns: timeouts on every outbound call (no infinite waits), r
 ---
 
 ## Java Module System (JPMS)
+
+### Summary
+
+**What this topic covers**
+
+Project Jigsaw — the module system that arrived in Java 9 — and the practical question of whether to use it. Three concern areas: (1) **basics** — `module-info.java`, `requires`, `exports`, `opens`, `uses`, `provides`; what an explicit module vs an automatic module vs the unnamed module means; (2) **reflection access controls** — the `--add-opens` / `--add-exports` flags that frameworks like Spring need to reach into JDK internals, and why every framework had a rough Java 9 upgrade; and (3) **ecosystem integration** — `ServiceLoader` for module-aware service discovery, migration strategies from non-modular apps (start with automatic modules, gradually go explicit), and `jlink` for building custom runtime images that include only the modules you need. The 5 questions are about whether you've actually used JPMS or just heard the controversy.
+
+**Mental model**
+
+JPMS is *strong encapsulation at the package level*. Before Java 9, "public" meant "visible to anyone with the JAR on their classpath" — `sun.misc.Unsafe`, JDK internals, every package was reachable. JPMS introduces **modules** as a grouping of packages with explicit declarations of (a) what packages they *export* (visible to other modules) and (b) what modules they *require* (depend on). A package not in an `exports` declaration is invisible to other modules, even if its classes are `public`. **Reflection** is gated separately by `opens` — a module must explicitly open a package to reflective access (or use `--add-opens` at the command line). This is why early Java 9 broke half the Java ecosystem: Spring, Hibernate, JAXB, every serialisation library was reflecting into JDK internals that were no longer accessible. The fix was a long migration. Three kinds of module exist at runtime: **explicit** (has a `module-info.java`), **automatic** (a JAR on the module path without `module-info`, gets a derived module name and exports all packages), and the **unnamed module** (everything on the classpath, the legacy bucket). Most apps in 2026 are *not* explicitly modular — they put their dependencies on the classpath and use only the runtime side of JPMS via `--add-opens` flags for compatibility. The places it has actually paid off are JDK distributions (`jlink` lets you build a 40MB runtime image instead of shipping a 200MB JRE), the JDK itself (strong encapsulation of internals improved security), and some library authors who want to publicly enforce API boundaries.
+
+**Key terms**
+
+- **`module-info.java`** — module descriptor at the module root; declares name, requires, exports, opens, uses, provides.
+- **`requires`** — module dependency; `requires transitive X` re-exports X to consumers.
+- **`exports`** — package made visible to other modules; can be qualified (`exports x.y.z to com.foo`).
+- **`opens`** — package made reflectively accessible; needed for serialisation, ORM, DI frameworks.
+- **`uses` / `provides`** — service consumer / provider declarations; integrates `ServiceLoader`.
+- **Explicit module** — has `module-info.java`; strong encapsulation enforced.
+- **Automatic module** — JAR on module path without `module-info`; module name derived from JAR name; exports everything.
+- **Unnamed module** — classpath fallback; can read all modules but other modules can't `requires` it.
+- **`--add-opens`** — JVM flag to open a package at runtime; the standard workaround for framework reflection.
+- **`--add-exports`** — JVM flag to export a package at compile/runtime.
+- **`jlink`** — tool to assemble a custom JRE containing only the modules you use; cuts runtime size dramatically.
+- **`jdeps`** — tool to analyse module dependencies; shows what's required.
+
+**Why interviewers ask this**
+
+Three signals. (1) **Awareness over adoption** — most senior candidates have *not* migrated production code to explicit modules. The interview signal is whether they know what JPMS does, what `--add-opens` is for, and why their Spring Boot app needs `--add-opens java.base/java.lang=ALL-UNNAMED` in some configurations. (2) **`jlink` usage** — the cloud-native sweet spot for JPMS is custom runtime images. A candidate who has used `jlink` to build a 70MB Docker base image instead of pulling the 200MB OpenJDK distribution understands the operational payoff. (3) **Service loader integration** — `ServiceLoader` with `uses`/`provides` is a clean alternative to scanning for `@Component`-style annotation discovery; senior engineers know it exists, even if they don't reach for it daily.
+
+**Common confusions**
+
+- "JPMS is required in modern Java" — it isn't; the classpath still works fine. JPMS is optional for application authors.
+- "Putting `module-info.java` in my project makes it modular" — yes, but transitively all your dependencies must either be explicit modules, automatic modules, or you accept the runtime warnings.
+- "`exports` and `opens` are the same" — they aren't; `exports` is for compile-time visibility, `opens` is for reflective access. A package can be opened but not exported.
+- "`--add-opens` is a hack" — it's the *intended* migration escape hatch; the JDK explicitly added it because pure JPMS would have broken the world.
+- "JPMS killed reflection" — no; it gates *cross-module* reflection. Within a module, reflection works as before.
+- "Automatic modules are evil" — they're a transitional bridge. Use them to migrate gradually; don't ship them as a long-term design.
+
+**What follows from this topic**
+
+JPMS is the most-discussed-least-used Java feature. The practical payoff is `jlink` for Cloud-Native (smaller container images) and the operational knowledge of `--add-opens` for Spring/Hibernate compatibility. It also previews the trend toward stronger encapsulation in the JDK — every recent JDK release closes off more internals (`sun.misc.Unsafe` removal, restricted reflection by default), so even non-modular apps eventually have to deal with the consequences. A candidate who can explain `--add-opens` and `jlink` has done enough.
 
 ### Q272. JPMS basics — `module-info.java`.
 
