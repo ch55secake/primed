@@ -44,6 +44,18 @@ The guest member is always `memid = 0`. Booking cost depends on whether the book
 #### Problem
 Retrieve all of the information from the `cd.facilities` table.
 
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
+|-------|------|------------|-----------|---------------|--------------------|
+| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
+| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+| 2 | Badminton Court | 0 | 15.5 | 4000 | 50 |
+| 3 | Table Tennis | 0 | 5 | 320 | 10 |
+| 4 | Massage Room 1 | 35 | 80 | 4000 | 3000 |
+| ... | ... | ... | ... | ... | ... |
+
 #### Pattern
 Basic SELECT
 
@@ -61,6 +73,18 @@ select * from cd.facilities;
 
 #### Problem
 Produce a list of facility names and their cost to members.
+
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| name | membercost |
+|------|------------|
+| Tennis Court 1 | 5 |
+| Tennis Court 2 | 5 |
+| Badminton Court | 0 |
+| Table Tennis | 0 |
+| Massage Room 1 | 35 |
+| ... | ... |
 
 #### Pattern
 Basic SELECT
@@ -80,6 +104,17 @@ select name, membercost from cd.facilities;
 #### Problem
 Produce a list of facilities that charge a fee to members.
 
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
+|-------|------|------------|-----------|---------------|--------------------|
+| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
+| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+| 4 | Massage Room 1 | 35 | 80 | 4000 | 3000 |
+| 5 | Massage Room 2 | 35 | 80 | 4000 | 3000 |
+| 6 | Squash Court | 3.5 | 17.5 | 5000 | 80 |
+
 #### Pattern
 WHERE filter
 
@@ -97,6 +132,14 @@ select * from cd.facilities where membercost > 0;
 
 #### Problem
 Produce a list of facilities that charge a fee to members and whose fee is less than 1/50th of the monthly maintenance cost. Return facid, name, membercost, monthlymaintenance.
+
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | monthlymaintenance |
+|-------|------|------------|--------------------|
+| 4 | Massage Room 1 | 35 | 3000 |
+| 5 | Massage Room 2 | 35 | 3000 |
 
 #### Pattern
 WHERE filter
@@ -120,6 +163,15 @@ select facid, name, membercost, monthlymaintenance
 #### Problem
 Produce a list of all facilities with the word 'Tennis' in their name.
 
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
+|-------|------|------------|-----------|---------------|--------------------|
+| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
+| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+| 3 | Table Tennis | 0 | 5 | 320 | 10 |
+
 #### Pattern
 WHERE filter
 
@@ -141,6 +193,14 @@ select *
 #### Problem
 Retrieve the details of facilities with ID 1 and 5, without using `OR`.
 
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
+|-------|------|------------|-----------|---------------|--------------------|
+| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+| 5 | Massage Room 2 | 35 | 80 | 4000 | 3000 |
+
 #### Pattern
 WHERE filter
 
@@ -161,6 +221,18 @@ select *
 
 #### Problem
 Produce a list of facilities labelled 'cheap' or 'expensive' depending on whether their monthly maintenance cost is more than $100. Return name and monthly maintenance.
+
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| name | cost |
+|------|------|
+| Tennis Court 1 | expensive |
+| Tennis Court 2 | expensive |
+| Badminton Court | cheap |
+| Table Tennis | cheap |
+| Massage Room 1 | expensive |
+| ... | ... |
 
 #### Pattern
 CASE WHEN (pivot)
@@ -186,6 +258,18 @@ select name,
 #### Problem
 Produce a list of members who joined after the start of September 2012. Return memid, surname, firstname, joindate.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| memid | surname | firstname | joindate |
+|-------|---------|-----------|----------|
+| 24 | Sarwin | Ramnaresh | 2012-09-01 08:44:42 |
+| 26 | Jones | Douglas | 2012-09-02 18:43:05 |
+| 27 | Rumney | Henrietta | 2012-09-05 08:42:35 |
+| 28 | Farrell | David | 2012-09-15 08:22:05 |
+| 29 | Worthington-Smyth | Henry | 2012-09-17 12:27:15 |
+| ... | ... | ... | ... |
+
 #### Pattern
 WHERE filter, Date arithmetic
 
@@ -205,6 +289,22 @@ select memid, surname, firstname, joindate
 
 #### Problem
 Produce an ordered list of the first 10 surnames in the members table. The list must not contain duplicates.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| surname |
+|---------|
+| Bader |
+| Baker |
+| Boothe |
+| Butters |
+| Coplin |
+| Crumpet |
+| Dare |
+| Farrell |
+| GUEST |
+| Genting |
 
 #### Pattern
 DISTINCT, ORDER BY, LIMIT
@@ -226,6 +326,19 @@ limit 10;
 
 #### Problem
 Produce a combined list of all member surnames and all facility names.
+
+**Tables:** `cd.members`, `cd.facilities`
+
+**Expected output (sample):**
+| surname |
+|---------|
+| Tennis Court 2 |
+| Worthington-Smyth |
+| Badminton Court |
+| Pinker |
+| Dare |
+| Bader |
+| ... |
 
 #### Pattern
 Set ops (UNION / INTERSECT / EXCEPT)
@@ -249,6 +362,13 @@ select name
 #### Problem
 Get the signup date of the most recent member.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| latest |
+|--------|
+| 2012-09-26 18:08:45 |
+
 #### Pattern
 MAX
 
@@ -267,6 +387,13 @@ select max(joindate) as latest
 
 #### Problem
 Get the first name, surname, and join date of the member(s) who signed up most recently.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| firstname | surname | joindate |
+|-----------|---------|----------|
+| Darren | Smith | 2012-09-26 18:08:45 |
 
 #### Pattern
 Subquery
@@ -289,6 +416,18 @@ select firstname, surname, joindate
 
 #### Problem
 Produce a list of the start times for bookings by members named 'David Farrell'.
+
+**Tables:** `cd.bookings`, `cd.members`
+
+**Expected output (sample):**
+| starttime |
+|-----------|
+| 2012-09-18 09:00:00 |
+| 2012-09-18 17:30:00 |
+| 2012-09-18 13:30:00 |
+| 2012-09-18 20:00:00 |
+| 2012-09-19 09:30:00 |
+| ... |
 
 #### Pattern
 INNER JOIN
@@ -314,6 +453,18 @@ select bks.starttime
 
 #### Problem
 Produce a list of the start times for bookings for tennis courts on 2012-09-21. Return start time and facility name, ordered by time.
+
+**Tables:** `cd.facilities`, `cd.bookings`
+
+**Expected output (sample):**
+| start | name |
+|-------|------|
+| 2012-09-21 08:00:00 | Tennis Court 1 |
+| 2012-09-21 08:00:00 | Tennis Court 2 |
+| 2012-09-21 09:30:00 | Tennis Court 1 |
+| 2012-09-21 10:00:00 | Tennis Court 2 |
+| 2012-09-21 11:30:00 | Tennis Court 2 |
+| ... | ... |
 
 #### Pattern
 INNER JOIN, WHERE filter
@@ -342,6 +493,19 @@ order by bks.starttime;
 #### Problem
 Output a deduplicated, name-sorted list of all members who have recommended another member.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| firstname | surname |
+|-----------|---------|
+| Florence | Bader |
+| Timothy | Baker |
+| Gerald | Butters |
+| Jemima | Farrell |
+| Matthew | Genting |
+| David | Jones |
+| ... | ... |
+
 #### Pattern
 Self-join
 
@@ -364,6 +528,19 @@ order by surname, firstname;
 
 #### Problem
 List every member with the individual who recommended them (if any), ordered by surname then firstname.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| memfname | memsname | recfname | recsname |
+|----------|----------|----------|----------|
+| Florence | Bader | Ponder | Stibbons |
+| Anne | Baker | Ponder | Stibbons |
+| Timothy | Baker | Jemima | Farrell |
+| Tim | Boothe | Tim | Rownam |
+| Gerald | Butters | Darren | Smith |
+| Joan | Coplin | Timothy | Baker |
+| ... | ... | ... | ... |
 
 #### Pattern
 LEFT JOIN, Self-join
@@ -388,6 +565,19 @@ order by memsname, memfname;
 
 #### Problem
 List members who have used a tennis court. Output the court name and the member's full name (single column), deduplicated and ordered.
+
+**Tables:** `cd.members`, `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| member | facility |
+|--------|----------|
+| Anne Baker | Tennis Court 1 |
+| Anne Baker | Tennis Court 2 |
+| Burton Tracy | Tennis Court 1 |
+| Burton Tracy | Tennis Court 2 |
+| Charles Owen | Tennis Court 1 |
+| Charles Owen | Tennis Court 2 |
+| ... | ... |
 
 #### Pattern
 INNER JOIN
@@ -415,6 +605,19 @@ order by member, facility
 
 #### Problem
 List bookings on 2012-09-14 that cost the member or guest more than $30. Output facility, member name (single column), cost. Order by descending cost. No subqueries.
+
+**Tables:** `cd.members`, `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| member | facility | cost |
+|--------|----------|------|
+| GUEST GUEST | Massage Room 2 | 320 |
+| GUEST GUEST | Massage Room 1 | 160 |
+| GUEST GUEST | Massage Room 1 | 160 |
+| GUEST GUEST | Massage Room 1 | 160 |
+| GUEST GUEST | Tennis Court 2 | 150 |
+| Jemima Farrell | Massage Room 1 | 140 |
+| ... | ... | ... |
 
 #### Pattern
 INNER JOIN, CASE WHEN (pivot)
@@ -454,6 +657,19 @@ order by cost desc;
 #### Problem
 Recreate the recommender-list query without any joins. Use a correlated subquery instead.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| member | recommender |
+|--------|-------------|
+| Anna Mackenzie | Darren Smith |
+| Anne Baker | Ponder Stibbons |
+| Burton Tracy | Charles Owen |
+| Darren Smith | Darren Smith |
+| David Farrell | David Jones |
+| Janice Joplette | David Pinker |
+| ... | ... |
+
 #### Pattern
 Correlated subquery
 
@@ -478,6 +694,19 @@ order by member;
 
 #### Problem
 Same as problem 18 (bookings > $30 on 2012-09-14), but cleaner: compute the cost once in a subquery, filter on it in the outer query.
+
+**Tables:** `cd.members`, `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| member | facility | cost |
+|--------|----------|------|
+| GUEST GUEST | Massage Room 2 | 320 |
+| GUEST GUEST | Massage Room 1 | 160 |
+| GUEST GUEST | Massage Room 1 | 160 |
+| GUEST GUEST | Massage Room 1 | 160 |
+| GUEST GUEST | Tennis Court 2 | 150 |
+| Jemima Farrell | Massage Room 1 | 140 |
+| ... | ... | ... |
 
 #### Pattern
 Subquery
@@ -518,6 +747,10 @@ order by cost desc;
 #### Problem
 Add a new facility (facid 9, 'Spa', membercost 20, guestcost 30, initialoutlay 100000, monthlymaintenance 800) to `cd.facilities`.
 
+**Tables:** `cd.facilities`
+
+**Expected output:** No result set; modifies 1 row.
+
 #### Pattern
 INSERT
 
@@ -537,6 +770,10 @@ insert into cd.facilities
 
 #### Problem
 Add two facilities in a single statement: 'Spa' (facid 9) and 'Squash Court 2' (facid 10).
+
+**Tables:** `cd.facilities`
+
+**Expected output:** No result set; modifies 2 rows.
 
 #### Pattern
 INSERT
@@ -560,6 +797,10 @@ insert into cd.facilities
 #### Problem
 Insert the spa using a facid one greater than the current maximum.
 
+**Tables:** `cd.facilities`
+
+**Expected output:** No result set; modifies 1 row.
+
 #### Pattern
 INSERT, Subquery
 
@@ -580,6 +821,10 @@ insert into cd.facilities
 #### Problem
 Fix the initial outlay of the second tennis court (facid 1) from 8000 to 10000.
 
+**Tables:** `cd.facilities`
+
+**Expected output:** No result set; modifies 1 row.
+
 #### Pattern
 UPDATE
 
@@ -599,6 +844,10 @@ update cd.facilities
 
 #### Problem
 Set both tennis courts (facids 0 and 1) to membercost 6 and guestcost 30 in one statement.
+
+**Tables:** `cd.facilities`
+
+**Expected output:** No result set; modifies 2 rows.
 
 #### Pattern
 UPDATE
@@ -622,6 +871,10 @@ update cd.facilities
 #### Problem
 Update tennis court 2 (facid 1) so its prices are 10% higher than tennis court 1 (facid 0). Don't hard-code prices.
 
+**Tables:** `cd.facilities`
+
+**Expected output:** No result set; modifies 1 row.
+
 #### Pattern
 UPDATE with JOIN, Subquery
 
@@ -644,6 +897,10 @@ update cd.facilities facs
 #### Problem
 Delete every row from `cd.bookings`.
 
+**Tables:** `cd.bookings`
+
+**Expected output:** No result set; deletes every row in `cd.bookings`.
+
 #### Pattern
 DELETE
 
@@ -661,6 +918,10 @@ delete from cd.bookings;
 
 #### Problem
 Remove member 37 (who has no bookings).
+
+**Tables:** `cd.members`
+
+**Expected output:** No result set; modifies 1 row.
 
 #### Pattern
 DELETE
@@ -680,6 +941,10 @@ delete from cd.members where memid = 37;
 #### Problem
 Delete every member who has never made a booking.
 
+**Tables:** `cd.members`, `cd.bookings`
+
+**Expected output:** No result set; deletes members not present in `cd.bookings`.
+
 #### Pattern
 DELETE, Anti-join, IN subquery
 
@@ -697,6 +962,13 @@ delete from cd.members where memid not in (select memid from cd.bookings);
 
 #### Problem
 Count the rows in `cd.facilities`.
+
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| count |
+|-------|
+| 9 |
 
 #### Pattern
 COUNT
@@ -716,6 +988,13 @@ select count(*) from cd.facilities;
 #### Problem
 Count facilities with a guest cost of 10 or more.
 
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| count |
+|-------|
+| 6 |
+
 #### Pattern
 COUNT, WHERE filter
 
@@ -733,6 +1012,19 @@ select count(*) from cd.facilities where guestcost >= 10;
 
 #### Problem
 Per recommender, count how many members they've recommended. Order by recommender ID.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| recommendedby | count |
+|---------------|-------|
+| 1 | 5 |
+| 2 | 3 |
+| 3 | 1 |
+| 4 | 2 |
+| 5 | 1 |
+| 6 | 1 |
+| ... | ... |
 
 #### Pattern
 GROUP BY, COUNT
@@ -756,6 +1048,18 @@ order by recommendedby;
 #### Problem
 For each facility, sum the slots booked. Output facid and total, sorted by facid.
 
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | Total Slots |
+|-------|-------------|
+| 0 | 1320 |
+| 1 | 1278 |
+| 2 | 1209 |
+| 3 | 830 |
+| 4 | 1404 |
+| ... | ... |
+
 #### Pattern
 GROUP BY, SUM
 
@@ -776,6 +1080,18 @@ order by facid;
 
 #### Problem
 For September 2012 only, sum slots per facility. Order by total slots.
+
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | Total Slots |
+|-------|-------------|
+| 5 | 122 |
+| 3 | 422 |
+| 7 | 426 |
+| 8 | 471 |
+| 6 | 540 |
+| ... | ... |
 
 #### Pattern
 GROUP BY, SUM, WHERE filter
@@ -801,6 +1117,19 @@ order by sum(slots);
 #### Problem
 For 2012, sum slots per facility per month. Output facid, month, slots, sorted by facid then month.
 
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | month | Total Slots |
+|-------|-------|-------------|
+| 0 | 7 | 270 |
+| 0 | 8 | 459 |
+| 0 | 9 | 591 |
+| 1 | 7 | 207 |
+| 1 | 8 | 483 |
+| 1 | 9 | 588 |
+| ... | ... | ... |
+
 #### Pattern
 GROUP BY, EXTRACT
 
@@ -823,6 +1152,13 @@ order by facid, month;
 #### Problem
 Count distinct members (including guests) who have made any booking.
 
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| count |
+|-------|
+| 30 |
+
 #### Pattern
 COUNT, DISTINCT
 
@@ -840,6 +1176,17 @@ select count(distinct memid) from cd.bookings
 
 #### Problem
 Sum slots per facility, return only facilities with totals over 1000. Output facid and total, ordered by facid.
+
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | Total Slots |
+|-------|-------------|
+| 0 | 1320 |
+| 1 | 1278 |
+| 2 | 1209 |
+| 4 | 1404 |
+| 6 | 1104 |
 
 #### Pattern
 GROUP BY, HAVING
@@ -862,6 +1209,21 @@ select facid, sum(slots) as "Total Slots"
 
 #### Problem
 Compute total revenue per facility, accounting for the guest/member cost difference. Output facility name and revenue, ordered by revenue.
+
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| name | revenue |
+|------|---------|
+| Table Tennis | 180 |
+| Snooker Table | 240 |
+| Pool Table | 270 |
+| Badminton Court | 1906.5 |
+| Squash Court | 13468.0 |
+| Tennis Court 1 | 13860 |
+| Tennis Court 2 | 14310 |
+| Massage Room 2 | 15810 |
+| Massage Room 1 | 72540 |
 
 #### Pattern
 INNER JOIN, GROUP BY, SUM, CASE WHEN (pivot)
@@ -888,6 +1250,15 @@ order by revenue;
 
 #### Problem
 Same revenue computation as problem 38, but return only facilities under 1000 in revenue.
+
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| name | revenue |
+|------|---------|
+| Table Tennis | 180 |
+| Snooker Table | 240 |
+| Pool Table | 270 |
 
 #### Pattern
 Subquery, GROUP BY
@@ -917,6 +1288,13 @@ order by revenue;
 #### Problem
 Return the single facility with the most slots booked.
 
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | Total Slots |
+|-------|-------------|
+| 4 | 1404 |
+
 #### Pattern
 GROUP BY, ORDER BY, LIMIT
 
@@ -938,6 +1316,21 @@ LIMIT 1;
 
 #### Problem
 For 2012, return slots per facility per month, plus per-facility totals (NULL month), plus a grand total (NULL facid and month). Sort by facid then month.
+
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | month | slots |
+|-------|-------|-------|
+| 0 | 7 | 270 |
+| 0 | 8 | 459 |
+| 0 | 9 | 591 |
+| 0 | null | 1320 |
+| 1 | 7 | 207 |
+| 1 | 8 | 483 |
+| 1 | 9 | 588 |
+| 1 | null | 1278 |
+| ... | ... | ... |
 
 #### Pattern
 GROUP BY, ROLLUP
@@ -963,6 +1356,18 @@ order by facid, month;
 #### Problem
 Per facility, sum slots and convert to hours (slot = 30 min). Output facid, name, hours formatted to two decimal places, ordered by facid.
 
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | Total Hours |
+|-------|------|-------------|
+| 0 | Tennis Court 1 | 660.00 |
+| 1 | Tennis Court 2 | 639.00 |
+| 2 | Badminton Court | 604.50 |
+| 3 | Table Tennis | 415.00 |
+| 4 | Massage Room 1 | 702.00 |
+| ... | ... | ... |
+
 #### Pattern
 GROUP BY, SUM
 
@@ -986,6 +1391,18 @@ order by facs.facid;
 
 #### Problem
 Per member, return surname, firstname, memid, and earliest booking after 2012-09-01. Order by member ID.
+
+**Tables:** `cd.bookings`, `cd.members`
+
+**Expected output (sample):**
+| surname | firstname | memid | starttime |
+|---------|-----------|-------|-----------|
+| GUEST | GUEST | 0 | 2012-09-01 08:00:00 |
+| Smith | Darren | 1 | 2012-09-01 09:00:00 |
+| Smith | Tracy | 2 | 2012-09-01 11:30:00 |
+| Rownam | Tim | 3 | 2012-09-01 16:00:00 |
+| Joplette | Janice | 4 | 2012-09-01 15:00:00 |
+| ... | ... | ... | ... |
 
 #### Pattern
 INNER JOIN, GROUP BY, MIN
@@ -1011,6 +1428,18 @@ order by mems.memid;
 #### Problem
 List every member with a column showing the total member count on each row. Order by join date.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| count | firstname | surname |
+|-------|-----------|---------|
+| 31 | GUEST | GUEST |
+| 31 | Darren | Smith |
+| 31 | Tracy | Smith |
+| 31 | Tim | Rownam |
+| 31 | Janice | Joplette |
+| ... | ... | ... |
+
 #### Pattern
 Window function
 
@@ -1031,6 +1460,18 @@ order by joindate
 #### Problem
 Number members 1..N ordered by join date. Member IDs aren't necessarily sequential.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| row_number | firstname | surname |
+|------------|-----------|---------|
+| 1 | GUEST | GUEST |
+| 2 | Darren | Smith |
+| 3 | Tracy | Smith |
+| 4 | Tim | Rownam |
+| 5 | Janice | Joplette |
+| ... | ... | ... |
+
 #### Pattern
 ROW_NUMBER
 
@@ -1050,6 +1491,13 @@ order by joindate
 
 #### Problem
 Return the facility with the most slots booked, but include all ties.
+
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| facid | total |
+|-------|-------|
+| 4 | 1404 |
 
 #### Pattern
 RANK, Window function
@@ -1073,6 +1521,21 @@ select facid, total from (
 
 #### Problem
 Per member, sum hours used (rounded to nearest ten), rank by rounded hours. Output firstname, surname, hours, rank. Sort by rank then surname then firstname.
+
+**Tables:** `cd.bookings`, `cd.members`
+
+**Expected output (sample):**
+| firstname | surname | hours | rank |
+|-----------|---------|-------|------|
+| GUEST | GUEST | 1200 | 1 |
+| Darren | Smith | 340 | 2 |
+| Tim | Rownam | 330 | 3 |
+| Tim | Boothe | 220 | 4 |
+| Tracy | Smith | 220 | 4 |
+| Gerald | Butters | 210 | 6 |
+| Burton | Tracy | 180 | 7 |
+| Charles | Owen | 170 | 8 |
+| ... | ... | ... | ... |
 
 #### Pattern
 GROUP BY, RANK, Window function
@@ -1098,6 +1561,15 @@ order by rank, surname, firstname;
 
 #### Problem
 Top three facilities by revenue, including ties. Output name and rank, sorted by rank then name.
+
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| name | rank |
+|------|------|
+| Massage Room 1 | 1 |
+| Massage Room 2 | 2 |
+| Tennis Court 2 | 3 |
 
 #### Pattern
 RANK, Window function, Subquery
@@ -1127,6 +1599,21 @@ order by rank;
 
 #### Problem
 Split facilities into thirds by revenue, labelled 'high', 'average', 'low'. Order by classification then name.
+
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| name | revenue |
+|------|---------|
+| Massage Room 1 | high |
+| Massage Room 2 | high |
+| Tennis Court 2 | high |
+| Badminton Court | average |
+| Squash Court | average |
+| Tennis Court 1 | average |
+| Pool Table | low |
+| Snooker Table | low |
+| Table Tennis | low |
 
 #### Pattern
 Window function, CASE WHEN (pivot)
@@ -1160,6 +1647,21 @@ order by class, name;
 #### Problem
 Given 3 complete months of data, compute months-to-payback per facility (initial outlay divided by monthly profit after maintenance). Output name and months, sorted by name.
 
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| name | months |
+|------|--------|
+| Badminton Court | 6.8317677198975235 |
+| Massage Room 1 | 0.18885741265344664778 |
+| Massage Room 2 | 1.7621145374449339 |
+| Pool Table | 5.3333333333333333 |
+| Snooker Table | 6.9230769230769231 |
+| Squash Court | 1.1339582703356516 |
+| Table Tennis | 6.4000000000000000 |
+| Tennis Court 1 | 2.2624434389140271 |
+| Tennis Court 2 | 1.7505470459518600 |
+
 #### Pattern
 GROUP BY, INNER JOIN
 
@@ -1186,6 +1688,21 @@ order by name;
 
 #### Problem
 For each day in August 2012, the 15-day trailing average of total revenue. Output date and revenue, sorted by date. Account for zero-revenue days.
+
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| date | revenue |
+|------|---------|
+| 2012-08-01 | 1126.8333333333333333 |
+| 2012-08-02 | 1153.0000000000000000 |
+| 2012-08-03 | 1162.9000000000000000 |
+| 2012-08-04 | 1177.3666666666666667 |
+| 2012-08-05 | 1160.9333333333333333 |
+| 2012-08-06 | 1185.4000000000000000 |
+| 2012-08-07 | 1182.8666666666666667 |
+| 2012-08-08 | 1172.6000000000000000 |
+| ... | ... |
 
 #### Pattern
 Running total, Correlated subquery, INTERVAL
@@ -1223,6 +1740,13 @@ order by dategen.date;
 #### Problem
 Return the timestamp `2012-08-31 01:00:00`.
 
+**Tables:** None (scalar expression).
+
+**Expected output (sample):**
+| timestamp |
+|-----------|
+| 2012-08-31 01:00:00 |
+
 #### Pattern
 Date arithmetic
 
@@ -1240,6 +1764,13 @@ select timestamp '2012-08-31 01:00:00';
 
 #### Problem
 Subtract `2012-07-30 01:00:00` from `2012-08-31 01:00:00`.
+
+**Tables:** None (scalar expression).
+
+**Expected output (sample):**
+| interval |
+|----------|
+| 32 days |
 
 #### Pattern
 INTERVAL, Date arithmetic
@@ -1259,6 +1790,19 @@ select timestamp '2012-08-31 01:00:00' - timestamp '2012-07-30 01:00:00' as inte
 #### Problem
 Output every date in October 2012.
 
+**Tables:** None (uses `generate_series`).
+
+**Expected output (sample):**
+| ts |
+|----|
+| 2012-10-01 00:00:00 |
+| 2012-10-02 00:00:00 |
+| 2012-10-03 00:00:00 |
+| 2012-10-04 00:00:00 |
+| 2012-10-05 00:00:00 |
+| 2012-10-06 00:00:00 |
+| ... |
+
 #### Pattern
 Date arithmetic
 
@@ -1276,6 +1820,13 @@ select generate_series(timestamp '2012-10-01', timestamp '2012-10-31', interval 
 
 #### Problem
 Extract the day-of-month integer from `2012-08-31`.
+
+**Tables:** None (scalar expression).
+
+**Expected output (sample):**
+| date_part |
+|-----------|
+| 31 |
 
 #### Pattern
 EXTRACT
@@ -1295,6 +1846,13 @@ select extract(day from timestamp '2012-08-31');
 #### Problem
 Seconds between `2012-08-31 01:00:00` and `2012-09-02 00:00:00`.
 
+**Tables:** None (scalar expression).
+
+**Expected output (sample):**
+| date_part |
+|-----------|
+| 169200 |
+
 #### Pattern
 EXTRACT, INTERVAL
 
@@ -1312,6 +1870,19 @@ select extract(epoch from (timestamp '2012-09-02 00:00:00' - '2012-08-31 01:00:0
 
 #### Problem
 For each month in 2012, output month number and an interval column with the month's length.
+
+**Tables:** None (uses `generate_series`).
+
+**Expected output (sample):**
+| month | length |
+|-------|--------|
+| 1 | 31 days |
+| 2 | 29 days |
+| 3 | 31 days |
+| 4 | 30 days |
+| 5 | 31 days |
+| 6 | 30 days |
+| ... | ... |
 
 #### Pattern
 INTERVAL, EXTRACT, Date arithmetic
@@ -1337,6 +1908,13 @@ order by month;
 #### Problem
 For `2012-02-11 01:00:00`, return the days remaining in the month (today counts as a whole day). Output a single interval.
 
+**Tables:** None (scalar expression).
+
+**Expected output (sample):**
+| remaining |
+|-----------|
+| 19 days |
+
 #### Pattern
 DATE_TRUNC, INTERVAL
 
@@ -1356,6 +1934,22 @@ select (date_trunc('month',ts.testts) + interval '1 month')
 
 #### Problem
 Last 10 bookings by end time then start time. Return start and end time.
+
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| starttime | endtime |
+|-----------|---------|
+| 2013-01-01 15:30:00 | 2013-01-01 16:00:00 |
+| 2012-09-30 19:30:00 | 2012-09-30 20:30:00 |
+| 2012-09-30 19:00:00 | 2012-09-30 20:30:00 |
+| 2012-09-30 19:30:00 | 2012-09-30 20:00:00 |
+| 2012-09-30 19:00:00 | 2012-09-30 20:00:00 |
+| 2012-09-30 19:00:00 | 2012-09-30 20:00:00 |
+| 2012-09-30 18:30:00 | 2012-09-30 20:00:00 |
+| 2012-09-30 18:30:00 | 2012-09-30 20:00:00 |
+| 2012-09-30 19:00:00 | 2012-09-30 19:30:00 |
+| 2012-09-30 18:30:00 | 2012-09-30 19:30:00 |
 
 #### Pattern
 INTERVAL, Date arithmetic, ORDER BY, LIMIT
@@ -1378,6 +1972,16 @@ select starttime, starttime + slots*(interval '30 minutes') endtime
 #### Problem
 Bookings per month, sorted by month.
 
+**Tables:** `cd.bookings`
+
+**Expected output (sample):**
+| month | count |
+|-------|-------|
+| 2012-07-01 00:00:00 | 658 |
+| 2012-08-01 00:00:00 | 1472 |
+| 2012-09-01 00:00:00 | 1913 |
+| 2013-01-01 00:00:00 | 1 |
+
 #### Pattern
 DATE_TRUNC, GROUP BY, COUNT
 
@@ -1398,6 +2002,19 @@ select date_trunc('month', starttime) as month, count(*)
 
 #### Problem
 Utilisation = (slots used / slots available) * 100, per facility per month, rounded to 1 dp. Sort by name then month. Opening hours: 8am to 8:30pm (25 half-hour slots/day).
+
+**Tables:** `cd.bookings`, `cd.facilities`
+
+**Expected output (sample):**
+| name | month | utilisation |
+|------|-------|-------------|
+| Badminton Court | 2012-07-01 00:00:00 | 23.2 |
+| Badminton Court | 2012-08-01 00:00:00 | 59.2 |
+| Badminton Court | 2012-09-01 00:00:00 | 76.0 |
+| Massage Room 1 | 2012-07-01 00:00:00 | 34.1 |
+| Massage Room 1 | 2012-08-01 00:00:00 | 63.5 |
+| Massage Room 1 | 2012-09-01 00:00:00 | 86.4 |
+| ... | ... | ... |
 
 #### Pattern
 DATE_TRUNC, GROUP BY, Date arithmetic
@@ -1429,6 +2046,19 @@ order by name, month
 #### Problem
 Output every member's name formatted 'Surname, Firstname'.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| name |
+|------|
+| GUEST, GUEST |
+| Smith, Darren |
+| Smith, Tracy |
+| Rownam, Tim |
+| Joplette, Janice |
+| Butters, Gerald |
+| ... |
+
 #### Pattern
 String manipulation (substring, position, concat)
 
@@ -1446,6 +2076,14 @@ select surname || ', ' || firstname as name from cd.members
 
 #### Problem
 Facilities whose name starts with 'Tennis'.
+
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
+|-------|------|------------|-----------|---------------|--------------------|
+| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
+| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
 
 #### Pattern
 WHERE filter, String manipulation (substring, position, concat)
@@ -1465,6 +2103,14 @@ select * from cd.facilities where name like 'Tennis%';
 #### Problem
 Facilities whose name starts with 'tennis', case-insensitively.
 
+**Tables:** `cd.facilities`
+
+**Expected output (sample):**
+| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
+|-------|------|------------|-----------|---------------|--------------------|
+| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
+| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+
 #### Pattern
 WHERE filter, String manipulation (substring, position, concat)
 
@@ -1482,6 +2128,18 @@ select * from cd.facilities where upper(name) like 'TENNIS%';
 
 #### Problem
 Members whose telephone contains parentheses. Return memid and telephone, sorted by memid.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| memid | telephone |
+|-------|-----------|
+| 0 | (000) 000-0000 |
+| 3 | (844) 693-0723 |
+| 4 | (833) 942-4710 |
+| 5 | (844) 078-4130 |
+| 6 | (822) 354-9973 |
+| ... | ... |
 
 #### Pattern
 WHERE filter, String manipulation (substring, position, concat)
@@ -1501,6 +2159,19 @@ select memid, telephone from cd.members where telephone ~ '\[()\]';
 #### Problem
 Zip codes padded to 5 chars with leading zeroes, ordered by the padded string.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| zip |
+|-----|
+| 00000 |
+| 00234 |
+| 00234 |
+| 04321 |
+| 04321 |
+| 10383 |
+| ... |
+
 #### Pattern
 String manipulation (substring, position, concat)
 
@@ -1518,6 +2189,19 @@ select lpad(cast(zipcode as char(5)),5,'0') zip from cd.members order by zip
 
 #### Problem
 Per first-letter of surname, count members. Sort by letter. Skip zero-count letters.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| letter | count |
+|--------|-------|
+| B | 5 |
+| C | 2 |
+| D | 1 |
+| F | 2 |
+| G | 2 |
+| H | 1 |
+| ... | ... |
 
 #### Pattern
 GROUP BY, String manipulation (substring, position, concat)
@@ -1540,6 +2224,19 @@ select substr(mems.surname,1,1) as letter, count(*) as count
 #### Problem
 Strip `-`, `(`, `)`, and space from telephone numbers. Output memid and cleaned number, sorted by memid.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| memid | telephone |
+|-------|-----------|
+| 0 | 0000000000 |
+| 1 | 5555555555 |
+| 2 | 5555555555 |
+| 3 | 8446930723 |
+| 4 | 8339424710 |
+| 5 | 8440784130 |
+| ... | ... |
+
 #### Pattern
 String manipulation (substring, position, concat)
 
@@ -1559,6 +2256,15 @@ select memid, translate(telephone, '-() ', '') as telephone
 
 #### Problem
 For member 27, return their recommender, that person's recommender, and so on up the chain. Output memid, firstname, surname, ordered by descending memid.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| recommender | firstname | surname |
+|-------------|-----------|---------|
+| 20 | Matthew | Genting |
+| 5 | Gerald | Butters |
+| 1 | Darren | Smith |
 
 #### Pattern
 Recursive CTE
@@ -1590,6 +2296,19 @@ order by memid desc
 #### Problem
 For member 1, return everyone they recommended, then those people's recommendations, all the way down. Output memid and name, sorted by ascending memid.
 
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| memid | firstname | surname |
+|-------|-----------|---------|
+| 4 | Janice | Joplette |
+| 5 | Gerald | Butters |
+| 7 | Nancy | Dare |
+| 10 | Charles | Owen |
+| 11 | David | Jones |
+| 14 | Jack | Smith |
+| ... | ... | ... |
+
 #### Pattern
 Recursive CTE
 
@@ -1619,6 +2338,16 @@ order by memid
 
 #### Problem
 Build a recursive CTE that yields `(member, recommender)` pairs for every member's full upward chain, then demonstrate by selecting chains for members 12 and 22.
+
+**Tables:** `cd.members`
+
+**Expected output (sample):**
+| member | recommender | firstname | surname |
+|--------|-------------|-----------|---------|
+| 12 | 9 | Ponder | Stibbons |
+| 12 | 6 | Burton | Tracy |
+| 22 | 16 | Timothy | Baker |
+| 22 | 13 | Jemima | Farrell |
 
 #### Pattern
 Recursive CTE
