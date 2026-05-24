@@ -50,11 +50,12 @@ export function NativeWebViewShell() {
           ref={webRef}
           source={{ uri: REMOTE_URL }}
           style={styles.web}
-          // Cache-first: serves the local copy when present, network
-          // otherwise. Combined with the WebView's HTTP cache this gives
-          // offline-after-first-visit semantics without a service worker.
+          // The page registers a service worker that owns offline caching
+          // via durable Cache Storage (the WebView HTTP cache was unreliable
+          // — evicted under memory pressure). Leave the WebView cache at its
+          // default and let the SW be the source of truth.
           cacheEnabled
-          cacheMode="LOAD_CACHE_ELSE_NETWORK"
+          cacheMode="LOAD_DEFAULT"
           javaScriptEnabled
           domStorageEnabled
           pullToRefreshEnabled
