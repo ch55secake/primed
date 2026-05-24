@@ -4,6 +4,7 @@ ctime: 2026-04-12 20:02:45
 categories:
   - "[[Categories/Algorithms|Algorithms]]"
 ---
+
 ### 1. Two Sum
 
 #### Problem
@@ -15,7 +16,9 @@ Given an array of integers and a target, return the indices of the two numbers t
 #### Explanation
 The brute-force approach checks every pair — `O(n²)` time. The trick: as you walk the array left to right, for each number `n` at index `i`, the question "is there a partner that completes the sum?" reduces to "have I already seen `target - n`?" That's an `O(1)` hashmap lookup. So you scan once: at each index, compute the complement, check the map, and only if it's not there do you record the current `n → i`. The first time the complement check succeeds, you return both indices. Recording happens *after* the check, so you can never accidentally pair an element with itself.
 
-#### Solution
+#### Python
+
+`enumerate` + dict gives the cleanest one-pass; recording `seen[n] = i` *after* the lookup is what prevents an element pairing with itself.
 
 ```python
 def twoSum(nums, target):
@@ -26,6 +29,10 @@ def twoSum(nums, target):
             return [seen[comp], i]
         seen[n] = i
 ```
+
+#### Rust
+
+`HashMap::get` returns `Option<&V>` — `if let Some(&j)` destructures and copies the index out without cloning. The `i as i32` cast is purely for LeetCode's signature; idiomatic Rust would keep `usize` end-to-end.
 
 ```rust
 use std::collections::HashMap;
@@ -43,6 +50,10 @@ fn two_sum(nums: Vec<i32>, target: i32) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+The comma-ok idiom (`j, ok := seen[comp]`) is the idiomatic 'does the key exist?' check — no separate `contains` call, no double lookup. Returning `nil` is fine here because Go treats a nil slice as a valid empty `[]int`.
+
 ```go
 func twoSum(nums []int, target int) []int {
     seen := make(map[int]int)
@@ -56,6 +67,10 @@ func twoSum(nums []int, target int) []int {
     return nil
 }
 ```
+
+#### C++
+
+`auto it = seen.find(comp)` + `it != seen.end()` is the standard way to avoid the double lookup you'd get from `seen.count(comp)` followed by `seen[comp]`. Brace-init `{it->second, i}` lets the compiler build the return vector in place.
 
 ```cpp
 #include <vector>
@@ -72,6 +87,8 @@ std::vector<int> twoSum(std::vector<int>& nums, int target) {
     return {};
 }
 ```
+
+
 ### 2. Add Two Numbers
 
 #### Problem
@@ -83,7 +100,9 @@ Given two non-empty linked lists representing non-negative integers stored in re
 #### Explanation
 The numbers are already in the convenient ones-first order, so you can walk both lists simultaneously and simulate grade-school addition. At each step, sum the two node values (defaulting to 0 when a list is exhausted) plus any carry from the previous step. The digit to store is `val % 10` and the new carry is `val // 10`. A dummy head node eliminates the special case of building the first node. The loop condition `while l1 or l2 or carry` handles lists of unequal length and a final carry (e.g., 99 + 1 = 100) without extra code. Edge case: both lists can have different lengths, and there may be a final carry after both lists are consumed.
 
-#### Solution
+#### Python
+
+Tuple assignment `carry, val = val // 10, val % 10` does both updates in one line without a temp. The walrus operators tempt you here but the dummy-head pattern reads better as-is.
 
 ```python
 class ListNode:
@@ -108,6 +127,10 @@ def addTwoNumbers(l1, l2):
         curr = curr.next
     return dummy.next
 ```
+
+#### Rust
+
+Threading `&mut dummy` through the loop sidesteps Rust's classic linked-list ownership pain — `curr.next.as_mut().unwrap()` re-borrows from the freshly-inserted node each iteration. Owning `l1`/`l2` by `mut Option<Box<...>>` lets you `if let Some(node) = l1` and move the chain forward without cloning.
 
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -145,6 +168,10 @@ fn add_two_numbers(
 }
 ```
 
+#### Go
+
+Allocating each node with `&ListNode{Val: val % 10}` puts it on the heap via escape analysis — no manual `new()` call needed. Nil checks on `l1`/`l2` are explicit rather than the `Option` pattern, but the loop condition `l1 != nil || l2 != nil || carry != 0` reads the same.
+
 ```go
 type ListNode struct {
     Val  int
@@ -173,6 +200,10 @@ func addTwoNumbers(l1 *ListNode, l2 *ListNode) *ListNode {
 }
 ```
 
+#### C++
+
+Stack-allocating `ListNode dummy` and pointing `curr` at it avoids a leak for the sentinel; only the real nodes use `new`. Single-line `if (l1) { ... }` keeps the inner loop dense without sacrificing clarity.
+
 ```cpp
 #include <memory>
 
@@ -198,6 +229,7 @@ ListNode* addTwoNumbers(ListNode* l1, ListNode* l2) {
 }
 ```
 
+
 ### 3. Median of Two Sorted Arrays
 
 #### Problem
@@ -209,7 +241,9 @@ Given two sorted arrays `nums1` and `nums2`, return the median of the combined s
 #### Explanation
 A naive approach merges both arrays and picks the middle element — `O(m + n)` time. The key insight is that the median is determined by a partition: split both arrays so that every element on the left of the partition is at most every element on the right, and the left half contains exactly `(m + n + 1) / 2` elements. Binary search on the shorter array's partition index `i`; the partner index `j = half - i` follows automatically. At each midpoint, check whether `left1 <= right2` and `left2 <= right1`; if so, the partition is correct. If `left1 > right2`, move `i` left; otherwise move it right. Use `-∞` and `+∞` as sentinels for out-of-bounds accesses. For even total length, the median is the average of the two middle values.
 
-#### Solution
+#### Python
+
+`float('-inf')` and `float('inf')` as sentinels avoid any integer overflow concerns and compare correctly against ints. The tuple swap `nums1, nums2 = nums2, nums1` enforces the 'binary-search-on-shorter' invariant without an extra variable.
 
 ```python
 def findMedianSortedArrays(nums1, nums2):
@@ -238,6 +272,10 @@ def findMedianSortedArrays(nums1, nums2):
             lo = i + 1
     return 0.0
 ```
+
+#### Rust
+
+Casting partition values to `i64` and using `i64::MIN`/`i64::MAX` as sentinels keeps comparisons safe when the input is at the edge of `i32`. Binding `(a, b)` as references avoids cloning either input vector.
 
 ```rust
 fn find_median_sorted_arrays(nums1: Vec<i32>, nums2: Vec<i32>) -> f64 {
@@ -273,6 +311,10 @@ fn find_median_sorted_arrays(nums1: Vec<i32>, nums2: Vec<i32>) -> f64 {
     }
 }
 ```
+
+#### Go
+
+`math.MinInt64`/`math.MaxInt64` as sentinels keep the comparison correct without overflow. Note the local `max`/`min` helpers — needed in older Go versions; from 1.21 the builtins remove this boilerplate.
 
 ```go
 func findMedianSortedArrays(nums1 []int, nums2 []int) float64 {
@@ -317,6 +359,10 @@ func min(a, b int) int {
 }
 ```
 
+#### C++
+
+Swapping the inputs with `std::swap` mutates the caller's vectors (cheap because vectors swap pointers) instead of taking references to a chosen shorter side. Promoting to `long` for the partition values handles the `LLONG_MIN`/`LLONG_MAX` sentinels without overflow.
+
 ```cpp
 #include <vector>
 #include <climits>
@@ -350,6 +396,7 @@ double findMedianSortedArrays(std::vector<int>& nums1, std::vector<int>& nums2) 
 }
 ```
 
+
 ### 4. Longest Palindromic Substring
 
 #### Problem
@@ -361,7 +408,9 @@ Given a string `s`, return the longest substring that is a palindrome. If there 
 #### Explanation
 A brute-force approach checks all `O(n²)` substrings and verifies each in `O(n)`, giving `O(n³)` overall. The expand-around-center insight is that every palindrome has a center — either a single character (odd length) or a pair of identical characters (even length). By trying all `2n - 1` centers and expanding outward as long as characters match, each expansion is `O(n)` worst case and the total is `O(n²)`. No extra space is needed beyond tracking the best result. A linear-time solution (Manacher's algorithm) exists but is rarely expected in interviews. Edge case: empty string or single character are trivially palindromes.
 
-#### Solution
+#### Python
+
+Closure over `res` via `nonlocal` keeps the expand helper short; the slice `s[l:r+1]` is built only when a new best is found, so allocation stays minimal.
 
 ```python
 def longestPalindrome(s):
@@ -381,6 +430,10 @@ def longestPalindrome(s):
 
     return res
 ```
+
+#### Rust
+
+Operating on `s.as_bytes()` avoids UTF-8 decoding for every comparison — safe here because the input is ASCII. Casting to `isize` lets `l` go negative as a loop-termination signal, then the helper returns the `(start, len)` pair so the outer loop tracks only the best.
 
 ```rust
 fn longest_palindrome(s: String) -> String {
@@ -409,6 +462,10 @@ fn longest_palindrome(s: String) -> String {
 }
 ```
 
+#### Go
+
+Indexing the string directly (`s[l] == s[r]`) works on bytes — fine for ASCII LeetCode inputs. The closure captures `bestStart`/`bestLen` by reference so the outer loop just calls `expand` twice per center.
+
 ```go
 func longestPalindrome(s string) string {
     n := len(s)
@@ -434,6 +491,10 @@ func longestPalindrome(s string) string {
 }
 ```
 
+#### C++
+
+The lambda captures by `[&]` to mutate `bestStart`/`bestLen` from inside. `s.substr(bestStart, bestLen)` is the only allocation in the whole function.
+
 ```cpp
 #include <string>
 #include <algorithm>
@@ -456,6 +517,8 @@ std::string longestPalindrome(std::string s) {
     return s.substr(bestStart, bestLen);
 }
 ```
+
+
 ### 5. Coin Change II
 
 #### Problem
@@ -467,7 +530,9 @@ Given an integer `amount` and an array of coin denominations, return the number 
 #### Explanation
 This is the classic "combination count" variant of the unbounded knapsack. `dp[a]` represents the number of ways to make amount `a`. Initialize `dp[0] = 1` (one way to make 0: use no coins). For each coin, iterate amounts from `coin` to `amount` and add `dp[a - coin]` to `dp[a]`. The outer loop over coins ensures we count combinations, not permutations — each coin is "committed" before moving to the next, so (1, 2) and (2, 1) are counted once. The naive recursive approach without memoization has exponential branches; the DP collapses overlapping subproblems to `O(n * amount)`.
 
-#### Solution
+#### Python
+
+List comprehension `[0] * (amount + 1)` is the standard 1D DP buffer. The coin-outer / amount-inner loop order is what counts combinations rather than permutations — easy to flip by accident.
 
 ```python
 def change(amount, coins):
@@ -478,6 +543,10 @@ def change(amount, coins):
             dp[a] += dp[a - coin]
     return dp[amount]
 ```
+
+#### Rust
+
+`vec![0i32; amount + 1]` allocates the DP table once; the inclusive range `coin..=amount` keeps the inner loop bounds-safe without index arithmetic. The `coin as usize` cast happens once per coin, not per iteration.
 
 ```rust
 fn change(amount: i32, coins: Vec<i32>) -> i32 {
@@ -494,6 +563,10 @@ fn change(amount: i32, coins: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+`make([]int, amount+1)` zero-initializes the DP table — no need to loop and fill. The two-level loop reads almost identically to the math definition.
+
 ```go
 func change(amount int, coins []int) int {
     dp := make([]int, amount+1)
@@ -506,6 +579,10 @@ func change(amount int, coins []int) int {
     return dp[amount]
 }
 ```
+
+#### C++
+
+`std::vector<int>(amount + 1, 0)` zero-initializes in the constructor. Range-for `for (int coin : coins)` keeps the outer loop clean; the inner is plain indexed iteration since you need the index.
 
 ```cpp
 #include <vector>
@@ -522,6 +599,7 @@ int change(int amount, std::vector<int>& coins) {
 }
 ```
 
+
 ### 6. Reverse Integer
 
 #### Problem
@@ -533,7 +611,9 @@ Given a 32-bit signed integer `x`, return `x` with its digits reversed. If the r
 #### Explanation
 Extract digits one at a time by repeatedly taking `x % 10` (the last digit) and building the result with `res = res * 10 + digit`, then dividing `x` by 10. The number of iterations is proportional to the number of digits, which is `O(log x)`. The key constraint is overflow: in C++ or Rust the multiplication could silently wrap, so you must check bounds before or after constructing the result. Python integers are arbitrary precision, so you check the final result against the 32-bit range. Strip the sign first, reverse the absolute value, then reapply the sign — this avoids dealing with negative modulo behavior in languages where it differs. Edge case: `x = -2147483648` reverses to a value that exceeds `INT_MAX`, so it must return 0.
 
-#### Solution
+#### Python
+
+Python's `//` on negatives floors toward `-∞`, so the explicit sign strip (`abs(x)` then reapply) avoids the `-7 % 10 == 3` surprise. Arbitrary-precision ints mean overflow only needs to be checked once at the end.
 
 ```python
 def reverse(x):
@@ -548,6 +628,10 @@ def reverse(x):
         return 0
     return res
 ```
+
+#### Rust
+
+`checked_mul` + `and_then(|r| r.checked_add(...))` is the idiomatic overflow-aware chain — returning `0` on `None` matches the problem's contract. Rust's `i32 % 10` truncates toward zero like C, so no sign normalization is needed.
 
 ```rust
 fn reverse(x: i32) -> i32 {
@@ -566,6 +650,10 @@ fn reverse(x: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Go's `int` is 64-bit on most platforms, so `res*10 + x%10` can't overflow during construction — the only check is the final `math.MinInt32`/`math.MaxInt32` bounds.
+
 ```go
 import "math"
 
@@ -582,6 +670,10 @@ func reverse(x int) int {
 }
 ```
 
+#### C++
+
+Widening `res` to `long` sidesteps signed-overflow undefined behavior during the build, then a single `INT_MIN`/`INT_MAX` check at the end. C++ `%` truncates toward zero, so the sign of `x` is preserved naturally.
+
 ```cpp
 #include <climits>
 
@@ -596,6 +688,7 @@ int reverse(int x) {
 }
 ```
 
+
 ### 7. Contains Duplicate
 
 #### Problem
@@ -607,12 +700,18 @@ Given an integer array `nums`, return `true` if any value appears at least twice
 #### Explanation
 The brute-force approach compares every pair in `O(n²)`. Sorting reduces this to `O(n log n)` by making duplicates adjacent, but the hashset approach is the fastest: insert each element into a set and stop as soon as an insertion would create a duplicate (the element is already present). The Python one-liner compares lengths before and after set conversion, which is equivalent but processes all elements before short-circuiting. In other languages, the explicit loop version short-circuits on the first duplicate found, which can be significantly faster in practice. Edge case: an empty or single-element array always returns false.
 
-#### Solution
+#### Python
+
+One-liner using `set(nums)` — readable, but it allocates the full set before comparing lengths, so it can't short-circuit on an early duplicate. For tiny inputs the simplicity wins; for huge ones the explicit loop is faster.
 
 ```python
 def containsDuplicate(nums):
     return len(nums) != len(set(nums))
 ```
+
+#### Rust
+
+`HashSet::insert` returns `false` if the element was already present — the idiomatic way to check-and-insert in one call. Short-circuits on the first duplicate.
 
 ```rust
 use std::collections::HashSet;
@@ -628,6 +727,10 @@ fn contains_duplicate(nums: Vec<i32>) -> bool {
 }
 ```
 
+#### Go
+
+Go has no built-in set, so `map[int]struct{}` is the zero-byte-value idiom. The two-step check-then-insert is needed because there's no atomic 'insert if absent and tell me' primitive.
+
 ```go
 func containsDuplicate(nums []int) bool {
     seen := make(map[int]struct{})
@@ -640,6 +743,10 @@ func containsDuplicate(nums []int) bool {
     return false
 }
 ```
+
+#### C++
+
+`seen.insert(n)` returns a `pair<iterator, bool>` where `.second` is true on successful insertion — `!insert().second` is the canonical 'was already there' check, same shape as Rust's API.
 
 ```cpp
 #include <vector>
@@ -654,6 +761,7 @@ bool containsDuplicate(std::vector<int>& nums) {
 }
 ```
 
+
 ### 8. Valid Anagram
 
 #### Problem
@@ -665,7 +773,9 @@ Given two strings `s` and `t`, return `true` if `t` is an anagram of `s` (contai
 #### Explanation
 An anagram has identical character frequencies. Early-exit on length mismatch avoids unnecessary work. With only lowercase English letters, a fixed 26-element integer array replaces a hashmap entirely, keeping auxiliary space constant. Increment for each character in `s` and decrement for the corresponding character in `t` simultaneously; if all counts are zero at the end, the strings are anagrams. This is equivalent to sorting both strings and comparing — `O(n log n)` — but the frequency array runs in `O(n)`. For Unicode inputs you would need a hashmap instead. Edge case: two empty strings are anagrams of each other.
 
-#### Solution
+#### Python
+
+Parallel `zip(s, t)` iteration with `ord(a) - ord('a')` indexes the 26-element array directly. `all(c == 0 for c in count)` reads as the postcondition; a generator avoids building an intermediate list.
 
 ```python
 def isAnagram(s, t):
@@ -678,6 +788,10 @@ def isAnagram(s, t):
     return all(c == 0 for c in count)
 ```
 
+#### Rust
+
+Iterating `s.bytes()` instead of `s.chars()` skips UTF-8 decoding — safe because the inputs are constrained to lowercase ASCII. The fixed `[i32; 26]` array lives on the stack, no allocation.
+
 ```rust
 fn is_anagram(s: String, t: String) -> bool {
     if s.len() != t.len() { return false; }
@@ -689,6 +803,10 @@ fn is_anagram(s: String, t: String) -> bool {
     count.iter().all(|&c| c == 0)
 }
 ```
+
+#### Go
+
+Indexing `s[i]` gives the byte directly; `s[i]-'a'` is a clean array index. A plain `[26]int` (array, not slice) keeps everything on the stack.
 
 ```go
 func isAnagram(s string, t string) bool {
@@ -704,6 +822,10 @@ func isAnagram(s string, t string) bool {
     return true
 }
 ```
+
+#### C++
+
+`std::array<int, 26>{}` value-initializes to zero with the empty brace. Fixed-size and stack-allocated, no heap overhead vs. `std::vector`.
 
 ```cpp
 #include <string>
@@ -721,6 +843,7 @@ bool isAnagram(std::string s, std::string t) {
 }
 ```
 
+
 ### 9. Group Anagrams
 
 #### Problem
@@ -732,7 +855,9 @@ Given an array of strings, group the strings that are anagrams of each other and
 #### Explanation
 Two strings are anagrams if and only if their sorted character sequences are identical, so sorting each string produces a canonical key. Group strings by this key in a hashmap: walk the array once, sort each string in `O(k log k)`, and append it to the matching bucket. The total cost is `O(n * k log k)`. An alternative key is a 26-element frequency tuple, which sorts in `O(k)` per string but with a larger constant. Edge cases: an empty string is its own anagram group; a single-element array is trivially grouped.
 
-#### Solution
+#### Python
+
+`tuple(sorted(s))` is hashable so it can key a dict directly — no need to rejoin to a string. `setdefault(key, []).append(s)` is one of Python's few really tidy 'get-or-create then mutate' patterns.
 
 ```python
 def groupAnagrams(strs):
@@ -742,6 +867,10 @@ def groupAnagrams(strs):
         groups.setdefault(key, []).append(s)
     return list(groups.values())
 ```
+
+#### Rust
+
+Keying by `Vec<u8>` (sorted bytes) avoids a `String` allocation per key, and `sort_unstable` is faster than `sort` since stability doesn't matter for an anagram key. `entry(key).or_default().push(s)` is the canonical get-or-create-and-mutate.
 
 ```rust
 use std::collections::HashMap;
@@ -756,6 +885,10 @@ fn group_anagrams(strs: Vec<String>) -> Vec<Vec<String>> {
     groups.into_values().collect()
 }
 ```
+
+#### Go
+
+Go has no first-class tuple, so the sorted bytes are converted back to `string` to use as a map key. `sort.Slice` with a closure is the pre-1.21 way; modern Go would use `slices.Sort(b)`.
 
 ```go
 import "sort"
@@ -775,6 +908,10 @@ func groupAnagrams(strs []string) [][]string {
     return res
 }
 ```
+
+#### C++
+
+Copying the input to `key` and sorting in place is the simplest path; `unordered_map<string, ...>` keys naturally. `std::move(v)` in the final loop avoids copying each bucket's vector into the result.
 
 ```cpp
 #include <vector>
@@ -796,6 +933,7 @@ std::vector<std::vector<std::string>> groupAnagrams(std::vector<std::string>& st
 }
 ```
 
+
 ### 10. Top K Frequent Elements
 
 #### Problem
@@ -807,7 +945,9 @@ Given an integer array `nums` and an integer `k`, return the `k` most frequent e
 #### Explanation
 The obvious approach uses a max-heap: count frequencies in `O(n)`, then extract the top `k` in `O(k log n)` — overall `O(n log n)`. Bucket sort beats this: since no element can appear more than `n` times, create `n + 1` buckets indexed by frequency. Place each element in its frequency bucket, then scan buckets from high to low, collecting elements until you have `k`. Because the bucket index is bounded by `n`, filling and scanning is `O(n)`. This approach works even when `k = n`. Edge case: ties in frequency are handled naturally since the bucket at the same index holds multiple elements.
 
-#### Solution
+#### Python
+
+Buckets are a list-of-lists indexed by frequency — `nums.length + 1` slots because frequency can be at most `n`. Walking buckets high-to-low with `extend` + length check short-circuits cleanly.
 
 ```python
 def topKFrequent(nums, k):
@@ -823,6 +963,10 @@ def topKFrequent(nums, k):
         if len(res) >= k:
             return res[:k]
 ```
+
+#### Rust
+
+`vec![vec![]; n + 1]` allocates the bucket array (note: each inner `vec![]` is a fresh allocation — fine here because buckets are tiny). `buckets.iter().rev()` is the clean way to scan high-to-low without manual indexing.
 
 ```rust
 fn top_k_frequent(nums: Vec<i32>, k: i32) -> Vec<i32> {
@@ -843,6 +987,10 @@ fn top_k_frequent(nums: Vec<i32>, k: i32) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Combining the bucket walk with the early-exit `len(res) < k` in the loop condition makes the code dense but readable. Final `res[:k]` slice keeps the answer at exactly `k` even if the last bucket overshoots.
+
 ```go
 func topKFrequent(nums []int, k int) []int {
     count := make(map[int]int)
@@ -856,6 +1004,10 @@ func topKFrequent(nums []int, k int) []int {
     return res[:k]
 }
 ```
+
+#### C++
+
+Reverse iteration via decrementing `i` from `n` down to `1` — there's no neat `views::reverse` here without C++20 ranges. Range-for over the bucket contents is the cleanest inner loop.
 
 ```cpp
 #include <vector>
@@ -878,6 +1030,7 @@ std::vector<int> topKFrequent(std::vector<int>& nums, int k) {
 }
 ```
 
+
 ### 11. Encode and Decode Strings
 
 #### Problem
@@ -889,7 +1042,9 @@ Design an algorithm to encode a list of strings into a single string, and decode
 #### Explanation
 A naive delimiter like `","` fails if strings contain that character. Escaping every special character is error-prone. Length-prefix encoding avoids both issues: encode each string as `"<length>#<content>"`. On decode, read up to the `#` to get the length, then slice exactly that many characters — no ambiguity regardless of the string content. The `#` only acts as a separator between the length and the content; because you read the length first, you always know where the content ends. This is `O(total characters)` for both encode and decode.
 
-#### Solution
+#### Python
+
+`s.index('#', i)` finds the next delimiter without allocating a sliced view. Building the result with `res.append` and a manual cursor `i` is faster than splitting because there's no ambiguity to resolve.
 
 ```python
 def encode(strs):
@@ -904,6 +1059,10 @@ def decode(s):
         i = j + 1 + length
     return res
 ```
+
+#### Rust
+
+Working on `s.as_bytes()` for the `#` scan avoids UTF-8 char-boundary checks; the actual content slice goes back through `s[..]` so it returns a `String`. `parse::<usize>` is unwrap-safe because we control the encoding.
 
 ```rust
 fn encode(strs: Vec<String>) -> String {
@@ -928,6 +1087,10 @@ fn decode(s: String) -> Vec<String> {
     res
 }
 ```
+
+#### Go
+
+`strings.Builder` for the encode side avoids quadratic string concatenation. On decode, `strings.Index(s[i:], "#") + i` recovers an absolute index without slicing the whole tail.
 
 ```go
 import (
@@ -958,6 +1121,10 @@ func decode(s string) []string {
 }
 ```
 
+#### C++
+
+`std::string::find('#', i)` returns the absolute position directly — no offset arithmetic needed. `substr(j + 1, len)` does the bounded copy that `decode` relies on.
+
 ```cpp
 #include <string>
 #include <vector>
@@ -983,6 +1150,7 @@ std::vector<std::string> decode(std::string s) {
 }
 ```
 
+
 ### 12. Product of Array Except Self
 
 #### Problem
@@ -994,7 +1162,9 @@ Given an integer array `nums`, return an array `output` where `output[i]` equals
 #### Explanation
 Division would be simple (`total_product / nums[i]`), but division is disallowed and zeros complicate it anyway. The insight is that `output[i]` is the product of everything to the left of `i` times the product of everything to the right. First pass: store running left products in the output array. Second pass (right to left): multiply each position by the running right product. This is two linear scans and uses only a single running variable (`suffix`), so auxiliary space is `O(1)`. No zeros require special handling because the prefix/suffix approach naturally produces 0 when needed.
 
-#### Solution
+#### Python
+
+Using the output array as the prefix-product buffer (then multiplying by the running suffix) is the key allocation saver — no separate left/right arrays. `range(len(nums) - 1, -1, -1)` is Python's idiomatic 'walk backwards by index'.
 
 ```python
 def productExceptSelf(nums):
@@ -1009,6 +1179,10 @@ def productExceptSelf(nums):
         suffix *= nums[i]
     return res
 ```
+
+#### Rust
+
+`vec![1i32; n]` initializes the output to 1 so the prefix pass can just assign. The reverse pass uses `(0..n).rev()` — Rust's clean reverse-range without manual `i -= 1`.
 
 ```rust
 fn product_except_self(nums: Vec<i32>) -> Vec<i32> {
@@ -1028,6 +1202,10 @@ fn product_except_self(nums: Vec<i32>) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Plain indexed loops; no fancy ranges. `make([]int, n)` zero-initializes — actually a minor pitfall here, you must remember the prefix pass writes 1 implicitly because the first iteration sets `res[0] = prefix = 1` before multiplying.
+
 ```go
 func productExceptSelf(nums []int) []int {
     n := len(nums)
@@ -1045,6 +1223,10 @@ func productExceptSelf(nums []int) []int {
     return res
 }
 ```
+
+#### C++
+
+`std::vector<int> res(n, 1)` is the constructor form that fills with 1 — same role as the Python `[1] * n`. Two indexed loops, no fancy iterators, matches the algorithm shape one-to-one.
 
 ```cpp
 #include <vector>
@@ -1066,6 +1248,7 @@ std::vector<int> productExceptSelf(std::vector<int>& nums) {
 }
 ```
 
+
 ### 13. Valid Sudoku
 
 #### Problem
@@ -1077,7 +1260,9 @@ Determine if a 9×9 Sudoku board is valid. Each row, column, and 3×3 sub-box mu
 #### Explanation
 Validity requires that digits 1–9 appear at most once in each row, column, and 3×3 box. Maintain three arrays of nine sets — one per row, one per column, one per box. For each filled cell, compute the box index as `(r // 3) * 3 + (c // 3)`, which maps the nine boxes to indices 0–8. If the digit is already in any of the three relevant sets, the board is invalid; otherwise add it to all three. The board size is fixed, so the algorithm is `O(81) = O(1)`. Edge case: `'.'` cells are simply skipped.
 
-#### Solution
+#### Python
+
+Uses three lists of sets keyed by position — the most readable form. `set` membership is `O(1)` average; with only 9 digits per region the constant factor doesn't matter.
 
 ```python
 def isValidSudoku(board):
@@ -1097,6 +1282,10 @@ def isValidSudoku(board):
             boxes[b].add(v)
     return True
 ```
+
+#### Rust
+
+Bitmask trick: `u16` is plenty for 9 digits, so `1u16 << (ch as u8 - b'1')` encodes the digit as a bit. `rows[r] & bit != 0` is the check, `|=` is the insert — faster than `HashSet` and cache-friendlier.
 
 ```rust
 fn is_valid_sudoku(board: Vec<Vec<char>>) -> bool {
@@ -1119,6 +1308,10 @@ fn is_valid_sudoku(board: Vec<Vec<char>>) -> bool {
 }
 ```
 
+#### Go
+
+Same bitmask approach as Rust with `[9]uint16` arrays (stack-allocated, no `make`). Multiple statements on one line (`rows[r] |= bit; cols[c] |= bit; ...`) is idiomatic when the operations are parallel.
+
 ```go
 func isValidSudoku(board [][]byte) bool {
     var rows, cols, boxes [9]uint16
@@ -1137,6 +1330,10 @@ func isValidSudoku(board [][]byte) bool {
     return true
 }
 ```
+
+#### C++
+
+`std::array<uint16_t, 9>{}` value-initializes the three bitmask vectors on the stack. The same bit-trick as Rust/Go — the C++ version reads almost identically because the operations are pure bit-twiddling, language-agnostic at that level.
 
 ```cpp
 #include <vector>
@@ -1157,6 +1354,7 @@ bool isValidSudoku(std::vector<std::vector<char>>& board) {
 }
 ```
 
+
 ### 14. Longest Consecutive Sequence
 
 #### Problem
@@ -1168,7 +1366,9 @@ Given an unsorted integer array `nums`, return the length of the longest sequenc
 #### Explanation
 Sorting would solve this in `O(n log n)`. To reach `O(n)`, dump all numbers into a set for `O(1)` lookups. For each number `n`, check whether `n - 1` is in the set; if not, `n` is the start of a consecutive sequence. Only from sequence starts do you walk forward counting `n + 1`, `n + 2`, … — this ensures each element is visited at most twice total (once to check start, at most once while extending). Duplicates are eliminated by the set, so they don't affect correctness or complexity. Edge case: empty input returns 0.
 
-#### Solution
+#### Python
+
+`set(nums)` deduplicates and gives `O(1)` lookups in one shot. The `n - 1 not in s` guard is what makes this `O(n)` instead of `O(n²)` — only sequence starts trigger the inner walk.
 
 ```python
 def longestConsecutive(nums):
@@ -1182,6 +1382,10 @@ def longestConsecutive(nums):
             best = max(best, length)
     return best
 ```
+
+#### Rust
+
+`nums.into_iter().collect::<HashSet<_>>()` consumes and dedups in one expression. The walk uses `&(n + length)` for the `contains` call because `HashSet<i32>::contains` takes `&i32`.
 
 ```rust
 use std::collections::HashSet;
@@ -1200,6 +1404,10 @@ fn longest_consecutive(nums: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+`map[int]bool` is the standard set substitute — slightly nicer than `map[int]struct{}` here because `s[n-1]` returns `false` for missing keys, avoiding the comma-ok dance.
+
 ```go
 func longestConsecutive(nums []int) int {
     s := make(map[int]bool)
@@ -1215,6 +1423,10 @@ func longestConsecutive(nums []int) int {
     return best
 }
 ```
+
+#### C++
+
+`unordered_set<int> s(nums.begin(), nums.end())` constructs the dedup'd set in one call. `s.count(n - 1)` is the idiomatic 'is this in the set' check — `contains` exists in C++20 but `count` is portable.
 
 ```cpp
 #include <vector>
@@ -1235,6 +1447,7 @@ int longestConsecutive(std::vector<int>& nums) {
 }
 ```
 
+
 ### 15. Valid Palindrome
 
 #### Problem
@@ -1246,7 +1459,9 @@ A phrase is a palindrome if, after converting all uppercase letters to lowercase
 #### Explanation
 The naive approach filters the string into a clean array first (`O(n)` extra space), then compares from both ends. The two-pointer approach avoids the copy: start a left pointer at the beginning and a right pointer at the end; skip non-alphanumeric characters on each side, then compare the remaining characters case-insensitively. If any pair mismatches, return false immediately. Empty string and single-character strings are trivially palindromes. Using `isalnum()` (or equivalent) handles all ASCII alphanumeric characters uniformly.
 
-#### Solution
+#### Python
+
+`str.isalnum()` and `str.lower()` work on single characters — concise and Unicode-aware (LeetCode tests are ASCII, but the code generalizes). The dual inner `while` loops cleanly separate skip-and-compare.
 
 ```python
 def isPalindrome(s):
@@ -1259,6 +1474,10 @@ def isPalindrome(s):
         r -= 1
     return True
 ```
+
+#### Rust
+
+Pre-filter into `Vec<u8>` of lowercase alphanumerics, then do a trivial two-pointer compare — trades `O(1)` extra space for clarity. `saturating_sub(1)` handles the empty-after-filter case without panicking on `0 - 1` for `usize`.
 
 ```rust
 fn is_palindrome(s: String) -> bool {
@@ -1274,6 +1493,10 @@ fn is_palindrome(s: String) -> bool {
     true
 }
 ```
+
+#### Go
+
+No `unicode.IsLetter`/`unicode.ToLower` here — raw byte comparisons with hand-rolled `isAlnum` and `toLower` closures, which avoid the rune-conversion overhead on ASCII inputs. The `+ 32` trick is the bit-level case shift.
 
 ```go
 func isPalindrome(s string) bool {
@@ -1295,6 +1518,10 @@ func isPalindrome(s string) bool {
 }
 ```
 
+#### C++
+
+`std::isalnum` and `std::tolower` take `int`, so casting through `unsigned char` is required to avoid undefined behavior on signed `char` values with the high bit set. Two-pointer skip is mechanical from there.
+
 ```cpp
 #include <string>
 #include <cctype>
@@ -1311,6 +1538,7 @@ bool isPalindrome(std::string s) {
 }
 ```
 
+
 ### 16. Two Sum II
 
 #### Problem
@@ -1322,7 +1550,9 @@ Given a 1-indexed sorted array `numbers` and a target, return the 1-indexed posi
 #### Explanation
 Because the array is already sorted, you can exploit its monotonic property with two pointers starting at opposite ends. If the current sum equals the target, return the indices. If it's too small, advance the left pointer to increase the sum. If it's too large, retreat the right pointer. Each step eliminates at least one element from consideration, so the loop runs in `O(n)` with no extra memory. The sorted precondition is the key — without it, you'd need a hashmap as in Two Sum I. Exactly one solution is guaranteed, so the loop always terminates with an answer.
 
-#### Solution
+#### Python
+
+Returns 1-indexed positions per the problem's quirk — easy to forget. The `while l < r` invariant with three branches (equal / less / greater) is the canonical two-pointer skeleton.
 
 ```python
 def twoSum(numbers, target):
@@ -1337,6 +1567,10 @@ def twoSum(numbers, target):
             r -= 1
 ```
 
+#### Rust
+
+`loop { ... return ... }` instead of `while l < r` because the problem guarantees a solution — no fallthrough return needed. The `as i32` casts only happen on the return shape.
+
 ```rust
 fn two_sum(numbers: Vec<i32>, target: i32) -> Vec<i32> {
     let (mut l, mut r) = (0usize, numbers.len() - 1);
@@ -1349,6 +1583,10 @@ fn two_sum(numbers: Vec<i32>, target: i32) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Same two-pointer shape, but a trailing `return nil` for the unreachable case keeps the compiler happy without forcing a `loop` construct (Go doesn't have one).
+
 ```go
 func twoSum(numbers []int, target int) []int {
     l, r := 0, len(numbers)-1
@@ -1360,6 +1598,10 @@ func twoSum(numbers []int, target int) []int {
     return nil
 }
 ```
+
+#### C++
+
+Return braces `{l + 1, r + 1}` are the simplest way to construct the result vector inline. `(int)numbers.size() - 1` cast keeps `r` signed in case the array is empty.
 
 ```cpp
 #include <vector>
@@ -1376,6 +1618,7 @@ std::vector<int> twoSum(std::vector<int>& numbers, int target) {
 }
 ```
 
+
 ### 17. 3Sum
 
 #### Problem
@@ -1387,7 +1630,9 @@ Given an integer array `nums`, return all unique triplets `[a, b, c]` such that 
 #### Explanation
 Checking all triplets naively is `O(n³)`. Sorting first unlocks a two-pointer scan: fix the first element `nums[i]` and use two pointers on the subarray to its right, reducing the inner search to `O(n)`. To eliminate duplicate triplets without a hashset, skip over equal values of `nums[i]` (outer loop) and skip over equal values of `nums[l]` after finding a valid triplet (inner loop). Since the array is sorted, duplicates are adjacent and easy to skip. If the current sum is negative, advance the left pointer; if positive, retreat the right pointer. Sorting costs `O(n log n)`, dominated by the `O(n²)` scan.
 
-#### Solution
+#### Python
+
+In-place `nums.sort()` is the cheapest way to enable the two-pointer scan. The duplicate-skip on `nums[l] == nums[l-1]` after a hit avoids the hashset that a naive dedup would need.
 
 ```python
 def threeSum(nums):
@@ -1410,6 +1655,10 @@ def threeSum(nums):
     return res
 ```
 
+#### Rust
+
+`sort_unstable` is faster than `sort` since stability is irrelevant for sums. `n.saturating_sub(2)` makes the outer range safe when `n < 2` (would underflow `usize` otherwise).
+
 ```rust
 fn three_sum(mut nums: Vec<i32>) -> Vec<Vec<i32>> {
     nums.sort_unstable();
@@ -1430,6 +1679,10 @@ fn three_sum(mut nums: Vec<i32>) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+`sort.Ints` is the type-specific sort; modern code would use `slices.Sort`. The triple-nested duplicate-skip pattern (outer + inner-after-hit) is exactly the same as the Python/Rust forms.
 
 ```go
 import "sort"
@@ -1453,6 +1706,10 @@ func threeSum(nums []int) [][]int {
     return res
 }
 ```
+
+#### C++
+
+`std::sort` over the input range is in-place. `res.push_back({nums[i], nums[l], nums[r]})` uses brace-init to build the inner vector inline — saves the temp.
 
 ```cpp
 #include <vector>
@@ -1478,6 +1735,7 @@ std::vector<std::vector<int>> threeSum(std::vector<int>& nums) {
 }
 ```
 
+
 ### 18. Container With Most Water
 
 #### Problem
@@ -1489,7 +1747,9 @@ Given an array `height` of `n` non-negative integers where each represents a ver
 #### Explanation
 The brute-force approach tests all pairs of lines in `O(n²)`. The two-pointer approach works because water volume is `min(height[l], height[r]) * (r - l)`. Starting with the widest container (pointers at both ends), moving the shorter pointer inward is the only action that could possibly increase the water level — moving the taller pointer can only decrease the width without any chance of gaining height. This greedy move is provably optimal: we never skip a container that could be larger. The loop runs in `O(n)` since each step advances one pointer.
 
-#### Solution
+#### Python
+
+Inline `min(height[l], height[r]) * (r - l)` is the natural expression of the area formula. The 'move the shorter side' rule lives in a single `if/else` — no need to track which side moved.
 
 ```python
 def maxArea(height):
@@ -1504,6 +1764,10 @@ def maxArea(height):
     return res
 ```
 
+#### Rust
+
+`height[l].min(height[r]) * (r - l) as i32` uses methods on `i32`, no `std::cmp::min` import. Note the precedence: `(r - l) as i32` casts the width, not the product.
+
 ```rust
 fn max_area(height: Vec<i32>) -> i32 {
     let (mut l, mut r) = (0usize, height.len() - 1);
@@ -1515,6 +1779,10 @@ fn max_area(height: Vec<i32>) -> i32 {
     res
 }
 ```
+
+#### Go
+
+Pre-1.21 Go forces the inline `min` helper at the bottom. Splitting the area calc onto its own line is a minor stylistic call — could also be a single `if`.
 
 ```go
 func maxArea(height []int) int {
@@ -1534,6 +1802,10 @@ func min(a, b int) int {
 }
 ```
 
+#### C++
+
+`std::max`/`std::min` keep the loop body readable; everything else is the same two-pointer shape.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -1548,6 +1820,7 @@ int maxArea(std::vector<int>& height) {
 }
 ```
 
+
 ### 19. Trapping Rain Water
 
 #### Problem
@@ -1559,7 +1832,9 @@ Given an array `height` representing an elevation map where the width of each ba
 #### Explanation
 The classical approach precomputes prefix-max and suffix-max arrays, then subtracts the bar height at each position — `O(n)` time but `O(n)` space. The two-pointer approach eliminates the extra arrays. Water above position `i` is `min(maxLeft, maxRight) - height[i]`. Move from whichever side has the smaller maximum: if `maxL <= maxR`, the water at the left pointer is determined by `maxL` (the right side is at least as tall), so advance left and accumulate `maxL - height[l]` after updating `maxL`. Mirror logic applies for the right side. This works because we process from the side whose bound is already known to be the limiting factor.
 
-#### Solution
+#### Python
+
+`max` calls dominate the readability; everything else is mechanical. The `if maxL <= maxR` branch is the heart of why this is `O(1)` space.
 
 ```python
 def trap(height):
@@ -1577,6 +1852,10 @@ def trap(height):
             res += maxR - height[r]
     return res
 ```
+
+#### Rust
+
+Method-form `max_l.max(height[l])` reads left-to-right. The variable names with underscores (`max_l`, `max_r`) match Rust convention vs. the camelCase in other languages.
 
 ```rust
 fn trap(height: Vec<i32>) -> i32 {
@@ -1598,6 +1877,10 @@ fn trap(height: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+Explicit `if height[l] > maxL` instead of a `max` call — pre-1.21 Go has no builtin. The two-pointer + running max idiom translates literally from the Python form.
+
 ```go
 func trap(height []int) int {
     l, r := 0, len(height)-1
@@ -1617,6 +1900,10 @@ func trap(height []int) int {
     return res
 }
 ```
+
+#### C++
+
+Standard `std::max` usage; the algorithm shape is identical to all four. The only language-specific bit is `(int)height.size() - 1` to avoid the unsigned-to-signed pitfall on empty input.
 
 ```cpp
 #include <vector>
@@ -1640,6 +1927,7 @@ int trap(std::vector<int>& height) {
 }
 ```
 
+
 ### 20. Best Time to Buy and Sell Stock
 
 #### Problem
@@ -1651,7 +1939,9 @@ Given an array `prices` where `prices[i]` is the stock price on day `i`, return 
 #### Explanation
 You must buy before you sell, so the brute-force approach checks every (buy, sell) pair in `O(n²)`. The key observation is that for any sell day, the best buy day is the cheapest day seen so far. Walk the prices array left to right, maintaining the running minimum `buy`. At each price `p`, the profit if you sold today is `p - buy`; update the best profit and the running minimum. This greedy one-pass approach is optimal because it correctly pairs each potential sell day with the globally cheapest prior buy day. Edge case: a strictly decreasing sequence yields 0 profit.
 
-#### Solution
+#### Python
+
+Slicing `prices[1:]` to skip the first element is more Pythonic than tracking an index. `max`/`min` on each step keeps the running state tight in two lines.
 
 ```python
 def maxProfit(prices):
@@ -1661,6 +1951,10 @@ def maxProfit(prices):
         buy = min(buy, p)
     return profit
 ```
+
+#### Rust
+
+`&prices[1..]` borrows the tail without allocating — slicing in Rust is free. Method-form `profit.max(...)` and `buy.min(...)` mirror the Python shape directly.
 
 ```rust
 fn max_profit(prices: Vec<i32>) -> i32 {
@@ -1674,6 +1968,10 @@ fn max_profit(prices: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+Pre-builtin-min/max Go — explicit `if` comparisons. `prices[1:]` slicing is identical to Rust syntax and free in cost.
+
 ```go
 func maxProfit(prices []int) int {
     buy, profit := prices[0], 0
@@ -1684,6 +1982,10 @@ func maxProfit(prices []int) int {
     return profit
 }
 ```
+
+#### C++
+
+Indexed loop from 1 instead of slicing; `std::max`/`std::min` from `<algorithm>`. Reads almost exactly like the Python form once you ignore the type annotations.
 
 ```cpp
 #include <vector>
@@ -1699,6 +2001,7 @@ int maxProfit(std::vector<int>& prices) {
 }
 ```
 
+
 ### 21. Longest Substring Without Repeating Characters
 
 #### Problem
@@ -1710,7 +2013,9 @@ Given a string `s`, return the length of the longest substring that contains no 
 #### Explanation
 The brute-force approach checks all `O(n²)` substrings and verifies uniqueness in `O(n)`, giving `O(n³)`. The sliding window maintains a valid window `[l, r]` where all characters are unique. Expand by moving `r` right; when the new character `c` is already in the window, shrink by moving `l` right (removing characters from the set) until `c` is no longer in the window, then add `c`. At each step the window `[l, r]` is always duplicate-free, and we track the maximum seen window size. Each character is added and removed from the set at most once, giving `O(n)` amortized. Edge case: empty string returns 0.
 
-#### Solution
+#### Python
+
+`set` of characters is the cleanest window membership check. The inner `while c in seen` (rather than an `if`) handles repeats inside the window without extra bookkeeping.
 
 ```python
 def lengthOfLongestSubstring(s):
@@ -1724,6 +2029,10 @@ def lengthOfLongestSubstring(s):
         res = max(res, r - l + 1)
     return res
 ```
+
+#### Rust
+
+Operating on `s.as_bytes()` and storing `u8` in the set avoids char decoding — fine for ASCII LeetCode inputs. `seen.contains(&b[r])` takes a reference, matching the API shape.
 
 ```rust
 use std::collections::HashSet;
@@ -1744,6 +2053,10 @@ fn length_of_longest_substring(s: String) -> i32 {
 }
 ```
 
+#### Go
+
+`map[byte]bool` as a set; `delete(seen, s[l])` is the idiomatic removal. Direct byte indexing `s[r]` is faster than rune decoding for the ASCII inputs.
+
 ```go
 func lengthOfLongestSubstring(s string) int {
     seen := make(map[byte]bool)
@@ -1759,6 +2072,10 @@ func lengthOfLongestSubstring(s string) int {
     return res
 }
 ```
+
+#### C++
+
+`seen.erase(s[l++])` and the equivalent `seen.insert(s[r])` keep the loop body dense. `seen.count(s[r])` is the portable 'is in set' check, same as `contains` in C++20.
 
 ```cpp
 #include <string>
@@ -1777,6 +2094,7 @@ int lengthOfLongestSubstring(std::string s) {
 }
 ```
 
+
 ### 22. Longest Repeating Character Replacement
 
 #### Problem
@@ -1788,7 +2106,9 @@ Given a string `s` and an integer `k`, return the length of the longest substrin
 #### Explanation
 Within any window `[l, r]`, the minimum replacements needed equals `window_size - max_freq`, where `max_freq` is the count of the most common character. If this exceeds `k`, the window is invalid. Expand right on every step; shrink left only when the window becomes invalid. The trick: `max_freq` is never decreased — we only update it upward. This is correct because any valid window must have a higher `max_freq` than any previously seen valid window to be longer, and a window with a lower `max_freq` can never beat the current best. The character count array has 26 entries, so auxiliary space is `O(1)`.
 
-#### Solution
+#### Python
+
+Uses a dict rather than a fixed array — slightly more flexible for non-uppercase inputs, but you eat the hash cost. The `max_freq` never-decreasing invariant is what makes this `O(n)` without a per-iteration scan.
 
 ```python
 def characterReplacement(s, k):
@@ -1804,6 +2124,10 @@ def characterReplacement(s, k):
         res = max(res, r - l + 1)
     return res
 ```
+
+#### Rust
+
+`[i32; 26]` on the stack — cheapest possible counter array. The `(b[r] - b'A') as usize` cast is the standard byte-to-index trick when the input is constrained to uppercase ASCII.
 
 ```rust
 fn character_replacement(s: String, k: i32) -> i32 {
@@ -1824,6 +2148,10 @@ fn character_replacement(s: String, k: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Stack-allocated `[26]int` (array, not slice). No `max` builtin pre-1.21, so the explicit `if` for `maxFreq` update is unavoidable.
+
 ```go
 func characterReplacement(s string, k int) int {
     count := [26]int{}
@@ -1840,6 +2168,10 @@ func characterReplacement(s string, k int) int {
     return res
 }
 ```
+
+#### C++
+
+`std::array<int, 26>{}` value-initializes to zero. Reads almost identically to the Go and Rust versions because everything is array indexing and arithmetic.
 
 ```cpp
 #include <string>
@@ -1862,6 +2194,7 @@ int characterReplacement(std::string s, int k) {
 }
 ```
 
+
 ### 23. Permutation in String
 
 #### Problem
@@ -1873,7 +2206,9 @@ Given strings `s1` and `s2`, return `true` if any permutation of `s1` is a conti
 #### Explanation
 A permutation of `s1` is any rearrangement, so the window only needs to contain the same character frequencies. Maintain a fixed-size window of length `len(s1)` over `s2` and a 26-element frequency array for the window. Compare it against `s1`'s frequency array at each position. Slide the window one step at a time: add the incoming character and remove the outgoing character. Comparing two 26-element arrays is `O(1)`, so the total cost is `O(|s2|)`. Edge case: if `s1` is longer than `s2`, no permutation can fit.
 
-#### Solution
+#### Python
+
+List equality on two `[0] * 26` arrays is `O(26) = O(1)` — that's the trick that keeps the slide `O(n)`. Slicing `s2[:len(s1)]` to seed the window costs one allocation up-front, then the slide is in-place.
 
 ```python
 def checkInclusion(s1, s2):
@@ -1894,6 +2229,10 @@ def checkInclusion(s1, s2):
             return True
     return False
 ```
+
+#### Rust
+
+Fixed-size arrays `[i32; 26]` compare with `==` — Rust generates a direct memcmp, no allocation. Computing `n1`/`n2` once avoids repeated `.len()` calls in the index arithmetic.
 
 ```rust
 fn check_inclusion(s1: String, s2: String) -> bool {
@@ -1916,6 +2255,10 @@ fn check_inclusion(s1: String, s2: String) -> bool {
 }
 ```
 
+#### Go
+
+Go arrays (not slices) compare with `==` — `[26]int` equality is `O(1)` and free of allocation, the underrated property that makes this solution clean.
+
 ```go
 func checkInclusion(s1 string, s2 string) bool {
     if len(s1) > len(s2) { return false }
@@ -1933,6 +2276,10 @@ func checkInclusion(s1 string, s2 string) bool {
     return false
 }
 ```
+
+#### C++
+
+`std::array` equality is element-wise and trivially constexpr-able. The brace-init `{}` zero-fills both `s1c` and `win`.
 
 ```cpp
 #include <string>
@@ -1956,6 +2303,7 @@ bool checkInclusion(std::string s1, std::string s2) {
 }
 ```
 
+
 ### 24. Minimum Window Substring
 
 #### Problem
@@ -1967,7 +2315,9 @@ Given strings `s` and `t`, return the minimum window substring of `s` that conta
 #### Explanation
 A brute-force check of all substrings is `O(|s|² * |t|)`. The sliding window approach keeps a `need` map of required character counts and a `missing` counter. Expand the right pointer: decrement `need[c]`; if `need[c]` drops from 1 to 0 (a required character just became satisfied), decrement `missing`. When `missing == 0` the window is valid — record it if it's the shortest so far, then shrink from the left: increment `need[s[l]]` and if it returns above 0 (a required character is no longer satisfied) increment `missing`. Using `need[c] > 0` to detect "needed" rather than a separate set keeps the logic compact and handles duplicates in `t` naturally.
 
-#### Solution
+#### Python
+
+Tracking `missing` as a single counter (instead of comparing two dicts) keeps the inner check `O(1)`. `enumerate(s, 1)` starts `r` at 1 so the window is `[l, r)`-style and `r - l` is the length directly.
 
 ```python
 def minWindow(s, t):
@@ -1991,6 +2341,10 @@ def minWindow(s, t):
             l += 1
     return s[start:end]
 ```
+
+#### Rust
+
+`HashMap::entry(...).or_insert(0)` returns a mutable reference you can decrement in place — the canonical 'upsert and modify' shape. `usize::MAX` as the 'no best yet' sentinel avoids an `Option<(usize, usize)>` wrapper.
 
 ```rust
 use std::collections::HashMap;
@@ -2020,6 +2374,10 @@ fn min_window(s: String, t: String) -> String {
 }
 ```
 
+#### Go
+
+Go's nil-map read returns the zero value (`0`), so `need[c]` is safe without a `make` check on the read side. The `end == 0` 'first valid window' sentinel works because zero-length windows can't be valid.
+
 ```go
 func minWindow(s string, t string) string {
     need := make(map[byte]int)
@@ -2039,6 +2397,10 @@ func minWindow(s string, t string) string {
     return s[start:end]
 }
 ```
+
+#### C++
+
+`need[s[r]]--` post-decrements *and* returns the old value — so `if (need[s[r]]-- > 0) --missing;` checks 'was needed' and decrements in one expression. Subtle but very C++.
 
 ```cpp
 #include <string>
@@ -2062,6 +2424,7 @@ std::string minWindow(std::string s, std::string t) {
 }
 ```
 
+
 ### 25. Sliding Window Maximum
 
 #### Problem
@@ -2073,7 +2436,9 @@ Given an integer array `nums` and an integer `k`, return an array of the maximum
 #### Explanation
 Checking the maximum of every window naively is `O(n * k)`. A monotonic deque stores indices in decreasing order of their values: before appending index `i`, pop all indices from the back whose values are less than or equal to `nums[i]` — they can never be a future window maximum while `i` is still in the window. Pop from the front when the front index falls outside the window (`dq[0] == i - k`). The front of the deque is always the index of the current window's maximum. Each index is added and removed at most once, giving `O(n)` total. Start emitting results once the first full window is formed (`i >= k - 1`).
 
-#### Solution
+#### Python
+
+`collections.deque` is the only built-in O(1)-at-both-ends container — list-as-deque would be O(n) on `popleft`. The `dq[0] == i - k` check evicts the stale front in one comparison.
 
 ```python
 from collections import deque
@@ -2092,6 +2457,10 @@ def maxSlidingWindow(nums, k):
     return res
 ```
 
+#### Rust
+
+`VecDeque::back().map_or(false, |&j| nums[j] <= n)` collapses the empty-check and the comparison into one expression. `i.wrapping_sub(k)` avoids panicking on the first window where `i < k`.
+
 ```rust
 use std::collections::VecDeque;
 
@@ -2109,6 +2478,10 @@ fn max_sliding_window(nums: Vec<i32>, k: i32) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Slice-as-deque works because `dq[1:]` and `dq[:len(dq)-1]` are O(1) view operations. Garbage collection takes care of the eventual reclamation.
+
 ```go
 func maxSlidingWindow(nums []int, k int) []int {
     dq := []int{}
@@ -2124,6 +2497,10 @@ func maxSlidingWindow(nums []int, k int) []int {
     return res
 }
 ```
+
+#### C++
+
+`std::deque<int>` gives O(1) push/pop at both ends; the API (`back`, `pop_back`, `front`, `pop_front`) maps directly to the algorithm vocabulary.
 
 ```cpp
 #include <vector>
@@ -2142,6 +2519,7 @@ std::vector<int> maxSlidingWindow(std::vector<int>& nums, int k) {
 }
 ```
 
+
 ### 26. Valid Parentheses
 
 #### Problem
@@ -2153,7 +2531,9 @@ Given a string `s` containing only `'('`, `')'`, `'{'`, `'}'`, `'['`, and `']'`,
 #### Explanation
 Every closing bracket must match the most recently opened unmatched bracket — a last-in-first-out requirement that maps directly to a stack. Push opening brackets; on a closing bracket, check whether the stack top is the matching opener. If the stack is empty or the top doesn't match, return false immediately. After processing all characters, the string is valid only if the stack is empty (all openers were matched). Edge cases: an odd-length string is always invalid; a string starting with a closing bracket fails on the first character.
 
-#### Solution
+#### Python
+
+Dict `pairs = {')': '(', ...}` lets a single `if c in pairs` branch handle all closers. `not stack` is the empty-stack check; `stack[-1]` peeks without popping.
 
 ```python
 def isValid(s):
@@ -2168,6 +2548,10 @@ def isValid(s):
             stack.append(c)
     return not stack
 ```
+
+#### Rust
+
+Pattern match on `char` with `|` alternatives gives a flat decision tree. `stack.pop()` returns `Option<char>` so the equality check against `Some('(')` is type-safe — no separate empty test needed.
 
 ```rust
 fn is_valid(s: String) -> bool {
@@ -2185,6 +2569,10 @@ fn is_valid(s: String) -> bool {
 }
 ```
 
+#### Go
+
+`map[rune]rune` for the pair lookup; ranging over a string yields runes, so types align. Slice-as-stack with `stack[:len(stack)-1]` for pop.
+
 ```go
 func isValid(s string) bool {
     stack := []rune{}
@@ -2200,6 +2588,10 @@ func isValid(s string) bool {
     return len(stack) == 0
 }
 ```
+
+#### C++
+
+`std::stack<char>` from `<stack>` — the dedicated adapter, not a vector. The chained `||` condition in the validation is slightly denser than the dict approach but avoids the map lookup.
 
 ```cpp
 #include <string>
@@ -2221,6 +2613,7 @@ bool isValid(std::string s) {
 }
 ```
 
+
 ### 27. Min Stack
 
 #### Problem
@@ -2232,7 +2625,9 @@ Design a stack that supports `push`, `pop`, `top`, and `getMin` — all in `O(1)
 #### Explanation
 A standard stack cannot retrieve the minimum in `O(1)` after arbitrary pops. The trick is to maintain a parallel `min_stack` where each entry records the minimum value reachable from that position down to the bottom of the stack. On `push`, append `min(val, min_stack[-1])` to `min_stack`. On `pop`, remove from both stacks simultaneously. `getMin` is then just `min_stack[-1]`. This works because each element in `min_stack` encodes the answer to "what is the minimum if the main stack were trimmed to this height?" — so pops automatically restore the correct running minimum.
 
-#### Solution
+#### Python
+
+Two parallel lists; `min(val, self.min_stack[-1] if self.min_stack else val)` inlines the empty-check. Simple and the canonical reference shape.
 
 ```python
 class MinStack:
@@ -2254,6 +2649,10 @@ class MinStack:
     def getMin(self):
         return self.min_stack[-1]
 ```
+
+#### Rust
+
+`self.min_stack.last().map_or(val, |&prev| prev.min(val))` is the empty-safe one-liner for 'min of new and current min, defaulting to new'. The `unwrap` on `top`/`get_min` reflects the problem's precondition that they're called only on non-empty stacks.
 
 ```rust
 struct MinStack {
@@ -2277,6 +2676,10 @@ impl MinStack {
     fn get_min(&self) -> i32 { *self.min_stack.last().unwrap() }
 }
 ```
+
+#### Go
+
+`Constructor()` returns a value (not a pointer) — LeetCode's Go convention. Methods take `*MinStack` so pushes/pops are visible to the caller.
 
 ```go
 type MinStack struct {
@@ -2304,6 +2707,10 @@ func (s *MinStack) Top() int     { return s.stack[len(s.stack)-1] }
 func (s *MinStack) GetMin() int  { return s.minStack[len(s.minStack)-1] }
 ```
 
+#### C++
+
+`std::stack<int>` adapter for both stacks. Ternary `mn.empty() ? val : std::min(mn.top(), val)` keeps the push compact.
+
 ```cpp
 #include <stack>
 #include <algorithm>
@@ -2321,6 +2728,7 @@ public:
 };
 ```
 
+
 ### 28. Evaluate Reverse Polish Notation
 
 #### Problem
@@ -2332,7 +2740,9 @@ Evaluate an arithmetic expression given as a list of tokens in Reverse Polish No
 #### Explanation
 RPN is designed for stack-based evaluation: push operands onto the stack; when you see an operator, pop the top two operands, apply the operator, and push the result. The key subtlety is division truncation toward zero — in Python `int(a / b)` handles negative cases correctly (unlike `a // b` which floors). After processing all tokens, the stack contains exactly one element: the result. Edge case: the token list is guaranteed valid so the stack will never underflow.
 
-#### Solution
+#### Python
+
+`int(a / b)` truncates toward zero — important because `a // b` floors, which differs for negative dividends. `t in "+-*/"` is a tiny-set membership check that's fine for four characters.
 
 ```python
 def evalRPN(tokens):
@@ -2348,6 +2758,10 @@ def evalRPN(tokens):
             stack.append(int(t))
     return stack[0]
 ```
+
+#### Rust
+
+Rust's `/` on integers already truncates toward zero, so no special handling needed. Nested `match t.as_str()` is the cleanest dispatch — `as_str` because matching on `String` directly isn't pattern-friendly.
 
 ```rust
 fn eval_rpn(tokens: Vec<String>) -> i32 {
@@ -2370,6 +2784,10 @@ fn eval_rpn(tokens: Vec<String>) -> i32 {
     stack[0]
 }
 ```
+
+#### Go
+
+Go's integer `/` truncates toward zero, but using `float64` here is a paranoid workaround for negative cases — equivalent to direct integer division. A simple `a / b` would also work.
 
 ```go
 import "strconv"
@@ -2398,6 +2816,10 @@ func evalRPN(tokens []string) int {
 }
 ```
 
+#### C++
+
+C++'s integer division has been truncate-toward-zero since C++11 (was implementation-defined before). Promoting to `long` defends against `INT_MIN / -1` overflow.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -2421,6 +2843,7 @@ int evalRPN(std::vector<std::string>& tokens) {
 }
 ```
 
+
 ### 29. Generate Parentheses
 
 #### Problem
@@ -2432,7 +2855,9 @@ Given `n`, generate all combinations of `n` pairs of well-formed (valid) parenth
 #### Explanation
 The total number of valid combinations is the `n`-th Catalan number, so any correct algorithm is at least that expensive. Backtracking prunes invalid paths early with two rules: you may add `'('` only while `open < n`, and you may add `')'` only while `close < open` (to keep the string valid at every prefix). When the string reaches length `2n`, it is a complete valid combination. This generates every valid combination exactly once without any deduplication needed. The recursive depth is at most `2n`, so stack space is `O(n)`.
 
-#### Solution
+#### Python
+
+Recursive closure captures `res` directly. String concatenation `s + "("` is O(n) per call — could use a list and `"".join` for huge n, but for typical n=8 it's fine and reads cleanly.
 
 ```python
 def generateParenthesis(n):
@@ -2449,6 +2874,10 @@ def generateParenthesis(n):
     return res
 ```
 
+#### Rust
+
+Mutating a shared `String` with `push`/`pop` and cloning only at leaves avoids the per-call allocation. The free-function `fn bt` (with explicit args) is more idiomatic than a closure when recursion is involved — closures can't recurse without trickery.
+
 ```rust
 fn generate_parenthesis(n: i32) -> Vec<String> {
     let mut res = Vec::new();
@@ -2461,6 +2890,10 @@ fn generate_parenthesis(n: i32) -> Vec<String> {
     res
 }
 ```
+
+#### Go
+
+Declare-then-assign (`var bt func...; bt = func...`) is the workaround for self-referential closures in Go. String concatenation `s+"("` creates a new string each call — fine for small n.
 
 ```go
 func generateParenthesis(n int) []string {
@@ -2475,6 +2908,10 @@ func generateParenthesis(n int) []string {
     return res
 }
 ```
+
+#### C++
+
+`std::function<void(int, int)>` is the workaround for recursive lambdas. Sharing one `cur` string with `pop_back` after each branch is the same in-place mutation as Rust's version.
 
 ```cpp
 #include <vector>
@@ -2493,6 +2930,7 @@ std::vector<std::string> generateParenthesis(int n) {
 }
 ```
 
+
 ### 30. Daily Temperatures
 
 #### Problem
@@ -2504,7 +2942,9 @@ Given an array `temperatures`, return an array `answer` where `answer[i]` is the
 #### Explanation
 For each day, the naive approach scans forward until a warmer day — `O(n²)` worst case. The monotonic stack processes each day at most twice (once pushed, once popped). Walk left to right: while the current temperature is greater than the temperature at the index on top of the stack, that top index has found its "next warmer day" — pop it and record the difference. Then push the current index. Indices remaining in the stack at the end have no warmer future day and stay 0 (the default). The stack stays in non-increasing temperature order, enforcing the monotonic property.
 
-#### Solution
+#### Python
+
+Standard monotonic-stack form: `while stack and t > temperatures[stack[-1]]`. Initializing `res = [0] * n` means indices left in the stack stay zero — no post-loop cleanup needed.
 
 ```python
 def dailyTemperatures(temperatures):
@@ -2517,6 +2957,10 @@ def dailyTemperatures(temperatures):
         stack.append(i)
     return res
 ```
+
+#### Rust
+
+`while let Some(&j) = stack.last()` is the idiomatic 'peek without popping' over an `Option`. The inner `break` is needed because the loop condition can't access `j`.
 
 ```rust
 fn daily_temperatures(temperatures: Vec<i32>) -> Vec<i32> {
@@ -2538,6 +2982,10 @@ fn daily_temperatures(temperatures: Vec<i32>) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Slice-as-stack; the indexed `temperatures[stack[len(stack)-1]]` chain is unavoidably noisy but matches the algorithm one-to-one.
+
 ```go
 func dailyTemperatures(temperatures []int) []int {
     n := len(temperatures)
@@ -2554,6 +3002,10 @@ func dailyTemperatures(temperatures []int) []int {
     return res
 }
 ```
+
+#### C++
+
+`std::stack<int>` adapter — `top()`/`pop()` are separate calls (unlike Rust's `pop()` which returns the value). `std::vector<int> res(n, 0)` zero-fills.
 
 ```cpp
 #include <vector>
@@ -2574,6 +3026,7 @@ std::vector<int> dailyTemperatures(std::vector<int>& temperatures) {
 }
 ```
 
+
 ### 31. Car Fleet
 
 #### Problem
@@ -2585,7 +3038,9 @@ Given `n` cars at different positions on a one-lane road heading toward a `targe
 #### Explanation
 A brute-force simulation would step time forward in small increments — expensive and fragile. The key insight is that a car can only catch the car ahead of it, never pass it. Sorting by starting position in descending order lets you process cars from closest-to-target to farthest. For each car, compute the time it would need to reach `target` on its own. If that time is greater than the time of the car ahead (top of stack), it can never catch up and forms a new fleet. If it's less than or equal, it merges into the car ahead's fleet and is not pushed. The stack therefore holds the arrival times of distinct fleets. Edge case: cars starting at the same position collapse immediately into one fleet — handled naturally because the slower one always has a longer time.
 
-#### Solution
+#### Python
+
+`sorted(zip(position, speed), reverse=True)` pairs and sorts in one expression — tuples sort lexicographically, so position descending is the primary key automatically. Float time is fine here since exact arithmetic isn't required.
 
 ```python
 def carFleet(target, position, speed):
@@ -2597,6 +3052,10 @@ def carFleet(target, position, speed):
             stack.append(t)
     return len(stack)
 ```
+
+#### Rust
+
+`sort_unstable_by(|a, b| b.0.cmp(&a.0))` sorts descending by position. Float `f64` for time matches the algorithm directly; integer cross-multiply would also work and avoid floats but is less readable.
 
 ```rust
 fn car_fleet(target: i32, position: Vec<i32>, speed: Vec<i32>) -> i32 {
@@ -2612,6 +3071,10 @@ fn car_fleet(target: i32, position: Vec<i32>, speed: Vec<i32>) -> i32 {
     stack.len() as i32
 }
 ```
+
+#### Go
+
+Local struct `type car struct{ pos, spd int }` keeps the sort key visible. Pre-1.21 needs `sort.Slice` with a closure; modern Go would use `slices.SortFunc`.
 
 ```go
 import "sort"
@@ -2635,6 +3098,10 @@ func carFleet(target int, position []int, speed []int) int {
 }
 ```
 
+#### C++
+
+Structured binding `auto& [pos, spd] : cars` cleans up the range-for. Sorting `std::pair<int,int>` with a custom lambda lets you compare `first` descending without flipping arguments.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -2653,6 +3120,7 @@ int carFleet(int target, std::vector<int>& position, std::vector<int>& speed) {
 }
 ```
 
+
 ### 32. Largest Rectangle in Histogram
 
 #### Problem
@@ -2664,7 +3132,9 @@ Given an array of bar heights in a histogram where each bar has width 1, return 
 #### Explanation
 The brute-force approach tries every pair of left and right boundaries — `O(n²)`. The monotonic stack insight: a bar at height `h` can extend leftward only as long as bars to its left are at least as tall. Maintain a stack of `(start_index, height)` pairs in increasing height order. When you encounter a bar shorter than the stack top, pop bars that can no longer extend rightward — compute their rectangle using the current index as the right boundary, and carry their start index leftward for the new (shorter) bar. After the loop, every remaining bar in the stack extends to the end of the array. The `start` variable tracks how far left the current bar's rectangle can reach.
 
-#### Solution
+#### Python
+
+Tuple `(start, height)` on the stack tracks how far left a bar's rectangle can stretch. The post-loop pass over remaining stack entries computes rectangles that extend to the end of the array — easy to forget.
 
 ```python
 def largestRectangleArea(heights):
@@ -2681,6 +3151,10 @@ def largestRectangleArea(heights):
         res = max(res, h * (len(heights) - i))
     return res
 ```
+
+#### Rust
+
+`while let Some(&(idx, ht)) = stack.last()` peeks with destructuring; the explicit `break` ends the inner loop without conditions. The `(i - idx) as i32` cast happens at the multiplication site, not at index time.
 
 ```rust
 fn largest_rectangle_area(heights: Vec<i32>) -> i32 {
@@ -2707,6 +3181,10 @@ fn largest_rectangle_area(heights: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+Named struct `pair{idx, h int}` is clearer than `[2]int`. The two phases (in-loop pops, post-loop drain) are duplicated but readable; could DRY via a helper at the cost of clarity.
+
 ```go
 func largestRectangleArea(heights []int) int {
     type pair struct{ idx, h int }
@@ -2731,6 +3209,10 @@ func largestRectangleArea(heights []int) int {
     return res
 }
 ```
+
+#### C++
+
+Structured binding `auto [idx, ht] = st.top()` is C++17. `std::stack<std::pair<int,int>>` is the natural container choice — adapter over deque, no allocation per element after warm-up.
 
 ```cpp
 #include <vector>
@@ -2758,6 +3240,7 @@ int largestRectangleArea(std::vector<int>& heights) {
 }
 ```
 
+
 ### 33. Binary Search
 
 #### Problem
@@ -2769,7 +3252,9 @@ Given a sorted array of integers and a target value, return the index of the tar
 #### Explanation
 A linear scan finds the target in `O(n)` time. Binary search exploits the sorted order: at every step, compare the middle element to the target. If it matches, return the index; if the middle is less than the target, the target must be in the right half — advance `l`; if greater, search the left half — retreat `r`. The loop invariant `l <= r` ensures we don't skip a single-element range. Computing the midpoint as `(l + r) // 2` avoids integer overflow compared to naive `(l + r) / 2` in languages with fixed-width integers. Edge cases: empty array (returns -1 immediately), duplicate values (any match is acceptable), single element.
 
-#### Solution
+#### Python
+
+Textbook binary search. `(l + r) // 2` is fine because Python ints don't overflow.
 
 ```python
 def search(nums, target):
@@ -2784,6 +3269,10 @@ def search(nums, target):
             r = m - 1
     return -1
 ```
+
+#### Rust
+
+`l + (r - l) / 2` is the overflow-safe midpoint formula — habit worth keeping even though `i32` won't overflow here. Casting `nums.len() as i32 - 1` requires the array to be non-empty; an empty slice would underflow `usize` first.
 
 ```rust
 fn search(nums: Vec<i32>, target: i32) -> i32 {
@@ -2802,6 +3291,10 @@ fn search(nums: Vec<i32>, target: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Same overflow-safe midpoint. Go has no `Vec`/`Vec`-like generic — plain int indices work because `len()` returns `int`.
+
 ```go
 func search(nums []int, target int) int {
     l, r := 0, len(nums)-1
@@ -2819,6 +3312,10 @@ func search(nums []int, target int) int {
 }
 ```
 
+#### C++
+
+Identical shape to Rust/Go; `(int)nums.size() - 1` cast guards against unsigned-to-signed comparison oddness when the array is empty.
+
 ```cpp
 #include <vector>
 
@@ -2834,6 +3331,7 @@ int search(std::vector<int>& nums, int target) {
 }
 ```
 
+
 ### 34. Search a 2D Matrix
 
 #### Problem
@@ -2845,7 +3343,9 @@ Given an `m x n` matrix where each row is sorted left-to-right and the first int
 #### Explanation
 The matrix's row-continuation property means the entire grid is equivalent to one sorted array of `m * n` elements. Rather than two nested binary searches, flatten: treat index `mid` as referring to `matrix[mid // n][mid % n]`. This single binary search runs in `O(log(m * n))` — the same asymptotic cost as binary searching one sorted array of the same size. A naive search scanning row by row would be `O(m + log n)` with binary search per row, but the flat approach is simpler and equally efficient. Edge case: an empty matrix or a row with zero columns should be handled before accessing elements.
 
-#### Solution
+#### Python
+
+Flat binary search with `mid // n` and `mid % n` for row/col — no nested search. Python's arbitrary-precision ints make `m * n - 1` overflow-safe even for huge matrices.
 
 ```python
 def searchMatrix(matrix, target):
@@ -2863,6 +3363,10 @@ def searchMatrix(matrix, target):
     return False
 ```
 
+#### Rust
+
+`(mid as usize) / n` casts only at the index site. The `i32` `mid` lets the loop go negative without underflow when shrinking past zero.
+
 ```rust
 fn search_matrix(matrix: Vec<Vec<i32>>, target: i32) -> bool {
     let m = matrix.len();
@@ -2878,6 +3382,10 @@ fn search_matrix(matrix: Vec<Vec<i32>>, target: i32) -> bool {
     false
 }
 ```
+
+#### Go
+
+Identical to Python in structure — `mid/n` and `mid%n` decompose the flat index. Go's `int` is 64-bit, no overflow concern.
 
 ```go
 func searchMatrix(matrix [][]int, target int) bool {
@@ -2898,6 +3406,10 @@ func searchMatrix(matrix [][]int, target int) bool {
 }
 ```
 
+#### C++
+
+Same flat-index trick. The `int` casts keep `mid` signed so the `r = mid - 1` decrement is safe at zero.
+
 ```cpp
 #include <vector>
 
@@ -2915,6 +3427,7 @@ bool searchMatrix(std::vector<std::vector<int>>& matrix, int target) {
 }
 ```
 
+
 ### 35. Koko Eating Bananas
 
 #### Problem
@@ -2926,7 +3439,9 @@ Given `n` piles of bananas and `h` hours, find the minimum eating speed `k` (ban
 #### Explanation
 The answer lies somewhere in `[1, max(piles)]`: speed 1 is the slowest possible; at speed `max(piles)` each pile is finished in one hour. The feasibility function — "can Koko finish at speed `k`?" — is monotone: if `k` works, any larger speed also works. That monotonicity makes binary search applicable. For a given speed `k`, the hours needed for a pile `p` is `ceil(p / k)`, computed without floating point as `(p + k - 1) // k`. Binary search finds the smallest `k` where total hours ≤ `h`. Using the strict `l < r` loop with `r = m` (not `m - 1`) on success ensures convergence to the minimum valid speed. Edge case: if `h >= len(piles)`, speed 1 may still not work if a single pile is very large — the binary search handles this correctly.
 
-#### Solution
+#### Python
+
+`(p + m - 1) // m` is the integer ceiling formula — avoids floats. The shrink-right-on-feasible / advance-left-on-infeasible pattern converges to the minimum valid speed.
 
 ```python
 def minEatingSpeed(piles, h):
@@ -2940,6 +3455,10 @@ def minEatingSpeed(piles, h):
     return l
 ```
 
+#### Rust
+
+`.iter().map(...).sum::<i32>()` — turbofish or annotated `let hours: i32` is needed because `sum` is generic. Same ceiling trick as Python.
+
 ```rust
 fn min_eating_speed(piles: Vec<i32>, h: i32) -> i32 {
     let mut l = 1i32;
@@ -2952,6 +3471,10 @@ fn min_eating_speed(piles: Vec<i32>, h: i32) -> i32 {
     l
 }
 ```
+
+#### Go
+
+Inlined max-find at the start instead of a helper. Otherwise reads exactly like the Python form — the algorithm shape dominates.
 
 ```go
 func minEatingSpeed(piles []int, h int) int {
@@ -2975,6 +3498,10 @@ func minEatingSpeed(piles []int, h int) int {
 }
 ```
 
+#### C++
+
+`*std::max_element(...)` for the upper bound. `long long hours` defends against the sum overflowing `int` when piles are large and speed is small.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -2993,6 +3520,7 @@ int minEatingSpeed(std::vector<int>& piles, int h) {
 }
 ```
 
+
 ### 36. Find Minimum in Rotated Sorted Array
 
 #### Problem
@@ -3004,7 +3532,9 @@ Given a sorted array of unique integers that has been rotated between 1 and n ti
 #### Explanation
 A linear scan finds the minimum trivially in `O(n)`. To achieve `O(log n)`, observe that the rotation creates exactly one "drop" point where the minimum lives. At each step, compare `nums[mid]` to `nums[r]`: if `nums[mid] > nums[r]`, the right half is the rotated part and the minimum is to the right of `mid` — set `l = mid + 1`. Otherwise the left half (including `mid`) still contains the minimum — set `r = mid`. The loop ends when `l == r`, pointing at the minimum. Using `nums[r]` as the pivot (rather than `nums[l]`) avoids ambiguity in the unrotated case where the entire array is sorted.
 
-#### Solution
+#### Python
+
+Comparing `nums[m]` to `nums[r]` (not `nums[l]`) is the canonical form because the right side is unambiguous about which half contains the pivot. `l < r` (strict) means the loop ends with `l == r` pointing at the answer.
 
 ```python
 def findMin(nums):
@@ -3018,6 +3548,10 @@ def findMin(nums):
     return nums[l]
 ```
 
+#### Rust
+
+`usize` for indices works here because we never decrement past zero. The structural form is identical to Python.
+
 ```rust
 fn find_min(nums: Vec<i32>) -> i32 {
     let (mut l, mut r) = (0usize, nums.len() - 1);
@@ -3028,6 +3562,10 @@ fn find_min(nums: Vec<i32>) -> i32 {
     nums[l]
 }
 ```
+
+#### Go
+
+Plain int indices. The loop condition `l < r` (strict) is essential — `l <= r` would loop forever once they meet.
 
 ```go
 func findMin(nums []int) int {
@@ -3044,6 +3582,10 @@ func findMin(nums []int) int {
 }
 ```
 
+#### C++
+
+Same structure as Go and Rust. The brevity of the body (one if-else) is unusual for C++ binary search — most variants are more complex.
+
 ```cpp
 #include <vector>
 
@@ -3058,6 +3600,7 @@ int findMin(std::vector<int>& nums) {
 }
 ```
 
+
 ### 37. Search in Rotated Sorted Array
 
 #### Problem
@@ -3069,7 +3612,9 @@ Given a sorted array of unique integers rotated at an unknown pivot, search for 
 #### Explanation
 The rotation means the array has two sorted subarrays joined at a pivot. At each binary search step, one of the two halves — `[l, mid]` or `[mid, r]` — must be fully sorted. Determine which: if `nums[l] <= nums[mid]`, the left half is sorted. Check whether the target falls within that sorted range; if yes, search left, otherwise search right. Otherwise the right half is sorted — apply the same logic. This two-case analysis narrows the search space by half each iteration, preserving `O(log n)`. Edge case: the condition `nums[l] <= nums[m]` uses `<=` to handle the case where `l == m` (single element in left half).
 
-#### Solution
+#### Python
+
+Chained comparison `nums[l] <= target < nums[m]` is the Python-only readability win — other languages need explicit `&&`. The 'which half is sorted' insight is what makes the two cases clean.
 
 ```python
 def search(nums, target):
@@ -3090,6 +3635,10 @@ def search(nums, target):
                 r = m - 1
     return -1
 ```
+
+#### Rust
+
+`as usize` casts everywhere because indices must be unsigned but the loop variables stay signed for `r - 1` safety. Verbose but explicit.
 
 ```rust
 fn search(nums: Vec<i32>, target: i32) -> i32 {
@@ -3115,6 +3664,10 @@ fn search(nums: Vec<i32>, target: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Explicit `&&` for the range check; reads almost identically to the C++ form. Pre-1.21, no generics to abstract over the index type.
+
 ```go
 func search(nums []int, target int) int {
     l, r := 0, len(nums)-1
@@ -3139,6 +3692,10 @@ func search(nums []int, target int) int {
 }
 ```
 
+#### C++
+
+Range checks use `&&`. The two-case structure (`if (nums[l] <= nums[m])` else) is the heart of the algorithm and language-independent.
+
 ```cpp
 #include <vector>
 
@@ -3159,6 +3716,7 @@ int search(std::vector<int>& nums, int target) {
 }
 ```
 
+
 ### 38. Time Based Key-Value Store
 
 #### Problem
@@ -3170,7 +3728,9 @@ Design a key-value store supporting `set(key, value, timestamp)` and `get(key, t
 #### Explanation
 Timestamps are strictly increasing per key (guaranteed by the problem), so each key maps to a list of `(timestamp, value)` pairs in sorted order. A linear scan would give `O(n)` per `get`. Instead, binary search for the largest timestamp ≤ the query timestamp. When `vals[m][0] <= timestamp`, record the candidate and search right for a potentially larger valid timestamp (`l = m + 1`). When `vals[m][0] > timestamp`, the candidate is too new — search left. The result variable holds the last accepted value. Edge case: if the key doesn't exist or all timestamps are greater than the query, return `""`.
 
-#### Solution
+#### Python
+
+Track `res` inside the loop as 'best valid so far' — when you find a `vals[m][0] <= timestamp`, record the value and search right for a more recent one. `setdefault`-free version uses explicit `if key not in self.store` for clarity.
 
 ```python
 class TimeMap:
@@ -3195,6 +3755,10 @@ class TimeMap:
                 r = m - 1
         return res
 ```
+
+#### Rust
+
+Returning `String::new()` (rather than `Option`) matches the problem's contract. `clone()` on the candidate `String` is needed because we hand back an owned value; could be avoided by returning `&str` if the API allowed it.
 
 ```rust
 use std::collections::HashMap;
@@ -3231,6 +3795,10 @@ impl TimeMap {
 }
 ```
 
+#### Go
+
+Anonymous struct fields inline (`struct{ ts int; val string }`) keep the type local. Reading a missing key returns the zero-value slice, so the empty-check is implicit.
+
 ```go
 type TimeMap struct {
     store map[string][]struct {
@@ -3262,6 +3830,10 @@ func (t *TimeMap) Get(key string, timestamp int) string {
 }
 ```
 
+#### C++
+
+`unordered_map<string, vector<pair<int,string>>>` — verbose but the structure is obvious. `auto& vals = it->second` binds a reference so we don't copy the vector.
+
 ```cpp
 #include <unordered_map>
 #include <vector>
@@ -3289,6 +3861,7 @@ public:
 };
 ```
 
+
 ### 39. Reverse Linked List
 
 #### Problem
@@ -3300,7 +3873,9 @@ Given the head of a singly linked list, reverse it in-place and return the new h
 #### Explanation
 A recursive approach reverses elegantly but uses `O(n)` stack space. The iterative approach uses three pointers: `prev` (initially `None`), `curr` (the current node), and a temporary `nxt`. At each step, save `curr.next` before overwriting it, redirect `curr.next` to `prev`, then advance both `prev` and `curr` forward. When `curr` becomes `None`, `prev` points to the new head. Edge case: an empty list or single-node list is handled correctly because the loop never executes (or executes once), returning `prev = head` unchanged.
 
-#### Solution
+#### Python
+
+Three pointers, no special cases. `prev` starts as `None` so the original head naturally becomes the new tail.
 
 ```python
 def reverseList(head):
@@ -3312,6 +3887,10 @@ def reverseList(head):
         curr = nxt
     return prev
 ```
+
+#### Rust
+
+`node.next.take()` is the key move: it swaps `next` with `None`, transferring ownership of the rest of the list to `head`. Without `take`, the borrow checker would block reassignment of `node.next`.
 
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -3331,6 +3910,10 @@ fn reverse_list(mut head: Option<Box<ListNode>>) -> Option<Box<ListNode>> {
 }
 ```
 
+#### Go
+
+`var prev *ListNode` defaults to `nil` — Go's zero-value gives us the initial state for free. Otherwise identical to the Python form.
+
 ```go
 type ListNode struct {
     Val  int
@@ -3349,6 +3932,10 @@ func reverseList(head *ListNode) *ListNode {
     return prev
 }
 ```
+
+#### C++
+
+Raw `ListNode*` makes the pointer dance explicit. No memory management concerns here since we're rewiring existing nodes.
 
 ```cpp
 struct ListNode {
@@ -3370,6 +3957,7 @@ ListNode* reverseList(ListNode* head) {
 }
 ```
 
+
 ### 40. Merge Two Sorted Lists
 
 #### Problem
@@ -3381,7 +3969,9 @@ Given the heads of two sorted linked lists, merge them into a single sorted link
 #### Explanation
 This mirrors the merge step of merge sort. A dummy head node eliminates the special case of initializing the result's first node — you always append to `curr.next` and advance `curr`. At each step, compare the front nodes of both lists and attach the smaller one. When one list is exhausted, `curr.next = l1 or l2` attaches the remaining non-empty list in one shot, since it's already sorted. Edge cases: one or both lists empty (handled by the loop condition and the final tail attachment).
 
-#### Solution
+#### Python
+
+`dummy = curr = ListNode()` is the Python-only chained assignment trick. `curr.next = l1 or l2` uses truthiness — `None or x` yields `x`, attaching the remaining tail in one line.
 
 ```python
 def mergeTwoLists(l1, l2):
@@ -3397,6 +3987,10 @@ def mergeTwoLists(l1, l2):
     curr.next = l1 or l2
     return dummy.next
 ```
+
+#### Rust
+
+Painful: `take()` repeatedly to satisfy the borrow checker, and the `as_ref().unwrap()` to peek `val` without taking. This is the canonical Rust linked-list pain — productive code would just use a `Vec`.
 
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -3428,6 +4022,10 @@ fn merge_two_lists(
 }
 ```
 
+#### Go
+
+Straightforward — `curr.Next = l1` aliases without copying; updating `l1 = l1.Next` walks the source forward. Tail attachment via if-else; Go has no ternary or truthy `or`.
+
 ```go
 type ListNode struct {
     Val  int
@@ -3456,6 +4054,10 @@ func mergeTwoLists(l1 *ListNode, l2 *ListNode) *ListNode {
 }
 ```
 
+#### C++
+
+Stack-allocated `dummy` avoids any allocation for the sentinel. Ternary `l1 ? l1 : l2` is the one-line tail attachment that Go can't do.
+
 ```cpp
 struct ListNode {
     int val;
@@ -3476,6 +4078,7 @@ ListNode* mergeTwoLists(ListNode* l1, ListNode* l2) {
 }
 ```
 
+
 ### 41. Reorder List
 
 #### Problem
@@ -3487,7 +4090,9 @@ Given a linked list `L0 → L1 → … → Ln`, reorder it in-place to `L0 → L
 #### Explanation
 The naive approach copies nodes to an array and interleaves by index — `O(n)` space. The in-place approach has three phases: (1) find the midpoint with slow/fast pointers; (2) reverse the second half in-place; (3) interleave the first and reversed-second halves. Splitting at the midpoint (and severing `slow.next = None`) is critical — it avoids corrupting the list during the merge step. During interleaving, save both `first.next` and `second.next` before rewiring, since both pointers are overwritten. Edge case: a list of length 1 or 2 requires no work — the slow/fast phase handles this by leaving `second = None`.
 
-#### Solution
+#### Python
+
+Three-phase in-place: slow/fast midpoint, reverse second half, then interleave. `slow.next = None` severs the list so the merge step can use `while second:` as the loop condition cleanly.
 
 ```python
 def reorderList(head):
@@ -3511,6 +4116,10 @@ def reorderList(head):
         first = t1
         second = t2
 ```
+
+#### Rust
+
+Rust's `Box`-owned linked list doesn't tolerate the three-pointer dance — the borrow checker rejects rewiring while holding handles. This implementation reads values into a `Vec`, computes the reorder order via two-pointer, and writes values back in place. Slightly cheating, but the only sane approach without `unsafe` or `Rc<RefCell<>>`.
 
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -3546,6 +4155,10 @@ fn reorder_list(head: &mut Option<Box<ListNode>>) {
     }
 }
 ```
+
+#### Go
+
+Three-phase pointer dance reads almost identically to the Python form — Go's pointers tolerate the kind of mutation that Rust's borrow checker forbids. `var prev *ListNode` defaults to nil for the reverse phase.
 
 ```go
 type ListNode struct {
@@ -3583,6 +4196,10 @@ func reorderList(head *ListNode) {
 }
 ```
 
+#### C++
+
+Raw pointers make this mechanical — same three phases, no language friction. `slow->next = nullptr` is the critical severance step.
+
 ```cpp
 struct ListNode {
     int val;
@@ -3619,6 +4236,7 @@ void reorderList(ListNode* head) {
 }
 ```
 
+
 ### 42. Remove Nth Node From End of List
 
 #### Problem
@@ -3630,7 +4248,9 @@ Given the head of a linked list and an integer `n`, remove the nth node from the
 #### Explanation
 A naive approach finds the length first, then traverses again to the target — two passes. The two-pointer trick does it in one: advance `fast` by `n + 1` steps ahead of `slow` (both start at a dummy node). Then advance both together until `fast` is `None`. At that point `slow` is exactly one node before the target, so `slow.next = slow.next.next` unlinks it. The dummy node before `head` handles the edge case of removing the first node (where `slow` would be the dummy itself).
 
-#### Solution
+#### Python
+
+Dummy node trick lets the fast pointer go `n + 1` steps ahead so `slow` lands one *before* the target. `dummy.next` returns the (possibly new) head — handles removing the first node trivially.
 
 ```python
 def removeNthFromEnd(head, n):
@@ -3644,6 +4264,10 @@ def removeNthFromEnd(head, n):
     slow.next = slow.next.next
     return dummy.next
 ```
+
+#### Rust
+
+Owned `Box<ListNode>` makes the two-pointer dance prohibitively painful — easier to collect values, drop the target index, and rebuild. The `vals.iter().rev()` + chained `Some(Box::new(...))` is the canonical 'build list from values' pattern.
 
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -3668,6 +4292,10 @@ fn remove_nth_from_end(head: Option<Box<ListNode>>, n: i32) -> Option<Box<ListNo
 }
 ```
 
+#### Go
+
+The textbook `n + 1` step lead — for-loop with `<=` instead of `<` makes the intent (`stop one short of n+1`) explicit. Pure pointer manipulation, no allocations.
+
 ```go
 type ListNode struct {
     Val  int
@@ -3689,6 +4317,10 @@ func removeNthFromEnd(head *ListNode, n int) *ListNode {
 }
 ```
 
+#### C++
+
+Stack-allocated `dummy(0, head)` uses the two-arg constructor. `delete del` is the only manual memory move — Go and Python rely on GC.
+
 ```cpp
 struct ListNode {
     int val;
@@ -3709,6 +4341,7 @@ ListNode* removeNthFromEnd(ListNode* head, int n) {
 }
 ```
 
+
 ### 43. Copy List with Random Pointer
 
 #### Problem
@@ -3720,7 +4353,9 @@ Deep-copy a linked list where each node has a `val`, a `next` pointer, and a `ra
 #### Explanation
 The challenge is that `random` can point forward or backward — you can't set it until the target node exists. Two-pass hashmap solves this cleanly: first pass creates all new nodes and maps each old node to its copy; second pass wires `next` and `random` using the map. Seeding the map with `{None: None}` means you never need to check for null `random` pointers during the second pass — the lookup for `None` simply returns `None`. An alternative interleaving approach avoids the hashmap at `O(1)` space but is more error-prone.
 
-#### Solution
+#### Python
+
+Seeding `old_to_new` with `{None: None}` is the trick that makes the second pass branchless — looking up a null `random` returns null naturally. Two passes are needed because `random` can point forward to nodes not yet created.
 
 ```python
 def copyRandomList(head):
@@ -3737,6 +4372,10 @@ def copyRandomList(head):
     return old_to_new[head]
 ```
 
+#### Rust
+
+Rust's borrow checker can't handle a graph with arbitrary forward/backward links via `Box`; production code would use `Rc<RefCell<Node>>` or raw pointers. This stub demonstrates the index-based representation that is the safe Rust alternative — real solution requires a different data structure.
+
 ```rust
 use std::collections::HashMap;
 
@@ -3752,6 +4391,10 @@ fn copy_random_list(nodes: &[Node]) -> Vec<Node> {
     nodes.to_vec()
 }
 ```
+
+#### Go
+
+`map[*Node]*Node{nil: nil}` seeds the nil mapping — same trick as Python. Pointers are first-class map keys in Go, no hashing concerns.
 
 ```go
 type Node struct {
@@ -3778,6 +4421,10 @@ func copyRandomList(head *Node) *Node {
 }
 ```
 
+#### C++
+
+`std::unordered_map<Node*, Node*>` with `m[nullptr] = nullptr` seeded. `new Node(cur->val)` allocates on the heap — LeetCode tolerates the leak; production would track ownership.
+
 ```cpp
 #include <unordered_map>
 
@@ -3801,6 +4448,7 @@ Node* copyRandomList(Node* head) {
 }
 ```
 
+
 ### 44. Linked List Cycle
 
 #### Problem
@@ -3812,7 +4460,9 @@ Given the head of a linked list, return `true` if the list has a cycle (some nod
 #### Explanation
 The simple approach stores visited nodes in a hash set — `O(n)` space. Floyd's algorithm uses two pointers: `slow` advances one step at a time, `fast` advances two. If there is a cycle, `fast` laps `slow` and they meet inside the cycle; if there is no cycle, `fast` reaches `None`. The loop condition `while fast and fast.next` ensures we don't dereference a null pointer when advancing `fast` two steps. The meeting of the two pointers is guaranteed because in each iteration the gap between them decreases by exactly one (modulo cycle length).
 
-#### Solution
+#### Python
+
+Both pointers start at `head` so they're equal initially — the meeting check after the move (not before) avoids the false-positive on iteration 0.
 
 ```python
 def hasCycle(head):
@@ -3824,6 +4474,10 @@ def hasCycle(head):
             return True
     return False
 ```
+
+#### Rust
+
+Owned `Box` linked lists can't have cycles by construction — `Box` enforces single ownership. This stub uses index arrays to demonstrate the algorithm; a real implementation would use raw pointers or `Rc<RefCell<>>`.
 
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -3850,6 +4504,10 @@ fn has_cycle(nodes: &[i32], nexts: &[i32]) -> bool {
 }
 ```
 
+#### Go
+
+Pointer comparison `slow == fast` works because Go pointers compare by address. Zero language friction — the algorithm reads identically to Python.
+
 ```go
 type ListNode struct {
     Val  int
@@ -3868,6 +4526,10 @@ func hasCycle(head *ListNode) bool {
     return false
 }
 ```
+
+#### C++
+
+Raw pointer comparison via `==` on addresses. Same shape as Go; no special syntax for cycle-aware traversal.
 
 ```cpp
 struct ListNode {
@@ -3888,6 +4550,7 @@ bool hasCycle(ListNode* head) {
 }
 ```
 
+
 ### 45. Find the Duplicate Number
 
 #### Problem
@@ -3899,7 +4562,9 @@ Given an array of `n + 1` integers where each integer is in `[1, n]`, find the o
 #### Explanation
 Think of the array as a function `f(i) = nums[i]`; since values are in `[1, n]` they act as indices into the same array, forming an implicit linked list. The duplicate means two indices point to the same "next" node, creating a cycle. Phase 1: run slow/fast pointers (`slow = nums[slow]`, `fast = nums[nums[fast]]`) until they meet inside the cycle. Phase 2: reset one pointer to `nums[0]` (the "start") and advance both by one step at a time; they meet at the cycle entrance, which is the duplicate. This works because of Floyd's mathematical guarantee that the entrance distance from the start equals the distance from the meeting point. Sorting-based (`O(n log n)`) or set-based (`O(n)` space) solutions are both inferior.
 
-#### Solution
+#### Python
+
+Two-phase Floyd: first loop finds the meeting point inside the cycle, second loop finds the cycle entrance (the duplicate). The `while True ... break` pattern is needed because `slow == fast` is also true initially.
 
 ```python
 def findDuplicate(nums):
@@ -3915,6 +4580,10 @@ def findDuplicate(nums):
         fast = nums[fast]
     return slow
 ```
+
+#### Rust
+
+`as usize` casts at every index — Rust forces this because array indices must be unsigned. The algorithm is identical in shape to the Python version.
 
 ```rust
 fn find_duplicate(nums: Vec<i32>) -> i32 {
@@ -3933,6 +4602,10 @@ fn find_duplicate(nums: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+Plain int indexing into the slice; the implicit-linked-list view is what makes this a graph problem in disguise. `for { ... break }` for the first phase.
+
 ```go
 func findDuplicate(nums []int) int {
     slow, fast := nums[0], nums[0]
@@ -3949,6 +4622,10 @@ func findDuplicate(nums []int) int {
     return slow
 }
 ```
+
+#### C++
+
+`do-while` loop is the most natural fit for the 'compare after move' first phase — eliminates the `while True/break` awkwardness.
 
 ```cpp
 #include <vector>
@@ -3968,6 +4645,7 @@ int findDuplicate(std::vector<int>& nums) {
 }
 ```
 
+
 ### 46. LRU Cache
 
 #### Problem
@@ -3979,7 +4657,9 @@ Design a data structure that supports `get(key)` and `put(key, value)` in `O(1)`
 #### Explanation
 A hashmap alone gives `O(1)` access but can't efficiently track usage order. A doubly linked list alone tracks order in `O(1)` but doesn't support `O(1)` lookup. Combining them: the hashmap maps keys to list nodes (giving `O(1)` find), while the list maintains recency order (MRU at the right, LRU at the left) with `O(1)` remove-and-reinsert. Two sentinel nodes (left/right dummies) eliminate all edge cases for empty or single-element lists — you never check for null neighbors. On `get`, move the node to the MRU end. On `put`, if the key exists, update its value and move it to MRU; if new and over capacity, remove the LRU node (left sentinel's neighbor) and delete it from the hashmap.
 
-#### Solution
+#### Python
+
+Two sentinel nodes (`left` and `right` dummies) eliminate every neighbor null-check. The `cache` maps key → node, so `get`/`put` are pure dict access plus list rewiring — both O(1).
 
 ```python
 class Node:
@@ -4025,6 +4705,10 @@ class LRUCache:
             del self.cache[lru.key]
 ```
 
+#### Rust
+
+Production Rust LRU uses `unsafe` raw pointers or a Crates.io implementation; the borrow checker can't express the doubly-linked-list-with-back-pointers pattern. This implementation uses `VecDeque` + `retain` for clarity — correctness is preserved but `touch` is O(n), not O(1).
+
 ```rust
 use std::collections::HashMap;
 
@@ -4065,6 +4749,10 @@ impl LRUCache {
 }
 ```
 
+#### Go
+
+`container/list` is the standard-library doubly linked list — `MoveToBack`, `PushBack`, `Remove`, `Front` give O(1) operations with no manual pointer wrangling. `el.Value.(*entry)` type-asserts the stored value.
+
 ```go
 import "container/list"
 
@@ -4103,6 +4791,10 @@ func (c *LRUCache) Put(key int, value int) {
 }
 ```
 
+#### C++
+
+`std::list<pair<int,int>>::iterator` stored in the map gives O(1) splice-to-MRU via `lst.splice(lst.end(), lst, it->second)` — that one line is what makes the C++ form so compact compared to Python.
+
 ```cpp
 #include <unordered_map>
 #include <list>
@@ -4137,6 +4829,7 @@ public:
 };
 ```
 
+
 ### 47. Merge K Sorted Lists
 
 #### Problem
@@ -4148,7 +4841,9 @@ Given an array of `k` sorted linked lists, merge all of them into one sorted lin
 #### Explanation
 Merging `k` lists naively by repeatedly scanning all `k` front nodes costs `O(n * k)`. A min-heap always gives the globally smallest front node in `O(log k)`. Initialize the heap with each list's head node; pop the minimum, append it to the result, and push its successor (if any). The tie-breaking index `i` prevents the heap from comparing `ListNode` objects directly when two values are equal. Total work: `n` pops and up to `n` pushes, each `O(log k)` — giving `O(n log k)` overall. Edge cases: empty list of lists, or individual lists that are `None`.
 
-#### Solution
+#### Python
+
+Three-tuple `(val, index, node)` is critical — Python's heap compares tuples lexicographically, and the `index` tie-breaker prevents falling through to comparing `ListNode` objects (which would crash).
 
 ```python
 import heapq
@@ -4167,6 +4862,10 @@ def mergeKLists(lists):
             heapq.heappush(heap, (node.next.val, i, node.next))
     return dummy.next
 ```
+
+#### Rust
+
+`BinaryHeap` is a max-heap by default; production code would wrap entries in `Reverse(...)` to invert. Owned `Box` linked lists make per-list-head heap entries painful, so this implementation flattens to a sorted vec and rebuilds — O(n log n) but trivial to write.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -4196,6 +4895,10 @@ fn merge_k_lists(lists: Vec<Option<Box<ListNode>>>) -> Option<Box<ListNode>> {
     result
 }
 ```
+
+#### Go
+
+Implementing `heap.Interface` requires five methods (`Len`, `Less`, `Swap`, `Push`, `Pop`) — verbose but explicit. The `interface{}` casts in `Push`/`Pop` predate generics; modern Go could use `container/heap` with a typed wrapper.
 
 ```go
 import "container/heap"
@@ -4230,6 +4933,10 @@ func mergeKLists(lists []*ListNode) *ListNode {
 }
 ```
 
+#### C++
+
+`std::priority_queue` with custom comparator via lambda; `decltype(cmp)` lets you type the queue's third template parameter from the lambda. Reversed comparison (`a->val > b->val`) makes it a min-heap.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -4256,6 +4963,7 @@ ListNode* mergeKLists(std::vector<ListNode*>& lists) {
 }
 ```
 
+
 ### 48. Reverse Nodes in K-Group
 
 #### Problem
@@ -4267,7 +4975,9 @@ Given a linked list and integer `k`, reverse the nodes in each group of `k` cons
 #### Explanation
 The recursive approach builds `O(n/k)` stack frames. The iterative approach uses a `group_prev` pointer that tracks the node just before the current group. For each group: (1) walk `k` steps forward to find the `kth` node — if it doesn't exist, we're done; (2) save `group_next = kth.next` as the anchor; (3) reverse the `k` nodes between `group_prev.next` and `kth` using standard pointer reversal, stopping when `curr == group_next`; (4) patch `group_prev.next` to the new head of the reversed group and advance `group_prev` to the old head (now the group's tail). The dummy node simplifies the initial `group_prev` setup.
 
-#### Solution
+#### Python
+
+Helper `get_kth` walks `k` steps and returns `None` if the group is short — that's the loop-termination signal. The `prev = group_next` (not `None`) initial value is the trick that makes the reversal stop at the right boundary.
 
 ```python
 def reverseKGroup(head, k):
@@ -4296,6 +5006,10 @@ def reverseKGroup(head, k):
     return dummy.next
 ```
 
+#### Rust
+
+Same `Box` ownership obstacle as the other linked-list problems. The values-to-vec, `chunks_mut(k).reverse()` chain is much shorter than a true in-place pointer reversal — sacrifices in-place for readability.
+
 ```rust
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ListNode {
@@ -4320,6 +5034,10 @@ fn reverse_k_group(head: Option<Box<ListNode>>, k: i32) -> Option<Box<ListNode>>
     result
 }
 ```
+
+#### Go
+
+Top-level helper `getKth` instead of a closure — Go's closure recursion is awkward, and the helper has no captures. Otherwise the algorithm shape is identical to Python.
 
 ```go
 type ListNode struct {
@@ -4357,6 +5075,10 @@ func getKth(curr *ListNode, k int) *ListNode {
 }
 ```
 
+#### C++
+
+Same as Go but with raw pointers; the four-pointer dance (`groupPrev`, `kth`, `groupNext`, `tmp`) is identical across all three pointer-friendly languages.
+
 ```cpp
 struct ListNode {
     int val;
@@ -4392,6 +5114,7 @@ ListNode* reverseKGroup(ListNode* head, int k) {
 }
 ```
 
+
 ### 49. Invert Binary Tree
 
 #### Problem
@@ -4403,7 +5126,9 @@ Given the root of a binary tree, invert it (mirror left and right subtrees at ev
 #### Explanation
 Every node must have its children swapped, and the same must happen recursively for all descendants. Postorder DFS (process children before parent) naturally handles this: recurse left, recurse right, then swap. Preorder also works — swap first, then recurse. BFS level-order works too but requires a queue. The single-line Python swap `root.left, root.right = invertTree(root.right), invertTree(root.left)` is correct because both recursive calls complete and return before the assignment happens. Edge case: `None` node returns `None` immediately, terminating the recursion.
 
-#### Solution
+#### Python
+
+The tuple assignment `root.left, root.right = invertTree(root.right), invertTree(root.left)` evaluates both calls before either assignment — order of recursion is well-defined.
 
 ```python
 def invertTree(root):
@@ -4412,6 +5137,10 @@ def invertTree(root):
     root.left, root.right = invertTree(root.right), invertTree(root.left)
     return root
 ```
+
+#### Rust
+
+`root.map(|mut node| { ... })` is the idiomatic 'do something to Option's inner value, returning a new Option'. `node.left.take()` is needed to move ownership out of `node` so it can be passed to the recursive call.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4433,6 +5162,10 @@ fn invert_tree(root: Option<Box<TreeNode>>) -> Option<Box<TreeNode>> {
 }
 ```
 
+#### Go
+
+Parallel assignment `root.Left, root.Right = invertTree(root.Right), invertTree(root.Left)` — identical to Python's form. Both recursive calls complete before either field is assigned.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -4446,6 +5179,10 @@ func invertTree(root *TreeNode) *TreeNode {
     return root
 }
 ```
+
+#### C++
+
+`std::swap(root->left, root->right)` swaps pointers in place — no need to chain through return values. The two recursive calls happen after the swap; either order works.
 
 ```cpp
 struct TreeNode {
@@ -4464,6 +5201,7 @@ TreeNode* invertTree(TreeNode* root) {
 }
 ```
 
+
 ### 50. Maximum Depth of Binary Tree
 
 #### Problem
@@ -4475,7 +5213,9 @@ Given the root of a binary tree, return its maximum depth — the number of node
 #### Explanation
 The depth of any node is 1 plus the maximum depth of its two subtrees. The base case — a `None` node contributes depth 0 — makes the recursion self-terminating and handles empty trees. Both left and right subtrees must be explored because the maximum can be on either side; we can't prune. An iterative BFS approach counting levels is equally valid but requires a queue. For very deep trees (linear chains), recursion can cause a stack overflow; an iterative DFS using an explicit stack avoids this. The space complexity is `O(h)` — the recursion depth equals the tree height, which ranges from `O(log n)` for balanced trees to `O(n)` for skewed ones.
 
-#### Solution
+#### Python
+
+Three lines including the base case. `max` of the two recursive calls is the entire algorithm.
 
 ```python
 def maxDepth(root):
@@ -4483,6 +5223,10 @@ def maxDepth(root):
         return 0
     return 1 + max(maxDepth(root.left), maxDepth(root.right))
 ```
+
+#### Rust
+
+Pattern match on `Option` — `None => 0`, `Some(node) => 1 + ...`. `max_depth(node.left).max(max_depth(node.right))` uses the method form of `max` on `i32`.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4500,6 +5244,10 @@ fn max_depth(root: Option<Box<TreeNode>>) -> i32 {
 }
 ```
 
+#### Go
+
+Pre-1.21, the `if l > r` ladder replaces a missing `max` builtin — verbose but unavoidable for the historical Go.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -4515,6 +5263,10 @@ func maxDepth(root *TreeNode) int {
 }
 ```
 
+#### C++
+
+Single-line return using `std::max`. Reads almost identically to Python.
+
 ```cpp
 struct TreeNode {
     int val;
@@ -4529,6 +5281,7 @@ int maxDepth(TreeNode* root) {
 }
 ```
 
+
 ### 51. Diameter of Binary Tree
 
 #### Problem
@@ -4540,7 +5293,9 @@ Given the root of a binary tree, return the length of the diameter — the longe
 #### Explanation
 The diameter through a given node is the sum of the longest path going down through its left subtree plus the longest path going down through its right subtree. DFS computes each node's "height" (longest downward path) as a return value, while simultaneously updating a global maximum with `l + r` (the diameter through that node). The key insight: the diameter might pass through any node, not just the root, so you can't just measure from the top. The nonlocal `res` (or class attribute) accumulates the answer across all nodes. Edge case: a single-node tree has diameter 0.
 
-#### Solution
+#### Python
+
+`res = [0]` is the standard 'mutable box' trick for closure-shared state in Python — `nonlocal` would also work but `[0]` requires no declaration. DFS returns height while updating diameter as a side effect.
 
 ```python
 def diameterOfBinaryTree(root):
@@ -4554,6 +5309,10 @@ def diameterOfBinaryTree(root):
     dfs(root)
     return res[0]
 ```
+
+#### Rust
+
+Pass `&mut i32` for the running max — Rust's explicit mutability makes the side-effect channel visible at the call site. Inner `fn dfs` instead of a closure because Rust closures can't recurse without `Box<dyn Fn>` tricks.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4581,6 +5340,10 @@ fn diameter_of_binary_tree(root: Option<Box<TreeNode>>) -> i32 {
 }
 ```
 
+#### Go
+
+Declare-then-assign closure for self-reference (Go can't recurse a closure declared inline). Pre-1.21 needs the `if l > r` ladder instead of a `max` builtin.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -4602,6 +5365,10 @@ func diameterOfBinaryTree(root *TreeNode) int {
     return res
 }
 ```
+
+#### C++
+
+Top-level `dfs` taking `int& res` — reference parameter is the C++ way to thread shared state without globals. `std::max` keeps the body terse.
 
 ```cpp
 #include <algorithm>
@@ -4627,6 +5394,7 @@ int diameterOfBinaryTree(TreeNode* root) {
 }
 ```
 
+
 ### 52. Balanced Binary Tree
 
 #### Problem
@@ -4638,7 +5406,9 @@ Given the root of a binary tree, return `true` if it is height-balanced — ever
 #### Explanation
 A naive approach calls a `height` function at every node — `O(n²)` for skewed trees because height is recomputed repeatedly. The optimal approach computes height and checks balance in a single DFS pass by using `-1` as a sentinel value meaning "already imbalanced." At each node, if either subtree returns `-1`, propagate `-1` up immediately without further work. Otherwise, check whether the heights differ by more than 1 — if so return `-1`; if not, return the actual height. This early-exit mechanism is key: once any imbalance is detected, all ancestor calls short-circuit.
 
-#### Solution
+#### Python
+
+The `-1` sentinel is the elegance — it both signals 'imbalanced' and short-circuits via the `or` chain. `abs(l - r) > 1` is the balance check.
 
 ```python
 def isBalanced(root):
@@ -4651,6 +5421,10 @@ def isBalanced(root):
         return 1 + max(l, r)
     return dfs(root) != -1
 ```
+
+#### Rust
+
+Same `-1` sentinel as Python; `(l - r).abs()` is the method form. Inner `fn dfs` for the same recursion-can't-be-closure reason as problem 51.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4676,6 +5450,10 @@ fn is_balanced(root: Option<Box<TreeNode>>) -> bool {
 }
 ```
 
+#### Go
+
+Two explicit comparisons (`l-r > 1 || r-l > 1`) replace `abs` to avoid a `math.Abs` cast through `float64`. Slightly more verbose but stays in `int`.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -4695,6 +5473,10 @@ func isBalanced(root *TreeNode) bool {
     return dfs(root) != -1
 }
 ```
+
+#### C++
+
+`std::abs(l - r)` on `int` works directly; the sentinel propagates the same way. Top-level `dfs` is the C++ idiom for recursive helpers.
 
 ```cpp
 #include <algorithm>
@@ -4717,6 +5499,7 @@ int dfs(TreeNode* node) {
 bool isBalanced(TreeNode* root) { return dfs(root) != -1; }
 ```
 
+
 ### 53. Same Tree
 
 #### Problem
@@ -4728,7 +5511,9 @@ Given the roots of two binary trees, return `true` if they are structurally iden
 #### Explanation
 You must check every node in both trees simultaneously. The three base cases cover all structural mismatches: (1) both null — trivially the same; (2) one null but not the other — different; (3) values differ — different. Only if values match do you recurse into both subtrees, short-circuiting with `and` so the right subtree is skipped if the left already fails. The time complexity is `O(min(m, n))` in practice because we stop as soon as a mismatch is found, but `O(n)` in the worst case (identical trees). Stack depth is `O(h)` — the height of the tree.
 
-#### Solution
+#### Python
+
+Three lines of base cases collapse all the structural mismatches; the recursive `and` short-circuits on the first mismatch.
 
 ```python
 def isSameTree(p, q):
@@ -4738,6 +5523,10 @@ def isSameTree(p, q):
         return False
     return isSameTree(p.left, q.left) and isSameTree(p.right, q.right)
 ```
+
+#### Rust
+
+Tuple match `(p, q)` is the cleanest expression of the four cases — `(None, None)`, `(Some, Some)`, and `_` for the mixed case. No null checks needed.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4760,6 +5549,10 @@ fn is_same_tree(p: Option<Box<TreeNode>>, q: Option<Box<TreeNode>>) -> bool {
 }
 ```
 
+#### Go
+
+Identical shape to Python — pointer nil-checks instead of `not p`. Short-circuit `&&` halts on the first mismatch.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -4773,6 +5566,10 @@ func isSameTree(p *TreeNode, q *TreeNode) bool {
     return isSameTree(p.Left, q.Left) && isSameTree(p.Right, q.Right)
 }
 ```
+
+#### C++
+
+Raw pointer null-checks; otherwise reads identically to Go. The `&&` chain is the same short-circuit story.
 
 ```cpp
 struct TreeNode {
@@ -4789,6 +5586,7 @@ bool isSameTree(TreeNode* p, TreeNode* q) {
 }
 ```
 
+
 ### 54. Subtree of Another Tree
 
 #### Problem
@@ -4800,7 +5598,9 @@ Given the roots of two binary trees `root` and `subRoot`, return `true` if there
 #### Explanation
 At each node of the main tree, attempt to match `subRoot` using an `isSameTree` check. If it matches, return `true`; otherwise recurse into both children. The worst case is `O(m * n)` — for each of `m` nodes in `root`, the `isSameTree` check costs `O(n)`. A more optimal `O(m + n)` approach serializes both trees to strings and uses KMP or hashing to find the pattern, but the straightforward DFS is simpler and acceptable for most inputs. Edge case: `subRoot = None` is considered a subtree of any tree; a `None` root contains no subtrees.
 
-#### Solution
+#### Python
+
+Nested `isSameTree` keeps the helper scoped to this problem. The `if isSameTree(root, subRoot): return True` check happens at every node — naive but readable.
 
 ```python
 def isSubtree(root, subRoot):
@@ -4815,6 +5615,10 @@ def isSubtree(root, subRoot):
         return True
     return isSubtree(root.left, subRoot) or isSubtree(root.right, subRoot)
 ```
+
+#### Rust
+
+Pass `&Option<Box<TreeNode>>` everywhere to avoid moves — references compose freely with the pattern match. The `is_same(root, sub)` is called against the *outer* `root` not `node` because the function signature wants references.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4844,6 +5648,10 @@ fn is_subtree(root: &Option<Box<TreeNode>>, sub: &Option<Box<TreeNode>>) -> bool
 }
 ```
 
+#### Go
+
+Top-level `isSameTree` and `isSubtree` — no nested functions in Go. The recursive `||` short-circuits as soon as a match is found.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -4863,6 +5671,10 @@ func isSubtree(root *TreeNode, subRoot *TreeNode) bool {
     return isSubtree(root.Left, subRoot) || isSubtree(root.Right, subRoot)
 }
 ```
+
+#### C++
+
+Two top-level functions; identical control flow to Go. The `O(m * n)` complexity is the same across all four — none of them implement the KMP-on-serialization speedup.
 
 ```cpp
 struct TreeNode {
@@ -4885,6 +5697,7 @@ bool isSubtree(TreeNode* root, TreeNode* subRoot) {
 }
 ```
 
+
 ### 55. Lowest Common Ancestor of a Binary Search Tree
 
 #### Problem
@@ -4896,7 +5709,9 @@ Given a BST and two nodes `p` and `q`, find their lowest common ancestor (the de
 #### Explanation
 In a general binary tree, LCA requires `O(n)` DFS to find both nodes. In a BST the ordering property lets you navigate directly. At each node: if both `p` and `q` are less than the current value, the LCA is in the left subtree; if both are greater, it's in the right subtree; otherwise, the current node splits them (or equals one of them) — it is the LCA. This eliminates one side at each step, giving `O(h)` time with `O(1)` space iteratively. The recursive version is equally clear but uses `O(h)` stack space. Edge case: `p` or `q` may equal the current node, which the "else" branch handles correctly since a node is its own ancestor.
 
-#### Solution
+#### Python
+
+Iterative `while root` — no recursion, no stack. The 'else' branch (the split point) is the answer; assignment to `root` walks down on the matching side.
 
 ```python
 def lowestCommonAncestor(root, p, q):
@@ -4908,6 +5723,10 @@ def lowestCommonAncestor(root, p, q):
         else:
             return root
 ```
+
+#### Rust
+
+Walks via `&Option<Box<TreeNode>>` references — no ownership moves. Returns the value `i32` rather than the node because re-extracting a `Box` from a reference would require cloning.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -4928,6 +5747,10 @@ fn lowest_common_ancestor(root: Option<Box<TreeNode>>, p: i32, q: i32) -> i32 {
     }
 }
 ```
+
+#### Go
+
+Idiomatic — pointer reassignment walks the tree without any allocation. Returns the actual `*TreeNode` per the LeetCode signature.
 
 ```go
 type TreeNode struct {
@@ -4950,6 +5773,10 @@ func lowestCommonAncestor(root, p, q *TreeNode) *TreeNode {
 }
 ```
 
+#### C++
+
+Same pointer-walk pattern as Go. The `while (root)` form with `return root` in the else branch is the tightest expression of the algorithm.
+
 ```cpp
 struct TreeNode {
     int val;
@@ -4968,6 +5795,7 @@ TreeNode* lowestCommonAncestor(TreeNode* root, TreeNode* p, TreeNode* q) {
 }
 ```
 
+
 ### 56. Binary Tree Level Order Traversal
 
 #### Problem
@@ -4979,7 +5807,9 @@ Given the root of a binary tree, return the node values grouped by level — lef
 #### Explanation
 DFS can produce level groupings with an extra depth parameter, but BFS maps more naturally to level-by-level processing. The key trick: snapshot `len(q)` at the start of each while-loop iteration. That count tells you how many nodes belong to the current level — process exactly that many before moving on. Children enqueued during this inner loop belong to the next level and won't be processed until the next outer iteration. Space is `O(n)` in the worst case because the last level of a complete binary tree has `n/2` nodes all queued simultaneously.
 
-#### Solution
+#### Python
+
+`deque.popleft()` is O(1) — a plain list would be O(n) per pop. The `for _ in range(len(q))` snapshot is what separates levels.
 
 ```python
 from collections import deque
@@ -4998,6 +5828,10 @@ def levelOrder(root):
         res.append(level)
     return res
 ```
+
+#### Rust
+
+`VecDeque::pop_front` is O(1). The level-size snapshot via `let size = queue.len()` before the inner loop is the same trick — children enqueued during the loop belong to the next level.
 
 ```rust
 use std::collections::VecDeque;
@@ -5029,6 +5863,10 @@ fn level_order(root: Option<Box<TreeNode>>) -> Vec<Vec<i32>> {
 }
 ```
 
+#### Go
+
+Uses slice-as-queue with `q = q[size:]` to drop processed nodes — O(1) view operation, eventual GC handles reclamation. `make([]int, 0, size)` pre-allocates the level vector.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -5055,6 +5893,10 @@ func levelOrder(root *TreeNode) [][]int {
     return res
 }
 ```
+
+#### C++
+
+`std::queue<TreeNode*>` adapter over deque — `front()`/`pop()` are separate calls. Level-size snapshot via `int size = q.size()` is the same pattern as the others.
 
 ```cpp
 #include <vector>
@@ -5087,6 +5929,7 @@ std::vector<std::vector<int>> levelOrder(TreeNode* root) {
 }
 ```
 
+
 ### 57. Binary Tree Right Side View
 
 #### Problem
@@ -5098,7 +5941,9 @@ Given the root of a binary tree, return the values of the nodes visible when loo
 #### Explanation
 The "right side view" is the last node at each level in BFS order. Use the same level-size snapshot technique as level-order traversal: process exactly `len(q)` nodes per level, and append the final node's value to the result. DFS works too — traverse right before left and record the first node seen at each new depth — but BFS is more straightforward. Edge case: an empty tree returns an empty list. Note that the rightmost visible node is not necessarily a right child; if a left subtree is deeper than the right subtree, its deepest nodes are visible.
 
-#### Solution
+#### Python
+
+Closure variable `node` survives after the inner loop because Python's for-loop variable leaks to the enclosing scope — that's how `res.append(node.val)` works after the loop. Subtle but idiomatic.
 
 ```python
 from collections import deque
@@ -5115,6 +5960,10 @@ def rightSideView(root):
         res.append(node.val)
     return res
 ```
+
+#### Rust
+
+Track `last` explicitly inside the loop — Rust scopes the iterator variable, no leak. Initial `last = 0` is overwritten on the first iteration since each level has ≥1 node.
 
 ```rust
 use std::collections::VecDeque;
@@ -5146,6 +5995,10 @@ fn right_side_view(root: Option<Box<TreeNode>>) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Cheats slightly — instead of tracking `last`, indexes `q[size-1]` *before* slicing. Works because we haven't yet sliced off the level's nodes.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -5170,6 +6023,10 @@ func rightSideView(root *TreeNode) []int {
     return res
 }
 ```
+
+#### C++
+
+Inline `if (i == size - 1) res.push_back(node->val)` inside the BFS loop — checks the index rather than tracking the last node separately. Marginally cleaner than the Python leak.
 
 ```cpp
 #include <vector>
@@ -5200,6 +6057,7 @@ std::vector<int> rightSideView(TreeNode* root) {
 }
 ```
 
+
 ### 58. Count Good Nodes in Binary Tree
 
 #### Problem
@@ -5211,7 +6069,9 @@ Given a binary tree, count the number of "good" nodes — nodes where no node on
 #### Explanation
 A "good" node is one where the node's value is at least as large as every ancestor's value — equivalently, `node.val >= max_so_far`. Thread the running maximum down the recursion: at each node, compare `node.val` to `max_val`, count 1 if it qualifies, then recurse with `max(max_val, node.val)`. The root is always good (no ancestors to violate the condition). Using `root.val` as the initial `max_val` correctly seeds the comparison. The running max ensures `O(h)` extra space — just the recursion stack, no additional data structure.
 
-#### Solution
+#### Python
+
+Thread `max_val` down the recursion as an argument — no shared mutable state, easy to reason about. Counts via `1 if condition else 0` for compactness.
 
 ```python
 def goodNodes(root):
@@ -5223,6 +6083,10 @@ def goodNodes(root):
         return res + dfs(node.left, m) + dfs(node.right, m)
     return dfs(root, root.val)
 ```
+
+#### Rust
+
+Inner `fn dfs` again for the recursion. `if-else` rather than ternary for the `good` count — Rust has no ternary but `if-else` is an expression so it fits inline.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -5247,6 +6111,10 @@ fn good_nodes(root: Option<Box<TreeNode>>) -> i32 {
 }
 ```
 
+#### Go
+
+Closure captures nothing — just threads `maxVal` as a parameter. Two `if` statements replace `max` and ternary because pre-1.21 Go has neither.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -5267,6 +6135,10 @@ func goodNodes(root *TreeNode) int {
     return dfs(root, root.Val)
 }
 ```
+
+#### C++
+
+Top-level `dfs` with `int maxVal` by value — the running max is per-path so by-value is correct. C-style ternary `node->val >= maxVal ? 1 : 0` for the count.
 
 ```cpp
 #include <algorithm>
@@ -5290,6 +6162,7 @@ int goodNodes(TreeNode* root) {
 }
 ```
 
+
 ### 59. Validate Binary Search Tree
 
 #### Problem
@@ -5301,7 +6174,9 @@ Given the root of a binary tree, return `true` if it is a valid BST — every no
 #### Explanation
 A common mistake is only comparing a node to its direct parent — that misses cases like a right child of a left subtree being too large relative to an ancestor. The correct approach threads allowed bounds `(lo, hi)` down the tree: for the root, bounds are `(-∞, +∞)`; going left, the upper bound tightens to `node.val`; going right, the lower bound tightens to `node.val`. At each node, `lo < node.val < hi` must hold strictly (BSTs don't allow duplicates). Using `float('-inf')` and `float('inf')` (or `i64::MIN`/`i64::MAX` in typed languages) avoids special-casing the root bounds. An inorder traversal approach works too — a valid BST produces a strictly increasing sequence.
 
-#### Solution
+#### Python
+
+Chained `lo < node.val < hi` is uniquely Pythonic — one comparison, no `and`. `float('-inf')`/`float('inf')` work for the BST's int bounds without overflow concerns.
 
 ```python
 def isValidBST(root):
@@ -5313,6 +6188,10 @@ def isValidBST(root):
         return valid(node.left, lo, node.val) and valid(node.right, node.val, hi)
     return valid(root, float('-inf'), float('inf'))
 ```
+
+#### Rust
+
+Cast `n.val as i64` so the comparison against `i64::MIN`/`i64::MAX` doesn't overflow when the tree has `i32::MIN` or `i32::MAX` values. Subtle but necessary.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -5338,6 +6217,10 @@ fn is_valid_bst(root: Option<Box<TreeNode>>) -> bool {
 }
 ```
 
+#### Go
+
+`math.MinInt64`/`math.MaxInt64` as the initial bounds — Go's `int` is 64-bit so this fits naturally. Pre-1.21 has no chained comparison so two `||` checks.
+
 ```go
 import "math"
 
@@ -5357,6 +6240,10 @@ func isValidBST(root *TreeNode) bool {
     return valid(root, math.MinInt64, math.MaxInt64)
 }
 ```
+
+#### C++
+
+`long long` for the bounds (`LLONG_MIN`/`LLONG_MAX`) — same overflow defense as Rust. Two comparisons against `node->val` separated by `||`.
 
 ```cpp
 #include <climits>
@@ -5379,6 +6266,7 @@ bool isValidBST(TreeNode* root) {
 }
 ```
 
+
 ### 60. Kth Smallest Element in a BST
 
 #### Problem
@@ -5390,7 +6278,9 @@ Given the root of a BST and an integer `k`, return the `k`th smallest value amon
 #### Explanation
 In a BST, inorder traversal (left → node → right) visits nodes in ascending order. The `k`th node visited is the answer. Iterative inorder using an explicit stack avoids recursion's stack-overflow risk on deep trees. The inner loop drills left as far as possible, then pops a node, decrements `k`, and if `k` reaches 0 that node is the answer; otherwise continue to the right subtree. This visits nodes one by one in sorted order and stops early after `k` visits. A recursive approach is equally correct but uses call-stack space. Edge case: the problem guarantees `1 <= k <= n`, so no out-of-bounds check is needed.
 
-#### Solution
+#### Python
+
+Classic iterative inorder: drill left, pop, count, then jump to right subtree. Stops the moment `k` hits zero — no need to traverse the whole tree.
 
 ```python
 def kthSmallest(root, k):
@@ -5406,6 +6296,10 @@ def kthSmallest(root, k):
             return curr.val
         curr = curr.right
 ```
+
+#### Rust
+
+Recursive inorder building a full `Vec<i32>` — simpler than fighting `Box<TreeNode>` ownership for the iterative form. O(n) regardless of `k`, vs. the iterative O(k + h) — acceptable on LeetCode.
 
 ```rust
 #[derive(Debug, PartialEq, Eq)]
@@ -5429,6 +6323,10 @@ fn kth_smallest(root: Option<Box<TreeNode>>, k: i32) -> i32 {
     vals[(k - 1) as usize]
 }
 ```
+
+#### Go
+
+Iterative inorder with slice-as-stack. `k--` then `if k == 0` is the standard 'visit the kth element' pattern.
 
 ```go
 type TreeNode struct {
@@ -5455,6 +6353,10 @@ func kthSmallest(root *TreeNode, k int) int {
 }
 ```
 
+#### C++
+
+`std::stack<TreeNode*>` adapter; the `if (--k == 0)` is the prefix-decrement trick that combines decrement and check. `top()` + `pop()` are separate calls per the STL convention.
+
 ```cpp
 #include <stack>
 
@@ -5478,6 +6380,7 @@ int kthSmallest(TreeNode* root, int k) {
 }
 ```
 
+
 ### 61. Construct Binary Tree from Preorder and Inorder Traversal
 
 #### Problem
@@ -5489,7 +6392,9 @@ Given a preorder and inorder traversal of a binary tree (all values unique), rec
 #### Explanation
 The key insight is that the first element of the preorder list is always the root. Once you know the root, its position `mid` in the inorder list tells you exactly how many nodes are in the left subtree (`mid - l`) and right subtree. A naive approach re-scans the inorder array to find `mid` on every recursive call, giving `O(n²)` time; precomputing a `val → index` hashmap drops each lookup to `O(1)`. A shared `pre` index (or pointer) advances through the preorder array in the correct DFS order as recursion proceeds. The recursion bottoms out when `l > r`, meaning the subtree is empty. No special casing is needed for one-node subtrees — the guard handles them automatically.
 
-#### Solution
+#### Python
+
+`pre = [0]` is the closure-shared mutable counter (`nonlocal` would also work). The `idx` dict turns the `O(n)` inorder lookup into `O(1)`, the entire reason this isn't `O(n²)`.
 
 ```python
 class TreeNode:
@@ -5510,6 +6415,10 @@ def buildTree(preorder, inorder):
         return root
     return build(0, len(inorder) - 1)
 ```
+
+#### Rust
+
+Pass `&mut usize` for the `pre` counter and `&HashMap` for the lookup — explicit borrows make the shared state visible. Extra `if mid > l` guard on the left recursion prevents `mid - 1` from underflowing `usize`.
 
 ```rust
 use std::collections::HashMap;
@@ -5547,6 +6456,10 @@ fn build_tree(preorder: Vec<i32>, inorder: Vec<i32>) -> Option<Box<TreeNode>> {
 }
 ```
 
+#### Go
+
+Closure captures `pre` and `idx` by reference automatically. The `pre++` post-increment-via-statement is Go's only increment form — no `++pre` expression.
+
 ```go
 type TreeNode struct {
     Val   int
@@ -5575,6 +6488,10 @@ func buildTree(preorder []int, inorder []int) *TreeNode {
     return build(0, len(inorder)-1)
 }
 ```
+
+#### C++
+
+Wraps state in a class so `pre` and `idx` are members — avoids the parameter-passing tax. The constructor takes the preorder by reference (`p`) which the recursive `build` consumes via the captured member.
 
 ```cpp
 #include <vector>
@@ -5608,6 +6525,7 @@ public:
 };
 ```
 
+
 ### 62. Binary Tree Maximum Path Sum
 
 #### Problem
@@ -5619,7 +6537,9 @@ Given a binary tree, find the maximum path sum where a path is any sequence of n
 #### Explanation
 A path can start and end at any node, so the root need not be on it — this rules out any top-down greedy approach. The trick is to think of each node as a potential "peak" of a path: the best path through `node` is `node.val + gainLeft + gainRight`, where `gainLeft` and `gainRight` are the best gains achievable going down each subtree (clamped to 0 if negative, meaning "don't go there"). After updating the global maximum with this "through" sum, the function must return only `node.val + max(gainLeft, gainRight)` to the parent, because a path passed up to the parent can extend in only one direction. Initialising `res` with `root.val` rather than negative infinity handles single-negative-node inputs correctly. The `max(..., 0)` clamping elegantly skips entire subtrees whose best gain would reduce the sum.
 
-#### Solution
+#### Python
+
+`res = [root.val]` initialization (not `0` or `-inf`) handles the all-negative-tree case. `max(dfs(...), 0)` clamps negative gains to zero — that's how we 'skip' a subtree that would hurt the sum.
 
 ```python
 class TreeNode:
@@ -5638,6 +6558,10 @@ def maxPathSum(root):
     dfs(root)
     return res[0]
 ```
+
+#### Rust
+
+Pattern match with early-return `return 0` inside the `match` binds `n` for the rest of the function. `(*res).max(...)` to update through the mutable reference — the parens make precedence explicit.
 
 ```rust
 #[derive(Debug)]
@@ -5660,6 +6584,10 @@ fn max_path_sum(root: Option<Box<TreeNode>>) -> i32 {
     res
 }
 ```
+
+#### Go
+
+Two `if l < 0 { l = 0 }` blocks replace the `max(_, 0)` clamp — verbose but clear. Pre-1.21 has no `max` builtin so the return ladder is unavoidable.
 
 ```go
 type TreeNode struct {
@@ -5692,6 +6620,10 @@ func maxPathSum(root *TreeNode) int {
 }
 ```
 
+#### C++
+
+`std::function<int(TreeNode*)>` lets the lambda recurse via captured-by-reference `dfs`. The `std::max(..., 0)` clamp and `std::max(l, r)` for the return-up value mirror Python exactly.
+
 ```cpp
 #include <algorithm>
 
@@ -5716,6 +6648,7 @@ int maxPathSum(TreeNode* root) {
 }
 ```
 
+
 ### 63. Serialize and Deserialize Binary Tree
 
 #### Problem
@@ -5727,7 +6660,9 @@ Design an algorithm to serialize a binary tree to a string and deserialize it ba
 #### Explanation
 The challenge is encoding structure, not just values — you need to know where null children are so the shape can be recovered. Preorder traversal (root, left, right) with an explicit `"N"` marker for null nodes encodes exactly enough information. During deserialization, you replay the same preorder DFS: each token is either a number (create a node and recurse into its left then right) or `"N"` (return null). A mutable index `i` advances through the flat token list as the recursion proceeds. BFS (level-order) encoding works too but needs more bookkeeping; preorder is elegantly self-describing. The only edge case worth noting is an empty tree, where serialization produces `"N"` and deserialization immediately returns `None`.
 
-#### Solution
+#### Python
+
+Preorder with `'N'` for null is the simplest self-describing format — splitting on `,` round-trips. The shared `i = [0]` mutable index walks through tokens during deserialization.
 
 ```python
 class TreeNode:
@@ -5760,6 +6695,10 @@ def deserialize(data):
         return node
     return dfs()
 ```
+
+#### Rust
+
+Inner `fn` for the recursion (closures can't recurse cleanly). `vals: Vec<&str>` is borrowed slice references — no string allocations during deserialization.
 
 ```rust
 #[derive(Debug)]
@@ -5799,6 +6738,10 @@ fn deserialize(data: String) -> Option<Box<TreeNode>> {
     dfs(&vals, &mut i)
 }
 ```
+
+#### Go
+
+Closure with self-reference via the `var dfs func(...)` then assignment. `strings.Split` returns `[]string` — works directly for the tokens.
 
 ```go
 import (
@@ -5842,6 +6785,10 @@ func deserialize(data string) *TreeNode {
 }
 ```
 
+#### C++
+
+`std::istringstream` + `std::getline` with `,` delimiter is the standard 'split string' incantation. The trailing `pop_back()` after serialization strips the dangling comma.
+
 ```cpp
 #include <string>
 #include <sstream>
@@ -5884,6 +6831,7 @@ TreeNode* deserialize(std::string data) {
 }
 ```
 
+
 ### 64. Implement Trie (Prefix Tree)
 
 #### Problem
@@ -5895,7 +6843,9 @@ Implement a trie with `insert(word)`, `search(word)` (exact match), and `startsW
 #### Explanation
 A trie stores strings as paths from root to leaf, sharing common prefixes. Each node holds a map from character to child node, plus a boolean `end` marking whether a complete word ends here. `insert` walks (or creates) a child per character, then sets `end = True`. `search` walks children and additionally checks `end`; `startsWith` only checks that all prefix characters exist. The dict-based child map keeps the implementation concise and language-agnostic compared to a fixed-size 26-element array, at the cost of slightly higher constant overhead per node. The key design choice: `search` and `startsWith` share the same traversal logic — only the final check differs.
 
-#### Solution
+#### Python
+
+Each `Trie` instance is itself a node — no separate `TrieNode` class. `setdefault`-style child creation via `if c not in node.children`.
 
 ```python
 class Trie:
@@ -5927,6 +6877,10 @@ class Trie:
             node = node.children[c]
         return True
 ```
+
+#### Rust
+
+`#[derive(Default)]` lets `or_default()` create child nodes implicitly via `entry`. Walking with `&mut self` propagates mutable borrow down the chain — works because each step reassigns `node`.
 
 ```rust
 use std::collections::HashMap;
@@ -5972,6 +6926,10 @@ impl Trie {
 }
 ```
 
+#### Go
+
+Fixed `[26]*Trie` array beats a map for lowercase-only inputs — index by `c - 'a'`, zero allocation per node beyond the struct. Faster constant factor than the dict approach.
+
 ```go
 type Trie struct {
     children [26]*Trie
@@ -6016,6 +6974,10 @@ func (t *Trie) StartsWith(prefix string) bool {
     return true
 }
 ```
+
+#### C++
+
+Separate `TrieNode` struct with a `root` pointer — more conventional than 'Trie is its own node'. `unordered_map<char, TrieNode*>` for children matches Python's flexibility at higher constant cost.
 
 ```cpp
 #include <unordered_map>
@@ -6063,6 +7025,7 @@ public:
 };
 ```
 
+
 ### 65. Design Add and Search Words Data Structure
 
 #### Problem
@@ -6074,7 +7037,9 @@ Design a word dictionary supporting `addWord(word)` and `search(word)`, where `s
 #### Explanation
 A plain trie handles exact-match queries in `O(m)`. The wildcard `'.'` breaks direct traversal because you don't know which child to follow. The solution is to treat `'.'` as a branch point: instead of following one child, try all children recursively. In the worst case (a pattern like `"..."`) every node fans out 26 ways, giving exponential time — but in practice most patterns are mostly literal characters. The recursive call passes the remaining suffix `word[i+1:]`, so each branch explores independently. An iterative stack-based variant avoids deep Python recursion for very long words, but the recursive form is clearest.
 
-#### Solution
+#### Python
+
+`'.'` triggers `any(child.search(word[i + 1:]) for child in node.children.values())` — recursive fan-out via slicing. The slice `word[i + 1:]` allocates per recursive call; an index-passing form avoids that but reads less cleanly.
 
 ```python
 class WordDictionary:
@@ -6100,6 +7065,10 @@ class WordDictionary:
             node = node.children[c]
         return node.end
 ```
+
+#### Rust
+
+Pre-collect `word.chars()` to `Vec<char>` once, then pass `&[char]` slices — zero further allocations during recursion. `map_or(false, |child| ...)` is the Option-handling idiom for 'do something only if Some'.
 
 ```rust
 use std::collections::HashMap;
@@ -6138,6 +7107,10 @@ impl WordDictionary {
     }
 }
 ```
+
+#### Go
+
+Index-passing `searchAt(word, pos)` avoids allocating slice suffixes. Iterating `[26]*WordDictionary` for the wildcard branch is fast — array iteration, no map churn.
 
 ```go
 type WordDictionary struct {
@@ -6182,6 +7155,10 @@ func (d *WordDictionary) searchAt(word string, pos int) bool {
 }
 ```
 
+#### C++
+
+Structured binding `auto& [_, child]` in the wildcard loop with C++17. Index passing instead of substring construction keeps allocation count flat.
+
 ```cpp
 #include <unordered_map>
 #include <string>
@@ -6224,6 +7201,7 @@ public:
 };
 ```
 
+
 ### 66. Word Search II
 
 #### Problem
@@ -6235,7 +7213,9 @@ Given an `m×n` character grid and a list of words, return all words that can be
 #### Explanation
 The naive approach — run Word Search (problem #79) for each word independently — costs `O(W · m·n·4^L)` and redundantly re-explores shared prefixes. Building a trie over all words lets you prune whole subtrees the moment the current cell sequence leaves all word paths. The DFS starts from every cell, walks the trie in parallel with the board, and marks visited cells by temporarily overwriting them with `'#'`, restoring on backtrack. When a node has the special end marker `"#"`, the full word is in the result set; the marker is deleted to avoid duplicates. Pruning dead branches from the trie as words are found (optional but efficient) reduces repeat visits. A `set` collects results to handle grids that could find the same word from multiple starting positions.
 
-#### Solution
+#### Python
+
+Nested-dict trie with `"#"` key storing the full word — the existence check `if "#" in node` doubles as 'this is an end node' and 'we just found a word'. Marking cells with `'#'` for visited (and restoring on backtrack) avoids a separate visited set.
 
 ```python
 def findWords(board, words):
@@ -6264,6 +7244,10 @@ def findWords(board, words):
             dfs(root, r, c)
     return list(res)
 ```
+
+#### Rust
+
+Owned `Node` with `Option<String>` at the word marker. `node.word.take()` extracts and clears in one move — the canonical 'consume Some' pattern. Borrow checker fights make this verbose vs. Python; production would use `Rc<RefCell<>>` or `unsafe`.
 
 ```rust
 use std::collections::HashMap;
@@ -6326,6 +7310,10 @@ fn find_words(mut board: Vec<Vec<char>>, words: Vec<String>) -> Vec<String> {
 }
 ```
 
+#### Go
+
+`[26]*TrieNode` array — faster than the map version, fine for lowercase-only inputs. Setting `node.word = ""` after finding a word prevents duplicate appends, the same trick as Python's `del node["#"]`.
+
 ```go
 type TrieNode struct {
     children [26]*TrieNode
@@ -6376,6 +7364,10 @@ func findWords(board [][]byte, words []string) []string {
 }
 ```
 
+#### C++
+
+`std::string word` member; `word.clear()` after finding marks the word as taken without freeing the node. Structured binding in the direction-iteration loop with C++17.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -6424,6 +7416,7 @@ public:
 };
 ```
 
+
 ### 67. Kth Largest Element in a Stream
 
 #### Problem
@@ -6435,7 +7428,9 @@ Design a class initialized with `k` and a list of initial numbers; `add(val)` in
 #### Explanation
 Maintaining a sorted structure over all seen elements would cost `O(n)` space and `O(log n)` per query, but we only care about the k-th largest. A min-heap of exactly `k` elements does the job: the heap's minimum is always the k-th largest, because there are exactly `k-1` elements larger than it in the heap. When a new value arrives, push it; if the heap grows beyond `k`, pop the smallest — the new value displaces itself if it was too small, leaving the top always as answer. During `__init__`, heapify first (O(n)), then pop excess elements down to size `k`. Edge case: the initial list may have fewer than `k` elements; the first few `add` calls grow the heap before it is trimmed.
 
-#### Solution
+#### Python
+
+`heapq.heapify` is O(n) — faster than n pushes of O(log n) each. The `while len > k: pop` trims to size during init; `add` does the same trim per call.
 
 ```python
 import heapq
@@ -6454,6 +7449,10 @@ class KthLargest:
             heapq.heappop(self.heap)
         return self.heap[0]
 ```
+
+#### Rust
+
+`BinaryHeap` is a max-heap; `Reverse(n)` inverts the ordering to make it a min-heap. `.peek().unwrap().0` extracts the inner `i32` from the `Reverse` wrapper.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -6482,6 +7481,10 @@ impl KthLargest {
     }
 }
 ```
+
+#### Go
+
+Implementing `heap.Interface` with five methods — same `Push`/`Pop` shape as the merge-k-lists problem. `(*kl.heap)[0]` dereferences the heap pointer to read the min.
 
 ```go
 import "container/heap"
@@ -6517,6 +7520,10 @@ func (kl *KthLargest) Add(val int) int {
 }
 ```
 
+#### C++
+
+`std::priority_queue<int, std::vector<int>, std::greater<int>>` — third template argument inverts to min-heap. The most compact heap construction in the four languages.
+
 ```cpp
 #include <queue>
 #include <vector>
@@ -6539,6 +7546,7 @@ public:
 };
 ```
 
+
 ### 68. Last Stone Weight
 
 #### Problem
@@ -6550,7 +7558,9 @@ You have a list of stone weights. Each turn, smash the two heaviest stones: if t
 #### Explanation
 Each turn requires the two largest elements, which is the classic max-heap use-case. Python's `heapq` only provides a min-heap, so negate all values: the smallest negative corresponds to the largest stone. Each iteration: pop twice (getting `a >= b` in absolute value), and if they differ, push back `-(a - b)`. The loop ends when one or zero stones remain. The `if heap else 0` guard handles the edge case where all stones cancel perfectly, leaving an empty heap. Sorting would give `O(n log n)` per step (re-sort after each smash), so the heap is the right structure here — each smash costs only `O(log n)`.
 
-#### Solution
+#### Python
+
+`heapq` is min-heap-only, so negate everything. `-(a - b)` rather than `b - a` keeps the sign-flip intent explicit at the call site.
 
 ```python
 import heapq
@@ -6565,6 +7575,10 @@ def lastStoneWeight(stones):
             heapq.heappush(heap, -(a - b))
     return -heap[0] if heap else 0
 ```
+
+#### Rust
+
+`BinaryHeap` is max-heap by default — no `Reverse` wrapper needed. `unwrap_or(0)` handles the empty-stones edge case cleanly without an `if`.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -6581,6 +7595,10 @@ fn last_stone_weight(stones: Vec<i32>) -> i32 {
     heap.pop().unwrap_or(0)
 }
 ```
+
+#### Go
+
+`MaxHeap` via `Less(i, j) bool { return h[i] > h[j] }` — flipping the comparator inverts the heap. Copy `stones` first to avoid mutating the caller's slice during `Init`.
 
 ```go
 import "container/heap"
@@ -6607,6 +7625,10 @@ func lastStoneWeight(stones []int) int {
 }
 ```
 
+#### C++
+
+`std::priority_queue<int>` is max-heap by default. Range constructor `(stones.begin(), stones.end())` builds in O(n) — better than n pushes.
+
 ```cpp
 #include <queue>
 #include <vector>
@@ -6622,6 +7644,7 @@ int lastStoneWeight(std::vector<int>& stones) {
 }
 ```
 
+
 ### 69. K Closest Points to Origin
 
 #### Problem
@@ -6633,7 +7656,9 @@ Given an array of points on a plane, return the `k` closest points to the origin
 #### Explanation
 The naive approach — sort all points by distance — costs `O(n log n)` and `O(n)` space. A max-heap of size `k` is better: maintain a window of the `k` smallest distances seen so far. For each point, push its (negated) squared distance onto the heap; if the heap exceeds `k`, pop the largest (most-negative negation = largest real distance), evicting the farthest candidate. Squaring avoids `sqrt` which is both slower and introduces floating-point error. Negation lets Python's min-heap behave like a max-heap. After processing all points, the heap holds exactly the `k` closest.
 
-#### Solution
+#### Python
+
+Negate distance for max-heap behavior; carry `(dist, x, y)` so the heap keys on distance but stores coordinates. List comprehension `[[x, y] for _, x, y in heap]` rebuilds the result shape.
 
 ```python
 import heapq
@@ -6647,6 +7672,10 @@ def kClosest(points, k):
             heapq.heappop(heap)
     return [[x, y] for _, x, y in heap]
 ```
+
+#### Rust
+
+`BinaryHeap<(i64, i32, i32)>` uses tuple lexicographic ordering — sorts on the first element (distance) primarily. `i64` for distance squared to avoid overflow on the multiplication.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -6665,6 +7694,10 @@ fn k_closest(points: Vec<Vec<i32>>, k: i32) -> Vec<Vec<i32>> {
     heap.into_iter().map(|(_, x, y)| vec![x, y]).collect()
 }
 ```
+
+#### Go
+
+Custom heap with `Less` computing squared distance inline — no caching. Could be optimized by storing distance alongside the point.
 
 ```go
 import "container/heap"
@@ -6692,6 +7725,10 @@ func kClosest(points [][]int, k int) [][]int {
 }
 ```
 
+#### C++
+
+Lambda comparator with `decltype(cmp)` template parameter trick — verbose syntax but standard. Custom predicate inside the heap means each comparison recomputes the squared distance; cache-friendlier than storing it for small `k`.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -6711,6 +7748,7 @@ std::vector<std::vector<int>> kClosest(std::vector<std::vector<int>>& points, in
 }
 ```
 
+
 ### 70. Kth Largest Element in an Array
 
 #### Problem
@@ -6722,7 +7760,9 @@ Given an integer array and an integer `k`, return the kth largest element (not t
 #### Explanation
 Sorting the array gives `O(n log n)` time and the answer is at index `n - k`, but a min-heap of size `k` does better when `k << n`. Seed the heap with the first `k` elements, then for each remaining element: if it exceeds the heap's minimum (the current kth largest), replace the minimum with it using `heapreplace` (pop + push in one O(log k) step). After processing all elements, the heap's minimum is the kth largest. The key insight: the heap always contains exactly the `k` largest elements seen so far, so its min is always the answer. For small `k` this is noticeably faster than full sort; for `k ≈ n` the difference shrinks.
 
-#### Solution
+#### Python
+
+`heapreplace` is `pop + push` in one O(log k) step — faster than separate calls when you know the heap is at capacity. `heapify` on the initial slice is O(k), better than k pushes.
 
 ```python
 import heapq
@@ -6735,6 +7775,10 @@ def findKthLargest(nums, k):
             heapq.heapreplace(heap, n)
     return heap[0]
 ```
+
+#### Rust
+
+`Reverse(n)` wraps for min-heap behavior. The heap-of-size-k pattern: push then conditionally pop — keeps the heap pruned at every step.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -6752,6 +7796,10 @@ fn find_kth_largest(nums: Vec<i32>, k: i32) -> i32 {
     heap.peek().unwrap().0
 }
 ```
+
+#### Go
+
+`IntMinHeap` via `Less(i, j) bool { return h[i] < h[j] }`. Verbose `Push`/`Pop` interface, but the algorithm body stays clean.
 
 ```go
 import "container/heap"
@@ -6775,6 +7823,10 @@ func findKthLargest(nums []int, k int) int {
 }
 ```
 
+#### C++
+
+`std::priority_queue<int, std::vector<int>, std::greater<int>>` — the min-heap incantation. Same push-then-prune pattern as everywhere else.
+
 ```cpp
 #include <queue>
 #include <vector>
@@ -6789,6 +7841,7 @@ int findKthLargest(std::vector<int>& nums, int k) {
 }
 ```
 
+
 ### 71. Task Scheduler
 
 #### Problem
@@ -6800,7 +7853,9 @@ Given a list of tasks and a cooldown period `n`, find the minimum number of CPU 
 #### Explanation
 Always execute the most frequent remaining task — this greedy choice minimises idle time. A max-heap stores `(-count, task)` to retrieve the highest-count task in `O(log k)`. After executing a task, it can't run again until time `t + n + 1`, so push it onto a FIFO queue as `(remaining_count, available_at)`. Each time-step: if the heap is non-empty, pop and execute; if the cooldown queue's front becomes available at this moment, push it back onto the heap. The loop runs until both the heap and queue are empty, and `time` counts the answer. A mathematical formula (`max(len(tasks), (maxCount-1)*(n+1)+numMaxTasks)`) gives `O(1)` but is harder to justify; the simulation generalises to variants.
 
-#### Solution
+#### Python
+
+Heap of negated counts + `deque` for the cooldown queue — `(remaining, available_at)` makes the FIFO order match cooldown expiry order. `cnt = 1 + heappop(heap)` increments toward zero since values are negated.
 
 ```python
 import heapq
@@ -6825,6 +7880,10 @@ def leastInterval(tasks, n):
     return time
 ```
 
+#### Rust
+
+`BinaryHeap<i32>` is max-heap so positive counts work directly — no negation tricks. `count.into_values().collect()` constructs the heap in one shot. `VecDeque` for the cooldown queue.
+
 ```rust
 use std::collections::{BinaryHeap, VecDeque, HashMap};
 
@@ -6846,6 +7905,10 @@ fn least_interval(tasks: Vec<char>, n: i32) -> i32 {
     time
 }
 ```
+
+#### Go
+
+Custom `MaxIntHeap` via flipped `Less`. Anonymous struct for the queue entries keeps the type local. Slice-as-queue with `queue[1:]` for the pop.
 
 ```go
 import (
@@ -6883,6 +7946,10 @@ func leastInterval(tasks []byte, n int) int {
 }
 ```
 
+#### C++
+
+`std::priority_queue<int>` is max-heap by default — cleanest of the four. Structured binding `auto& [_, c]` for the count map iteration.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -6909,6 +7976,7 @@ int leastInterval(std::vector<char>& tasks, int n) {
 }
 ```
 
+
 ### 72. Design Twitter
 
 #### Problem
@@ -6920,7 +7988,9 @@ Design a simplified Twitter supporting `postTweet`, `getNewsFeed` (the 10 most r
 #### Explanation
 Each user maintains their tweets as a list in posting order, indexed by a global descending counter so recency comparison is just numeric ordering. `getNewsFeed` needs the 10 most recent tweets from up to `u+1` sorted lists — a classic k-way merge. Seed a min-heap with the latest tweet from each relevant user; each pop extracts the globally newest remaining tweet, then the next tweet from that user is pushed. This runs in `O(k log u)` rather than concatenating and sorting everything. The follow/unfollow operations update a set-per-user for `O(1)` lookup. Edge case: a user with no tweets or who hasn't tweeted yet needs a guard before accessing their tweet list.
 
-#### Solution
+#### Python
+
+Negative `count` makes the min-heap behave like a max-heap on recency (smaller count = more recent). Tuple `(cnt, tid, u, idx-1)` carries everything needed to enqueue the next tweet from the same user when this one is consumed.
 
 ```python
 import heapq
@@ -6960,6 +8030,10 @@ class Twitter:
     def unfollow(self, followerId, followeeId):
         self.following[followerId].discard(followeeId)
 ```
+
+#### Rust
+
+Negate timestamps for max-heap-via-min-heap behavior — `BinaryHeap` is max but we want most-recent-first which is most-negative. `users.insert(user_id)` includes the user's own tweets in the feed.
 
 ```rust
 use std::collections::{HashMap, HashSet, BinaryHeap};
@@ -7014,6 +8088,10 @@ impl Twitter {
     }
 }
 ```
+
+#### Go
+
+Custom heap with `Less` flipped (`h[i].ts > h[j].ts`) so most recent is at the top — no negation needed. `entry` struct carries the four-tuple.
 
 ```go
 import (
@@ -7076,6 +8154,10 @@ func (t *Twitter) Unfollow(followerId, followeeId int) {
 }
 ```
 
+#### C++
+
+`std::tuple<int,int,int,int>` and structured binding `auto [ts, tid, u, idx]`. The lambda `push` deduplicates seeding logic for self + followed users.
+
 ```cpp
 #include <vector>
 #include <unordered_map>
@@ -7118,6 +8200,7 @@ public:
 };
 ```
 
+
 ### 73. Find Median from Data Stream
 
 #### Problem
@@ -7129,7 +8212,9 @@ Design a data structure that supports `addNum(int num)` and `findMedian()` — t
 #### Explanation
 The median requires knowing the "middle" of a sorted set — efficient insertion into a fully sorted structure would be `O(n)`. The two-heap trick: keep a max-heap `small` for the lower half and a min-heap `large` for the upper half, maintaining the invariant `len(small) == len(large)` or `len(small) == len(large) + 1`. After each insertion, rebalance if needed. If the tops violate the order property (max of lower > min of upper), fix by moving the offending element across. The median is then either the top of `small` (odd total) or the average of both tops (even total). All operations are `O(log n)` for heap push/pop. Python negates values for the max-heap since `heapq` is a min-heap only.
 
-#### Solution
+#### Python
+
+Two heaps with the invariant `len(small) >= len(large)` — when sizes equal, median is the average of tops; when odd total, median is `small`'s top. Three rebalance steps cover all imbalance directions.
 
 ```python
 import heapq
@@ -7153,6 +8238,10 @@ class MedianFinder:
             return float(-self.small[0])
         return (-self.small[0] + self.large[0]) / 2.0
 ```
+
+#### Rust
+
+`BinaryHeap<i32>` is max-heap (for `small`); `BinaryHeap<Reverse<i32>>` is min-heap (for `large`). Destructuring `let Reverse(v) = ...` extracts the inner value.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -7195,6 +8284,10 @@ impl MedianFinder {
     }
 }
 ```
+
+#### Go
+
+Two separate heap types — `maxH` and `minH` — because Go's heap interface ties comparator to the slice type. `(*mf.small)[0]` to read the top without popping.
 
 ```go
 import "container/heap"
@@ -7243,6 +8336,10 @@ func (mf *MedianFinder) FindMedian() float64 {
 }
 ```
 
+#### C++
+
+Two `priority_queue`s — the default max-heap for `small`, the `greater<int>` variant for `large`. Cleaner than Rust's `Reverse` wrapper because the comparator lives in the template parameter.
+
 ```cpp
 #include <queue>
 
@@ -7268,6 +8365,7 @@ public:
 };
 ```
 
+
 ### 74. Subsets
 
 #### Problem
@@ -7279,7 +8377,9 @@ Given an array of distinct integers, return all possible subsets (the power set)
 #### Explanation
 There are `2ⁿ` subsets — one for each way to include or exclude each element. The backtracking approach frames this as a binary decision tree: at index `i`, either include `nums[i]` and recurse, or skip it and recurse. When `i == n` the current subset is a complete choice and is recorded. This yields each subset exactly once in lexicographic order. An iterative bit-mask approach (`for mask in range(1 << n)`) gives the same `O(n · 2ⁿ)` result but is less generalisable. The `subset[:]` copy is necessary because `subset` is mutated in-place throughout the recursion.
 
-#### Solution
+#### Python
+
+`subset.append` / `bt` / `subset.pop` / `bt` — the include/exclude pattern. `subset[:]` copy at the leaf is mandatory because subset is mutated throughout.
 
 ```python
 def subsets(nums):
@@ -7296,6 +8396,10 @@ def subsets(nums):
     return res
 ```
 
+#### Rust
+
+Same include/exclude pattern; `current.clone()` at the leaf. Inner `fn bt` with explicit threading of `nums`, `current`, and `res`.
+
 ```rust
 fn subsets(nums: Vec<i32>) -> Vec<Vec<i32>> {
     let mut res = Vec::new();
@@ -7310,6 +8414,10 @@ fn subsets(nums: Vec<i32>) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+`append(current, nums[i])` returns a new slice — but Go's append may share the underlying array, so the explicit `copy` at the leaf is essential. Skip the pop because `current` isn't mutated.
 
 ```go
 func subsets(nums []int) [][]int {
@@ -7330,6 +8438,10 @@ func subsets(nums []int) [][]int {
 }
 ```
 
+#### C++
+
+`current.push_back` / `bt(i+1)` / `current.pop_back` — the same include/exclude shape. `res.push_back(current)` copies the vector at the leaf.
+
 ```cpp
 #include <vector>
 
@@ -7348,6 +8460,7 @@ std::vector<std::vector<int>> subsets(std::vector<int>& nums) {
 }
 ```
 
+
 ### 75. Combination Sum
 
 #### Problem
@@ -7359,7 +8472,9 @@ Given an array of distinct positive integers and a target, find all unique combi
 #### Explanation
 Unlike a subset problem, here a candidate can be picked repeatedly — so the recursion does not advance the index after including an element. At each call with index `i`, two branches: (1) use `candidates[i]` again (recurse with same `i`, larger total), (2) move to the next candidate (recurse with `i+1`, same total). Pruning fires when `total > target` or `i` runs past the array. No sorting is strictly required because candidates are distinct, but pre-sorting lets you break early when a candidate exceeds the remaining budget. The result contains no duplicates because the index only moves forward, preventing the same multi-set from being constructed in different orders.
 
-#### Solution
+#### Python
+
+Recurse with same `i` for the 'reuse' branch, `i+1` for the 'move on' branch. The two prunings (`total == target` for hit, `i >= len` or `total > target` for miss) cover all dead branches.
 
 ```python
 def combinationSum(candidates, target):
@@ -7378,6 +8493,10 @@ def combinationSum(candidates, target):
     return res
 ```
 
+#### Rust
+
+Inner `fn bt` with five threaded parameters — verbose but explicit. Same dual-branch (reuse same index vs advance) as Python.
+
 ```rust
 fn combination_sum(candidates: Vec<i32>, target: i32) -> Vec<Vec<i32>> {
     let mut res = Vec::new();
@@ -7393,6 +8512,10 @@ fn combination_sum(candidates: Vec<i32>, target: i32) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+Closure `bt(i, total int, current []int)` — captures `res`, `candidates`, `target` from outer scope. `append(current, candidates[i])` creates a new slice for the recurse call.
 
 ```go
 func combinationSum(candidates []int, target int) [][]int {
@@ -7416,6 +8539,10 @@ func combinationSum(candidates []int, target int) [][]int {
 }
 ```
 
+#### C++
+
+Lambda with `[&]` capture; `std::function<void(int,int)>` because recursive lambdas need a type. Same include-then-pop-then-advance shape.
+
 ```cpp
 #include <vector>
 
@@ -7435,6 +8562,7 @@ std::vector<std::vector<int>> combinationSum(std::vector<int>& candidates, int t
 }
 ```
 
+
 ### 76. Permutations
 
 #### Problem
@@ -7446,7 +8574,9 @@ Given an array of distinct integers, return all possible permutations in any ord
 #### Explanation
 There are `n!` permutations each of length `n`, so `O(n! · n)` is unavoidable. The visited-set approach checks `if n not in perm` on each recursive call — correct but `O(n)` per check, turning the guard into `O(n²)` overhead per leaf. An in-place swap approach avoids this: keep a boundary index `start`; swap `nums[start]` with each `nums[i]` for `i >= start`, recurse, then swap back. This explores every arrangement without extra memory for tracking. The `perm[:]` copy on leaf is necessary regardless of approach. The existing Python solution with `if n not in perm` is `O(n)` per check but still correct and clear for moderate `n`.
 
-#### Solution
+#### Python
+
+Uses `if n not in perm` instead of a visited set — readable but O(n) per check, so the overall is O(n! · n²) on the perm checks. Acceptable for typical n ≤ 6.
 
 ```python
 def permute(nums):
@@ -7464,6 +8594,10 @@ def permute(nums):
     return res
 ```
 
+#### Rust
+
+Swap-based approach: `nums.swap(start, i)` then recurse with `start + 1`, then swap back. O(1) per choice, no visited set, no allocation — strictly faster than Python's `in` check.
+
 ```rust
 fn permute(nums: Vec<i32>) -> Vec<Vec<i32>> {
     let mut res = Vec::new();
@@ -7480,6 +8614,10 @@ fn permute(nums: Vec<i32>) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+Same swap-based approach with `nums[start], nums[i] = nums[i], nums[start]`. The leaf still requires `copy` because `nums` is the same slice being mutated.
 
 ```go
 func permute(nums []int) [][]int {
@@ -7503,6 +8641,10 @@ func permute(nums []int) [][]int {
 }
 ```
 
+#### C++
+
+`std::swap(nums[start], nums[i])` is the swap primitive. `res.push_back(nums)` at the leaf copies the current state of `nums` into the result.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -7522,6 +8664,7 @@ std::vector<std::vector<int>> permute(std::vector<int>& nums) {
 }
 ```
 
+
 ### 77. Subsets II
 
 #### Problem
@@ -7533,7 +8676,9 @@ Given an integer array that may contain duplicates, return all possible unique s
 #### Explanation
 The naive approach generates all `2ⁿ` subsets and deduplicates with a set — correct but wasteful. Sorting the array first groups duplicates together, enabling a simple rule: within the same recursion level (same `i`), skip `nums[j]` if `j > i` and `nums[j] == nums[j-1]`. This prevents choosing the same value twice at the same position in the decision tree without preventing the same value from being chosen at a deeper level (a different copy). The result set is built by appending `subset[:]` at the start of each call (recording every prefix, including the empty set), then branching on each remaining index. This is subtly different from the Combination Sum family — here we record on entry, not only at the leaf.
 
-#### Solution
+#### Python
+
+Record on entry (`res.append(subset[:])` at the top) rather than only at leaves — this captures every prefix as a valid subset including the empty one. The `if j > i and nums[j] == nums[j-1]: continue` skips siblings with equal values.
 
 ```python
 def subsetsWithDup(nums):
@@ -7550,6 +8695,10 @@ def subsetsWithDup(nums):
     bt(0, [])
     return res
 ```
+
+#### Rust
+
+`nums.sort()` in place — `Vec<i32>` has `sort` directly. The duplicate-skip is the same `j > i` boundary check that prevents same-value choice at the same recursion depth.
 
 ```rust
 fn subsets_with_dup(mut nums: Vec<i32>) -> Vec<Vec<i32>> {
@@ -7568,6 +8717,10 @@ fn subsets_with_dup(mut nums: Vec<i32>) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+`sort.Ints` for the pre-sort. Append-pass on `current` works because we record an explicit copy at the start of each call before mutating.
 
 ```go
 import "sort"
@@ -7592,6 +8745,10 @@ func subsetsWithDup(nums []int) [][]int {
 }
 ```
 
+#### C++
+
+`std::sort` in place; `res.push_back(current)` copies on entry. The duplicate-skip predicate is identical across all four languages — it's an algorithm constant, not a language feature.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -7614,6 +8771,7 @@ std::vector<std::vector<int>> subsetsWithDup(std::vector<int>& nums) {
 }
 ```
 
+
 ### 78. Combination Sum II
 
 #### Problem
@@ -7625,7 +8783,9 @@ Given a collection of candidates (may contain duplicates) and a target, find all
 #### Explanation
 Compared to Combination Sum (problem #75), two constraints tighten the search: each element used at most once (advance `j+1` rather than staying at `i`), and the input may have duplicates (must deduplicate results). Sorting enables both optimisations simultaneously: the duplicate-skip rule (`j > i and candidates[j] == candidates[j-1]`) prevents identical values from being chosen at the same level of the tree, and because candidates are sorted, once `total + candidates[j] > target` you can `break` the inner loop entirely — all subsequent candidates are at least as large. These two prunings together make this considerably faster in practice than the naive approach.
 
-#### Solution
+#### Python
+
+Two prunings beyond the basic backtrack: same-level duplicate skip and the early `break` when `total + candidates[j] > target` exploits the sort order. Advancing `j+1` (not `j`) enforces the 'each element used at most once' rule.
 
 ```python
 def combinationSum2(candidates, target):
@@ -7647,6 +8807,10 @@ def combinationSum2(candidates, target):
     return res
 ```
 
+#### Rust
+
+Same two-prune pattern; `break` works on Rust's `for` loop just like Python. The `sort()` is on the owned `Vec<i32>` so it's mutating in place.
+
 ```rust
 fn combination_sum2(mut candidates: Vec<i32>, target: i32) -> Vec<Vec<i32>> {
     candidates.sort();
@@ -7665,6 +8829,10 @@ fn combination_sum2(mut candidates: Vec<i32>, target: i32) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+`sort.Ints(candidates)` mutates in place. `for j := i; ...` then `if ... { break }` to terminate early once sums exceed target.
 
 ```go
 import "sort"
@@ -7691,6 +8859,10 @@ func combinationSum2(candidates []int, target int) [][]int {
 }
 ```
 
+#### C++
+
+`std::sort` in place. Same two-prune pattern — the `break` from the for-loop is the early termination, the `continue` skips duplicates.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -7714,6 +8886,7 @@ std::vector<std::vector<int>> combinationSum2(std::vector<int>& candidates, int 
 }
 ```
 
+
 ### 79. Word Search
 
 #### Problem
@@ -7725,7 +8898,9 @@ Given an `m×n` grid of characters, determine if the word exists in the grid by 
 #### Explanation
 Start a DFS from every cell that matches `word[0]`. The DFS advances through `word` one character at a time; if the current cell doesn't match `word[i]`, return false immediately. Mark visited cells by temporarily overwriting them with a sentinel (`'#'`) to prevent revisiting within the current path — this avoids a separate `visited` set and restores the board on backtrack. When `i == len(word)` all characters have been matched successfully. The worst-case `O(m·n·4^L)` occurs on grids filled with the same character, but early mismatch pruning makes this fast on typical inputs. No global state is needed since the board itself serves as the visited structure.
 
-#### Solution
+#### Python
+
+In-place visited marking via `board[r][c] = "#"` saves allocating a visited set. The `any(... for dr, dc in [...])` generator short-circuits as soon as one direction succeeds.
 
 ```python
 def exist(board, word):
@@ -7741,6 +8916,10 @@ def exist(board, word):
         return found
     return any(dfs(r, c, 0) for r in range(rows) for c in range(cols))
 ```
+
+#### Rust
+
+Mutating `Vec<Vec<char>>` requires `&mut` threading through the recursion. `i32` for `r`/`c` to allow negative bounds without underflowing `usize`.
 
 ```rust
 fn exist(mut board: Vec<Vec<char>>, word: &str) -> bool {
@@ -7769,6 +8948,10 @@ fn exist(mut board: Vec<Vec<char>>, word: &str) -> bool {
 }
 ```
 
+#### Go
+
+Explicit four-direction `||` chain — short-circuit evaluation handles the early-exit. No `any` builtin so the chain is necessary.
+
 ```go
 func exist(board [][]byte, word string) bool {
     rows, cols := len(board), len(board[0])
@@ -7790,6 +8973,10 @@ func exist(board [][]byte, word string) bool {
     return false
 }
 ```
+
+#### C++
+
+Same four-direction `||` chain. `std::function<bool(int,int,int)>` for the recursive lambda — the type can't be inferred for self-referential lambdas.
 
 ```cpp
 #include <vector>
@@ -7813,6 +9000,7 @@ bool exist(std::vector<std::vector<char>>& board, std::string word) {
 }
 ```
 
+
 ### 80. Palindrome Partitioning
 
 #### Problem
@@ -7824,7 +9012,9 @@ Given a string `s`, partition it so that every substring in the partition is a p
 #### Explanation
 At each index `i`, try every possible end index `j >= i` for the next partition piece. If `s[i..j]` is a palindrome, include it and recurse from `j+1`. When `i` reaches the end of the string, the current partition is complete and gets recorded. The inline two-pointer palindrome check is `O(n)` per call, so total time is `O(n · 2ⁿ)`. A DP precomputation (`isPalin[i][j]`) reduces each check to `O(1)` at the cost of `O(n²)` setup, beneficial when the string is long and palindrome checks are repeated frequently. For most interview inputs the inline check is simpler and fast enough.
 
-#### Solution
+#### Python
+
+Inline `is_palindrome` closure captures `s` — no need to pass it. `s[i:j+1]` is the palindrome slice; `j+1` because the upper bound is exclusive.
 
 ```python
 def partition(s):
@@ -7848,6 +9038,10 @@ def partition(s):
     bt(0, [])
     return res
 ```
+
+#### Rust
+
+Pre-collect `chars: Vec<char>` once to index by position (Rust strings can't be indexed by byte for UTF-8 safety). `chars[i..=j].iter().collect()` rebuilds a `String` from the char slice — one allocation per palindrome found.
 
 ```rust
 fn partition(s: &str) -> Vec<Vec<String>> {
@@ -7875,6 +9069,10 @@ fn partition(s: &str) -> Vec<Vec<String>> {
     res
 }
 ```
+
+#### Go
+
+Byte indexing `s[l]` is fine because LeetCode inputs are ASCII. Substring `s[i:j+1]` is a view sharing the underlying string memory, no copy.
 
 ```go
 func partition(s string) [][]string {
@@ -7905,6 +9103,10 @@ func partition(s string) [][]string {
 }
 ```
 
+#### C++
+
+`s.substr(i, j - i + 1)` for the substring — second arg is length, not end index. Inline `isPalin` lambda captures `s` by reference.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -7931,6 +9133,7 @@ std::vector<std::vector<std::string>> partition(std::string s) {
 }
 ```
 
+
 ### 81. Letter Combinations of a Phone Number
 
 #### Problem
@@ -7942,7 +9145,9 @@ Given a string of digits `2-9`, return all possible letter combinations that the
 #### Explanation
 Each digit maps to 2-4 letters; the total combinations multiply out to at most `4ⁿ`. The backtracking walks digit by digit, branching once per letter for the current digit. Because strings are immutable in Python, concatenation (`curr + c`) creates a new string at each level — an alternative is to build a list and join at the leaf, but for short phone numbers the difference is negligible. The empty-digits guard is critical: without it the recursion would try to index into the phone map with an empty string and produce an incorrect single empty-string result instead of `[]`.
 
-#### Solution
+#### Python
+
+Dict-of-digit-to-letters keeps the mapping declarative. Empty-digits guard returns `[]` instead of `[""]` — easy to miss.
 
 ```python
 def letterCombinations(digits):
@@ -7960,6 +9165,10 @@ def letterCombinations(digits):
     bt(0, "")
     return res
 ```
+
+#### Rust
+
+Array of `&str` indexed by digit value (slots 0 and 1 are empty) — faster than a HashMap lookup. `current: &mut Vec<char>` accumulates without per-step allocation; `iter().collect()` at the leaf builds the String.
 
 ```rust
 fn letter_combinations(digits: String) -> Vec<String> {
@@ -7980,6 +9189,10 @@ fn letter_combinations(digits: String) -> Vec<String> {
 }
 ```
 
+#### Go
+
+`map[byte]string` keyed on the digit byte. `string(c)` to convert a rune to a one-character string for concatenation — Go has no implicit char-to-string coercion.
+
 ```go
 func letterCombinations(digits string) []string {
     if len(digits) == 0 { return nil }
@@ -7999,6 +9212,10 @@ func letterCombinations(digits string) []string {
     return res
 }
 ```
+
+#### C++
+
+`unordered_map<char, string>` for the phone map. `current += c` and `current.pop_back()` mutate the string in place — no per-call allocation.
 
 ```cpp
 #include <vector>
@@ -8026,6 +9243,7 @@ std::vector<std::string> letterCombinations(std::string digits) {
 }
 ```
 
+
 ### 82. N-Queens
 
 #### Problem
@@ -8037,7 +9255,9 @@ Place `n` queens on an `n×n` chessboard such that no two queens share a row, co
 #### Explanation
 The backtracking places one queen per row (since two queens can never share a row) and prunes columns and diagonals. Three sets track conflicts: `cols` for columns, and the two diagonals — all cells on the same `\` diagonal share the same `r - c` value, and all on the same `/` diagonal share `r + c`. Set membership gives `O(1)` conflict checking. For each row, iterate over columns; if the column or either diagonal is occupied, skip. Otherwise place the queen, recurse to the next row, then undo. When `r == n`, all `n` queens are placed without conflict and the board snapshot is recorded. This is more efficient than bit-mask approaches for clarity, though bitmask versions run faster in practice.
 
-#### Solution
+#### Python
+
+Three Python sets — `cols`, `pos_diag` (r+c), `neg_diag` (r-c) — give O(1) conflict checks. Board snapshot via `["".join(row) for row in board]` at each solution.
 
 ```python
 def solveNQueens(n):
@@ -8061,6 +9281,10 @@ def solveNQueens(n):
     bt(0)
     return res
 ```
+
+#### Rust
+
+Bool arrays instead of sets — `vec![false; n]` and `vec![false; 2 * n]` for the diagonals. The `(r + n) - c` offset shifts negative diagonal indices into a non-negative range.
 
 ```rust
 fn solve_n_queens(n: usize) -> Vec<Vec<String>> {
@@ -8094,6 +9318,10 @@ fn solve_n_queens(n: usize) -> Vec<Vec<String>> {
 }
 ```
 
+#### Go
+
+Maps as sets — `delete` is the explicit way to remove a key. Board reconstruction via per-row `string(row)` conversion.
+
 ```go
 func solveNQueens(n int) [][]string {
     var res [][]string
@@ -8124,6 +9352,10 @@ func solveNQueens(n int) [][]string {
 }
 ```
 
+#### C++
+
+`std::vector<bool>` for the three conflict trackers — packed bit-storage. The `neg[r-c+n]` offset trick prevents negative indices. Multiple-assignment `cols[c] = pos[r+c] = neg[r-c+n] = true` is a C++ idiom.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -8148,6 +9380,7 @@ std::vector<std::vector<std::string>> solveNQueens(int n) {
 }
 ```
 
+
 ### 83. Number of Islands
 
 #### Problem
@@ -8159,7 +9392,9 @@ Given an `m×n` binary grid of `'1'` (land) and `'0'` (water), count the number 
 #### Explanation
 Each call to DFS from an unvisited `'1'` cell represents discovering a new island. The DFS marks every reachable land cell `'0'` to prevent counting any cell twice. After the DFS returns, the whole island has been consumed and the counter increments by 1. In-place marking avoids a separate visited set. This approach modifies the input — if that's unacceptable, use a separate boolean grid. BFS is an iterative alternative with the same complexity that avoids deep recursion stacks on large grids. Both are `O(m·n)` since each cell is visited at most once.
 
-#### Solution
+#### Python
+
+In-place mark with `"0"` doubles as visited tracking — no separate set. Direction list `[(0,1),(0,-1),(1,0),(-1,0)]` is the canonical 4-way iteration.
 
 ```python
 def numIslands(grid):
@@ -8178,6 +9413,10 @@ def numIslands(grid):
                 count += 1
     return count
 ```
+
+#### Rust
+
+`Vec<Vec<char>>` mutated in place; `&mut` threaded through the recursion. `i32` for r,c lets the bounds check happen before the `as usize` cast.
 
 ```rust
 fn num_islands(mut grid: Vec<Vec<char>>) -> i32 {
@@ -8205,6 +9444,10 @@ fn num_islands(mut grid: Vec<Vec<char>>) -> i32 {
 }
 ```
 
+#### Go
+
+Four explicit `dfs(r±1, c)` / `dfs(r, c±1)` calls instead of a direction loop — shorter for 4-way DFS. Mutating `grid` in place via byte assignment.
+
 ```go
 func numIslands(grid [][]byte) int {
     rows, cols := len(grid), len(grid[0])
@@ -8224,6 +9467,10 @@ func numIslands(grid [][]byte) int {
 }
 ```
 
+#### C++
+
+Four explicit recursive calls — same shape as Go. `std::function<void(int,int)>` for the recursive lambda.
+
 ```cpp
 #include <vector>
 
@@ -8241,6 +9488,7 @@ int numIslands(std::vector<std::vector<char>>& grid) {
 }
 ```
 
+
 ### 84. Clone Graph
 
 #### Problem
@@ -8252,7 +9500,9 @@ Given a reference to a node in a connected undirected graph, return a deep copy 
 #### Explanation
 A plain recursive copy without tracking would revisit nodes and loop infinitely on cycles. The `old_to_new` map serves two purposes: it acts as a visited set to detect already-cloned nodes, and it maps each original node to its clone so neighbors can be wired correctly. When the DFS encounters a node already in the map, it returns the existing clone — this breaks cycles. The DFS creates the clone immediately and inserts it into the map *before* recursing into neighbors, which is critical for graphs with cycles (otherwise the second visit tries to create a second clone). The `null` guard handles an empty graph input.
 
-#### Solution
+#### Python
+
+Insert the new node into `old_to_new` *before* recursing — critical for cycles, otherwise the recursive call would re-create the clone. `old_to_new[n]` for both 'have I seen this?' and 'give me the clone'.
 
 ```python
 def cloneGraph(node):
@@ -8269,6 +9519,10 @@ def cloneGraph(node):
         return copy
     return dfs(node)
 ```
+
+#### Rust
+
+`Rc<RefCell<Node>>` is the standard shared-mutable graph shape in Rust. Cloning the neighbor list outside the recursive call (`let neighbors: Vec<_> = ...`) releases the immutable borrow before the recursive call needs `borrow_mut`.
 
 ```rust
 use std::collections::HashMap;
@@ -8299,6 +9553,10 @@ fn clone_graph(node: Option<Rc<RefCell<Node>>>) -> Option<Rc<RefCell<Node>>> {
 }
 ```
 
+#### Go
+
+Map keyed by pointer — `map[*Node]*Node` — leverages Go's native pointer identity. The comma-ok lookup `if copy, ok := visited[n]; ok` is the standard 'memoized' check.
+
 ```go
 type Node struct {
     Val       int
@@ -8321,6 +9579,10 @@ func cloneGraph(node *Node) *Node {
     return dfs(node)
 }
 ```
+
+#### C++
+
+`unordered_map<Node*, Node*>` for the memoization. `visited.count(n)` then `visited[n]` does two lookups; could optimize with `find()` but readability wins.
 
 ```cpp
 #include <unordered_map>
@@ -8348,6 +9610,7 @@ Node* cloneGraph(Node* node) {
 }
 ```
 
+
 ### 85. Max Area of Island
 
 #### Problem
@@ -8359,7 +9622,9 @@ Given a binary matrix where `1` is land and `0` is water, return the area of the
 #### Explanation
 This is Number of Islands (problem #83) with an extra requirement: track and maximise the area of each connected component. The DFS returns the count of cells in the island rooted at `(r, c)`: `1` for the current cell plus the sum of sizes returned by the four recursive calls. In-place marking (`grid[r][c] = 0`) prevents revisiting. The outer loop takes the maximum over all starting cells — cells already marked `0` contribute `0` from the DFS. The `max(... for ...)` generator is convenient but visits every cell; an explicit loop storing the running maximum is equivalent. Edge case: a grid with no land returns `0` because all DFS calls return `0`.
 
-#### Solution
+#### Python
+
+`1 + sum(dfs(...) for ...)` is the elegant one-liner that aggregates the four directions. Returns 0 on out-of-bounds or water, so the sum collapses naturally.
 
 ```python
 def maxAreaOfIsland(grid):
@@ -8371,6 +9636,10 @@ def maxAreaOfIsland(grid):
         return 1 + sum(dfs(r + dr, c + dc) for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)])
     return max(dfs(r, c) for r in range(rows) for c in range(cols))
 ```
+
+#### Rust
+
+Same `1 + dfs() + dfs() + dfs() + dfs()` aggregation, but explicit because Rust has no `sum` over inline iterators here without a slice. `i32` indices for bounds-safe arithmetic.
 
 ```rust
 fn max_area_of_island(mut grid: Vec<Vec<i32>>) -> i32 {
@@ -8393,6 +9662,10 @@ fn max_area_of_island(mut grid: Vec<Vec<i32>>) -> i32 {
 }
 ```
 
+#### Go
+
+Inline assignment-in-condition `if a := dfs(r, c); a > best` updates the running max in one expression — Go's only conditional-binding form.
+
 ```go
 func maxAreaOfIsland(grid [][]int) int {
     rows, cols := len(grid), len(grid[0])
@@ -8411,6 +9684,10 @@ func maxAreaOfIsland(grid [][]int) int {
     return best
 }
 ```
+
+#### C++
+
+Returns `1 + dfs(...) + dfs(...) + ...` aggregated inline. `std::function<int(int,int)>` because the recursive lambda needs a typed self-reference.
 
 ```cpp
 #include <vector>
@@ -8431,6 +9708,7 @@ int maxAreaOfIsland(std::vector<std::vector<int>>& grid) {
 }
 ```
 
+
 ### 86. Pacific Atlantic Water Flow
 
 #### Problem
@@ -8442,7 +9720,9 @@ Given an `m×n` integer matrix of heights, water flows to adjacent cells with eq
 #### Explanation
 Forward simulation (try every cell, simulate flow) is `O((mn)²)`. The reversal insight: instead of asking "can water flow from this cell to the ocean?", ask "from the ocean border, which cells can water flow *up* to?" — which means moving to adjacent cells with height **greater than or equal to** the current cell. Two separate BFS passes — one seeded from the Pacific border, one from the Atlantic — produce two reachable sets. The answer is their intersection. This is `O(m·n)` because each cell is enqueued at most once per BFS. The edge initialization includes all border cells for the respective ocean (top+left for Pacific, bottom+right for Atlantic).
 
-#### Solution
+#### Python
+
+Set comprehension for the starting cells of each ocean; `pacific & atlantic` is set intersection in one operator. List comprehension for the result conversion.
 
 ```python
 from collections import deque
@@ -8466,6 +9746,10 @@ def pacificAtlantic(heights):
     atlantic = bfs([(rows-1, c) for c in range(cols)] + [(r, cols-1) for r in range(rows)])
     return [[r, c] for r, c in pacific & atlantic]
 ```
+
+#### Rust
+
+Two visited bool grids instead of sets — index-keyed lookup is faster. Closure `bfs` captures `heights` by capture; explicit `&mut` for the queue and visited grid.
 
 ```rust
 use std::collections::VecDeque;
@@ -8498,6 +9782,10 @@ fn pacific_atlantic(heights: Vec<Vec<i32>>) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+`container/list` for the queue gives O(1) push/pop; slice-as-queue would also work. Type-assertion `e.Value.([2]int)` extracts the pair from `interface{}`.
 
 ```go
 import "container/list"
@@ -8532,6 +9820,10 @@ func pacificAtlantic(heights [][]int) [][]int {
 }
 ```
 
+#### C++
+
+`std::queue<std::pair<int,int>>` with structured binding `auto [r,c] = ...` for the dequeue. Captures `heights` by reference in the lambda.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -8563,6 +9855,7 @@ std::vector<std::vector<int>> pacificAtlantic(std::vector<std::vector<int>>& hei
 }
 ```
 
+
 ### 87. Surrounded Regions
 
 #### Problem
@@ -8574,7 +9867,9 @@ Given an `m×n` board of `'X'` and `'O'`, capture all `'O'` regions completely s
 #### Explanation
 A direct approach — flood-fill each `'O'` region and check if it touches the border — requires `O(mn)` per region and risks quadratic time. The reverse approach is cleaner: any `'O'` reachable from the border is safe; anything else is surrounded. Two-pass algorithm: (1) DFS from every border `'O'`, marking safe cells `'S'`; (2) sweep the board and convert `'S'` back to `'O'` (safe) and everything else to `'X'` (captured or already `'X'`). The border cells to seed are the first/last row and first/last column. This runs in exactly `O(m·n)` since each cell is visited at most once.
 
-#### Solution
+#### Python
+
+Two-pass: mark border-reachable Os as `'S'`, then sweep converting `'S' → 'O'`, everything else `→ 'X'`. The `r in (0, rows-1)` tuple membership is a compact border test.
 
 ```python
 def solve(board):
@@ -8593,6 +9888,10 @@ def solve(board):
         for c in range(cols):
             board[r][c] = "O" if board[r][c] == "S" else "X"
 ```
+
+#### Rust
+
+Same two-pass with `'S'` as the safe marker. Explicit `r==0||r==rows-1||c==0||c==cols-1` border check — Rust has no tuple-membership operator.
 
 ```rust
 fn solve(board: &mut Vec<Vec<char>>) {
@@ -8620,6 +9919,10 @@ fn solve(board: &mut Vec<Vec<char>>) {
 }
 ```
 
+#### Go
+
+Four explicit border conditions joined by `||`. The final sweep uses a ternary-style if-else inline.
+
 ```go
 func solve(board [][]byte) {
     rows, cols := len(board), len(board[0])
@@ -8642,6 +9945,10 @@ func solve(board [][]byte) {
 }
 ```
 
+#### C++
+
+Same shape; ternary `(board[r][c]=='S') ? 'O' : 'X'` for the final sweep. Lambda `dfs` captures `board` by reference.
+
 ```cpp
 #include <vector>
 
@@ -8659,6 +9966,7 @@ void solve(std::vector<std::vector<char>>& board) {
 }
 ```
 
+
 ### 88. Rotting Oranges
 
 #### Problem
@@ -8670,7 +9978,9 @@ In a grid, `0` = empty, `1` = fresh orange, `2` = rotten orange. Each minute, ev
 #### Explanation
 The classic single-source BFS finds shortest path from one source; multi-source BFS seeds all rotten oranges simultaneously, which naturally propagates rotting in all directions at once (optimal spread). Count fresh oranges upfront; decrement on each conversion. The time elapsed is tracked by carrying a timestamp `t` per cell in the queue (or by processing level by level). When the queue empties, if `fresh > 0` some oranges were isolated — return `-1`. Edge case: if there are no fresh oranges to begin with, return `0` immediately (the BFS loop exits without modifying `time`).
 
-#### Solution
+#### Python
+
+Multi-source BFS: enqueue every initially rotten orange with `t=0`. Tracking `fresh` count avoids a final sweep; `time = t + 1` updates on each successful infection.
 
 ```python
 from collections import deque
@@ -8697,6 +10007,10 @@ def orangesRotting(grid):
                 time = t + 1
     return time if fresh == 0 else -1
 ```
+
+#### Rust
+
+Same multi-source pattern. `i32` casts at the boundary check; the `usize` ↔ `i32` shuffling is the price for negative-bound-checking.
 
 ```rust
 use std::collections::VecDeque;
@@ -8726,6 +10040,10 @@ fn oranges_rotting(mut grid: Vec<Vec<i32>>) -> i32 {
     if fresh == 0 { time } else { -1 }
 }
 ```
+
+#### Go
+
+`container/list` for the queue; named `cell` struct keeps the tuple readable. `time` is monotonically increasing because BFS processes in level order.
 
 ```go
 import "container/list"
@@ -8758,6 +10076,10 @@ func orangesRotting(grid [][]int) int {
 }
 ```
 
+#### C++
+
+`std::tuple<int,int,int>` for the queue entries, structured binding to destructure. Multi-source seeded in the initial double loop, no separate phase.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -8782,6 +10104,7 @@ int orangesRotting(std::vector<std::vector<int>>& grid) {
 }
 ```
 
+
 ### 89. Walls and Gates
 
 #### Problem
@@ -8793,7 +10116,9 @@ Given a grid of rooms where `-1` is a wall, `0` is a gate, and `INF` (2^31 - 1) 
 #### Explanation
 Running a BFS from each gate independently would cost `O(g · m·n)` where `g` is the number of gates. Multi-source BFS seeds all gates at once and propagates outward in waves: the first time any cell is reached gives the shortest distance to any gate. The `rooms[nr][nc] == INF` condition acts as a visited check — already-filled cells are not re-enqueued. This is correct because BFS guarantees that the first time a cell is dequeued, it was reached via the shortest path (so the first fill is optimal). Walls (`-1`) are never filled because the INF check excludes them.
 
-#### Solution
+#### Python
+
+`INF = 2147483647` matches the problem's sentinel. The `rooms[nr][nc] == INF` check is both 'is this a room to fill' and 'have we already filled it'.
 
 ```python
 from collections import deque
@@ -8816,6 +10141,10 @@ def wallsAndGates(rooms):
                 q.append((nr, nc))
 ```
 
+#### Rust
+
+`i32::MAX` as the sentinel — exactly the problem's value. The 'visited' check is the INF comparison itself; once filled, it's skipped on later visits.
+
 ```rust
 use std::collections::VecDeque;
 
@@ -8836,6 +10165,10 @@ fn walls_and_gates(rooms: &mut Vec<Vec<i32>>) {
     }
 }
 ```
+
+#### Go
+
+`1<<31 - 1` for `INF` — `math.MaxInt32` would work too but the bit-shift form is more concise. `container/list` queue.
 
 ```go
 import "container/list"
@@ -8863,6 +10196,10 @@ func wallsAndGates(rooms [][]int) {
 }
 ```
 
+#### C++
+
+`INT_MAX` from `<climits>` is the sentinel. Multi-source seeding in the initial loop, BFS waves outward.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -8884,6 +10221,7 @@ void wallsAndGates(std::vector<std::vector<int>>& rooms) {
 }
 ```
 
+
 ### 90. Course Schedule
 
 #### Problem
@@ -8895,7 +10233,9 @@ Given `numCourses` and a list of prerequisite pairs `[a, b]` meaning you must ta
 #### Explanation
 A cycle in the prerequisite graph means some set of courses depends circularly on each other — impossible to finish. DFS detects cycles via a "currently visiting" set (`visiting`): if DFS reaches a node already in that set, a back-edge (cycle) is found. After successfully exploring all of a node's prerequisites, it's removed from `visiting` and its adjacency list cleared — this memoises completion and prevents re-traversal. A node with an empty adjacency list is safe (no prerequisites or already verified). The call `all(dfs(c) for c in range(numCourses))` ensures disconnected components are all checked. Kahn's BFS approach (used in problem #91) is an alternative that naturally produces a topological order.
 
-#### Solution
+#### Python
+
+Two-state via Python set (`visiting`) plus the trick of clearing `adj[c] = []` to memoize 'done'. Empty adjacency list short-circuits to True.
 
 ```python
 def canFinish(numCourses, prerequisites):
@@ -8918,6 +10258,10 @@ def canFinish(numCourses, prerequisites):
     return all(dfs(c) for c in range(numCourses))
 ```
 
+#### Rust
+
+Three-state coloring via `Vec<u8>` (0=unvisited, 1=visiting, 2=done) — cleaner than the Python adj-clearing hack. `(0..n).all(...)` for the outer pass.
+
 ```rust
 fn can_finish(num_courses: i32, prerequisites: Vec<Vec<i32>>) -> bool {
     let n = num_courses as usize;
@@ -8936,6 +10280,10 @@ fn can_finish(num_courses: i32, prerequisites: Vec<Vec<i32>>) -> bool {
     (0..n).all(|c| dfs(c, &adj, &mut state))
 }
 ```
+
+#### Go
+
+Same three-state encoding via `[]int`. Closure recursion via `var dfs func(int) bool` declare-then-assign.
 
 ```go
 func canFinish(numCourses int, prerequisites [][]int) bool {
@@ -8957,6 +10305,10 @@ func canFinish(numCourses int, prerequisites [][]int) bool {
 }
 ```
 
+#### C++
+
+Three-state via `std::vector<int>`. `std::function<bool(int)>` lambda for the recursion — the type is needed for self-reference.
+
 ```cpp
 #include <vector>
 
@@ -8977,6 +10329,7 @@ bool canFinish(int numCourses, std::vector<std::vector<int>>& prerequisites) {
 }
 ```
 
+
 ### 91. Course Schedule II
 
 #### Problem
@@ -8988,7 +10341,9 @@ Given `numCourses` and a list of `[course, prerequisite]` pairs, return a valid 
 #### Explanation
 The prerequisite graph must be a DAG for a valid ordering to exist. Kahn's algorithm tracks `indegree` — the number of prerequisites each course still needs. Courses with `indegree == 0` are ready to take immediately and seed the BFS queue. Each time a course is taken, its dependents get their `indegree` decremented; when a dependent hits zero it enters the queue. If all `numCourses` are collected the topological order is valid; if the queue empties early, a cycle exists and we return `[]`. This extends Course Schedule I naturally — you just collect the order instead of only checking feasibility.
 
-#### Solution
+#### Python
+
+`adj.get(c, [])` is the defensive read — courses with no dependents won't be in `adj`. `len(res) == numCourses` distinguishes 'topo-sort complete' from 'stopped at a cycle'.
 
 ```python
 from collections import deque
@@ -9012,6 +10367,10 @@ def findOrder(numCourses, prerequisites):
                 q.append(nb)
     return res if len(res) == numCourses else []
 ```
+
+#### Rust
+
+`(0..n).filter(|&c| indegree[c] == 0).collect()` constructs the initial queue in one expression. Output is `Vec<i32>` per LeetCode signature, so the `as i32` cast happens at result push.
 
 ```rust
 use std::collections::VecDeque;
@@ -9039,6 +10398,10 @@ fn find_order(num_courses: i32, prerequisites: Vec<Vec<i32>>) -> Vec<i32> {
     if res.len() == n { res } else { vec![] }
 }
 ```
+
+#### Go
+
+Slice-as-queue with `q = q[1:]` for the pop. The Kahn's invariant — emit only when indegree hits zero — is identical across all four implementations.
 
 ```go
 func findOrder(numCourses int, prerequisites [][]int) []int {
@@ -9074,6 +10437,10 @@ func findOrder(numCourses int, prerequisites [][]int) []int {
 }
 ```
 
+#### C++
+
+`--indegree[nb] == 0` pre-decrement-and-test combines two operations. `std::queue<int>` adapter, no custom comparator needed.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -9100,6 +10467,7 @@ std::vector<int> findOrder(int numCourses, std::vector<std::vector<int>>& prereq
 }
 ```
 
+
 ### 92. Redundant Connection
 
 #### Problem
@@ -9111,7 +10479,9 @@ Given a graph that started as a tree with one extra edge added, find and return 
 #### Explanation
 A tree on `n` nodes has exactly `n-1` edges; the input has `n` edges, so exactly one creates a cycle. We process edges in order and union the two endpoints. If both endpoints already share the same root — meaning they are already connected — this edge is the culprit and we return it immediately. Union by rank with path compression (via path halving) keeps each `find` nearly O(1). The problem guarantees exactly one redundant edge, so the first cycle-creating edge is the answer, and returning it preserves the "last such edge" tie-breaking rule since we process edges in order.
 
-#### Solution
+#### Python
+
+Path halving (`parent[x] = parent[parent[x]]`) inside `find` does compression without recursion. The `rank[px] += rank[py] == rank[px]` is the boolean-as-int trick — increments only when ranks were equal.
 
 ```python
 def findRedundantConnection(edges):
@@ -9138,6 +10508,10 @@ def findRedundantConnection(edges):
         if not union(u, v):
             return [u, v]
 ```
+
+#### Rust
+
+Inner `fn find` instead of closure (closures-recursing-themselves is awkward). Three-branch rank-tie handling spelled out because Rust has no boolean-as-int coercion.
 
 ```rust
 fn find_redundant_connection(edges: Vec<Vec<i32>>) -> Vec<i32> {
@@ -9172,6 +10546,10 @@ fn find_redundant_connection(edges: Vec<Vec<i32>>) -> Vec<i32> {
     vec![]
 }
 ```
+
+#### Go
+
+Closure for `find` via declare-then-assign. The first cycle-creating edge is the answer per the problem's tie-breaking rule.
 
 ```go
 func findRedundantConnection(edges [][]int) []int {
@@ -9208,6 +10586,10 @@ func findRedundantConnection(edges [][]int) []int {
 }
 ```
 
+#### C++
+
+`std::iota` to fill the parent array `[0, 1, 2, ..., n-1]` — saves a manual loop. `std::swap(pu, pv)` to normalize the ranks before union.
+
 ```cpp
 #include <vector>
 
@@ -9235,6 +10617,7 @@ std::vector<int> findRedundantConnection(std::vector<std::vector<int>>& edges) {
 }
 ```
 
+
 ### 93. Number of Connected Components in an Undirected Graph
 
 #### Problem
@@ -9246,7 +10629,9 @@ Given `n` nodes and a list of undirected edges, return the number of connected c
 #### Explanation
 Start with `n` isolated components. For each edge `(u, v)`, attempt to union the two nodes. If they already share a root, they are in the same component and the count doesn't change; if their roots differ, we merge and decrement the component count by 1. DFS/BFS works equally well at `O(V+E)`, but Union-Find is more concise and handles dynamic connectivity queries naturally. Path compression with union by rank keeps each operation near-constant. The final component count equals `n` minus the number of successful merges.
 
-#### Solution
+#### Python
+
+`union` returns 0 (already connected) or 1 (newly merged); summing over edges gives the merge count. `n - sum(...)` is the component count.
 
 ```python
 def countComponents(n, edges):
@@ -9271,6 +10656,10 @@ def countComponents(n, edges):
 
     return n - sum(union(u, v) for u, v in edges)
 ```
+
+#### Rust
+
+Inner `fn find` with `&mut Vec<usize>`. The merge logic spells out the three rank cases explicitly instead of inlining the boolean trick.
 
 ```rust
 fn count_components(n: i32, edges: Vec<Vec<i32>>) -> i32 {
@@ -9305,6 +10694,10 @@ fn count_components(n: i32, edges: Vec<Vec<i32>>) -> i32 {
     components
 }
 ```
+
+#### Go
+
+Closure-based `find`. Decrement `components` per successful union — clearer than computing post-hoc.
 
 ```go
 func countComponents(n int, edges [][]int) int {
@@ -9341,6 +10734,10 @@ func countComponents(n int, edges [][]int) int {
 }
 ```
 
+#### C++
+
+`std::iota(parent.begin(), parent.end(), 0)` initializes parents to identity. `std::swap` for rank-based union normalization.
+
 ```cpp
 #include <vector>
 #include <numeric>
@@ -9371,6 +10768,7 @@ int countComponents(int n, std::vector<std::vector<int>>& edges) {
 }
 ```
 
+
 ### 94. Graph Valid Tree
 
 #### Problem
@@ -9382,7 +10780,9 @@ Given `n` nodes labeled `0` to `n-1` and a list of undirected edges, determine w
 #### Explanation
 A valid tree on `n` nodes must satisfy exactly two conditions: it has `n-1` edges and contains no cycle. Checking the edge count first is a fast short-circuit — too many or too few edges fail immediately. Then we process each edge through Union-Find: if both endpoints already share the same root, adding this edge creates a cycle and we return `False`. If we union all `n-1` edges without conflict, the graph is both acyclic and connected (since a connected acyclic graph is exactly a tree). No need for a separate connectivity check because `n-1` edges with no cycle guarantees a spanning tree.
 
-#### Solution
+#### Python
+
+Edge-count short-circuit (`if len(edges) != n - 1`) is the fast fail. Rank is omitted here because the asymptotic gain doesn't matter at LeetCode scales — plain `parent[pu] = pv` union works.
 
 ```python
 def validTree(n, edges):
@@ -9403,6 +10803,10 @@ def validTree(n, edges):
         parent[pu] = pv
     return True
 ```
+
+#### Rust
+
+Same simplified union — no rank tracking. The `if pu == pv` cycle check is the only acceptance criterion beyond edge count.
 
 ```rust
 fn valid_tree(n: i32, edges: Vec<Vec<i32>>) -> bool {
@@ -9432,6 +10836,10 @@ fn valid_tree(n: i32, edges: Vec<Vec<i32>>) -> bool {
 }
 ```
 
+#### Go
+
+Plain union without rank; the path-halving compression in `find` keeps it fast enough. `for i := range parent` to initialize.
+
 ```go
 func validTree(n int, edges [][]int) bool {
     if len(edges) != n-1 {
@@ -9460,6 +10868,10 @@ func validTree(n int, edges [][]int) bool {
 }
 ```
 
+#### C++
+
+`std::iota` for the parent initialization. The simplified union shows that for tree-validity you don't need both the cycle check *and* rank — edge count + cycle check suffices.
+
 ```cpp
 #include <vector>
 #include <numeric>
@@ -9486,6 +10898,7 @@ bool validTree(int n, std::vector<std::vector<int>>& edges) {
 }
 ```
 
+
 ### 95. Word Ladder
 
 #### Problem
@@ -9497,7 +10910,9 @@ Given `beginWord`, `endWord`, and a `wordList`, return the length of the shortes
 #### Explanation
 Each word is a node; two words are adjacent if they differ by exactly one character. The problem reduces to finding the shortest path in this implicit graph — precisely what BFS solves for unweighted graphs. A naive approach tries every pair of words to build edges, costing `O(n² * m)`; instead, generate all `26 * m` one-letter mutations per word and check them against the set in `O(1)`. The `visited` set prevents revisiting words and guarantees each node is processed at most once. Checking `endWord` at generation time (not dequeue time) lets us return `steps + 1` immediately, shaving one BFS level off the loop.
 
-#### Solution
+#### Python
+
+Generate all `26 * len(word)` neighbors per step — faster than precomputing edges for short words. Checking `endWord` at generation time saves one BFS level.
 
 ```python
 from collections import deque
@@ -9520,6 +10935,10 @@ def ladderLength(beginWord, endWord, wordList):
                     q.append((next_word, steps + 1))
     return 0
 ```
+
+#### Rust
+
+Allocating `bytes.clone()` per candidate is wasteful — production code would use a buffer with a single byte mutation. The clarity wins here for an interview-style solution.
 
 ```rust
 use std::collections::{HashSet, VecDeque};
@@ -9554,6 +10973,10 @@ fn ladder_length(begin_word: String, end_word: String, word_list: Vec<String>) -
     0
 }
 ```
+
+#### Go
+
+Mutate `bs[i]` in place then restore via `orig` — avoids the per-candidate allocation that Rust suffers. `string(bs)` to hash-key the result.
 
 ```go
 func ladderLength(beginWord string, endWord string, wordList []string) int {
@@ -9594,6 +11017,10 @@ func ladderLength(beginWord string, endWord string, wordList []string) int {
 }
 ```
 
+#### C++
+
+Mutate `word[i]` in place then restore — same in-place trick as Go. `wordSet.count(word)` returns 0 or 1; structured binding `auto [word, steps] = q.front()` destructures the queue entry.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -9625,6 +11052,7 @@ int ladderLength(std::string beginWord, std::string endWord, std::vector<std::st
 }
 ```
 
+
 ### 96. Reconstruct Itinerary
 
 #### Problem
@@ -9636,7 +11064,9 @@ Given a list of airline tickets `[from, to]`, reconstruct the full itinerary sta
 #### Explanation
 This is an Eulerian path problem: find a path that visits every edge exactly once. Hierholzer's algorithm does it in linear time on the edge count. By sorting destinations in reverse order and using a stack/list as an adjacency list we pop from, each `pop()` always picks the lexicographically smallest next destination greedily. A node is appended to `res` only once all its outgoing edges are exhausted. Reversing `res` at the end gives the correct forward order. The recursive DFS here has Python stack depth risk on large inputs; an iterative version with an explicit stack is safer in practice.
 
-#### Solution
+#### Python
+
+Pre-sorting tickets in *reverse* order means `pop()` always pulls the lex-smallest destination — clever inversion that turns list pop into greedy choice. Final `res[::-1]` reverses the postorder.
 
 ```python
 def findItinerary(tickets):
@@ -9653,6 +11083,10 @@ def findItinerary(tickets):
         res.append(stack.pop())
     return res[::-1]
 ```
+
+#### Rust
+
+`BTreeMap` + `BinaryHeap<Reverse<String>>` per node — the heap gives lex-smallest pop. The `stack.last().cloned()` borrow workaround is annoying but avoids holding the borrow during `pop`.
 
 ```rust
 use std::collections::BTreeMap;
@@ -9680,6 +11114,10 @@ fn find_itinerary(tickets: Vec<Vec<String>>) -> Vec<String> {
     res
 }
 ```
+
+#### Go
+
+`sort.Reverse(sort.StringSlice(adj[k]))` sorts each adjacency list once; then `pop` from the back is the smallest. Manual reverse loop at the end.
 
 ```go
 import "sort"
@@ -9712,6 +11150,10 @@ func findItinerary(tickets [][]string) []string {
 }
 ```
 
+#### C++
+
+`std::map<std::string, std::vector<std::string>>` keyed by source. `std::sort` with `std::greater<std::string>` puts lex-smallest at the back for `pop_back` to grab.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -9742,6 +11184,7 @@ std::vector<std::string> findItinerary(std::vector<std::vector<std::string>>& ti
 }
 ```
 
+
 ### 97. Min Cost to Connect All Points
 
 #### Problem
@@ -9753,7 +11196,9 @@ Given an array of points on a 2-D plane, return the minimum cost to connect all 
 #### Explanation
 This is a dense minimum spanning tree problem — the implicit graph is fully connected with `n*(n-1)/2` edges. Prim's algorithm is preferred over Kruskal's here because generating all edges explicitly would be expensive; Prim's grows the MST one node at a time by always picking the cheapest edge to a not-yet-visited node. The lazy heap approach pushes all candidate edges for a newly added node immediately, tolerating stale entries that get skipped when popped. Since every pair of points is a potential edge, the heap can hold O(n²) entries. With only `n` points Kruskal would also work but requires materializing all edges upfront.
 
-#### Solution
+#### Python
+
+Lazy deletion: stale heap entries are skipped via the `if i in visited` guard. Manhattan distance because the problem specifies it; squared Euclidean would be a different MST.
 
 ```python
 import heapq
@@ -9775,6 +11220,10 @@ def minCostConnectPoints(points):
                 heapq.heappush(heap, (d, j))
     return cost
 ```
+
+#### Rust
+
+`Reverse((cost, idx))` for the min-heap behavior. The `if visited.contains(&i) { continue; }` is the lazy-deletion check.
 
 ```rust
 use std::collections::{BinaryHeap, HashSet};
@@ -9802,6 +11251,10 @@ fn min_cost_connect_points(points: Vec<Vec<i32>>) -> i32 {
     cost
 }
 ```
+
+#### Go
+
+Slice `[]bool` for visited (faster than map for `usize` indices). Custom `pairHeap` since Go heap requires interface implementation.
 
 ```go
 import "container/heap"
@@ -9844,6 +11297,10 @@ func minCostConnectPoints(points [][]int) int {
 }
 ```
 
+#### C++
+
+`std::priority_queue<pair<int,int>, vector<pair<int,int>>, greater<>>` — the verbose min-heap declaration. `std::unordered_set<int>` for visited.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -9874,6 +11331,7 @@ int minCostConnectPoints(std::vector<std::vector<int>>& points) {
 }
 ```
 
+
 ### 98. Network Delay Time
 
 #### Problem
@@ -9885,7 +11343,9 @@ Given a directed weighted graph with `n` nodes and edges `[u, v, w]`, find the m
 #### Explanation
 The question reduces to: find the maximum single-source shortest path from `k` to all other nodes. Dijkstra's greedy approach always expands the unvisited node with the current shortest distance, guaranteeing that when a node is first popped from the min-heap its distance is finalized. We skip stale heap entries with the `if u in dist` guard (lazy deletion). After processing, if `dist` contains fewer than `n` nodes, some node was unreachable and we return `-1`; otherwise the max distance is the answer — the last node to receive the signal determines overall delay.
 
-#### Solution
+#### Python
+
+Lazy deletion via `if u in dist: continue` — once a node has a finalized distance, ignore stale heap entries. `max(dist.values())` is the network's bottleneck node.
 
 ```python
 import heapq
@@ -9908,6 +11368,10 @@ def networkDelayTime(times, n, k):
                 heapq.heappush(heap, (d + w, v))
     return max(dist.values()) if len(dist) == n else -1
 ```
+
+#### Rust
+
+`Reverse((d, u))` for min-heap; lazy deletion via `dist.contains_key`. `dist.values().max().unwrap()` for the final aggregation.
 
 ```rust
 use std::collections::{BinaryHeap, HashMap};
@@ -9939,6 +11403,10 @@ fn network_delay_time(times: Vec<Vec<i32>>, n: i32, k: i32) -> i32 {
     }
 }
 ```
+
+#### Go
+
+Custom `minHeap97` with item struct. The lazy-deletion check uses the comma-ok idiom `if _, ok := dist[cur.node]; ok`.
 
 ```go
 import "container/heap"
@@ -9981,6 +11449,10 @@ func networkDelayTime(times [][]int, n int, k int) int {
 }
 ```
 
+#### C++
+
+`std::greater<>` template parameter for the min-heap. `std::unordered_map<int, int>` for the distance table; `.count(u)` for the visited check.
+
 ```cpp
 #include <vector>
 #include <unordered_map>
@@ -10009,6 +11481,7 @@ int networkDelayTime(std::vector<std::vector<int>>& times, int n, int k) {
 }
 ```
 
+
 ### 99. Swim in Rising Water
 
 #### Problem
@@ -10020,7 +11493,9 @@ Given an `n x n` grid where `grid[r][c]` is the elevation of cell `(r, c)`, find
 #### Explanation
 Rather than minimizing the sum of weights along a path, we want to minimize the maximum elevation encountered — a minimax path problem. Dijkstra handles this naturally by replacing the "relax with sum" step with `max(current_t, grid[nr][nc])`. The min-heap always expands the reachable cell with the lowest bottleneck elevation, so when `(n-1, n-1)` is first popped, its value is the globally optimal minimax cost. An alternative is binary search on `t` with BFS/DFS feasibility check, also `O(n² log n)`, but Dijkstra solves it in one pass without the outer binary search loop.
 
-#### Solution
+#### Python
+
+`max(t, grid[nr][nc])` replaces the usual 'sum the edge weight' — the minimax twist. Eager `visited` mark on enqueue (not dequeue) saves duplicate heap entries.
 
 ```python
 import heapq
@@ -10039,6 +11514,10 @@ def swimInWater(grid):
                 visited.add((nr, nc))
                 heapq.heappush(heap, (max(t, grid[nr][nc]), nr, nc))
 ```
+
+#### Rust
+
+`Reverse((t, r, c))` for the min-heap. Visited is a `vec![vec![false; n]; n]` 2D array, faster than a HashSet for index-keyed lookup.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -10068,6 +11547,10 @@ fn swim_in_water(grid: Vec<Vec<i32>>) -> i32 {
     -1
 }
 ```
+
+#### Go
+
+Custom `swimHeap` with named fields. The `max` of `cur.t` and `grid[nr][nc]` is via two ifs since pre-1.21 Go has no `max` builtin.
 
 ```go
 import "container/heap"
@@ -10107,6 +11590,10 @@ func swimInWater(grid [][]int) int {
 }
 ```
 
+#### C++
+
+`std::tuple<int,int,int>` for the heap entries; structured binding to destructure. `std::max(t, grid[nr][nc])` for the minimax relaxation.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -10135,6 +11622,7 @@ int swimInWater(std::vector<std::vector<int>>& grid) {
 }
 ```
 
+
 ### 100. Alien Dictionary
 
 #### Problem
@@ -10146,7 +11634,9 @@ Given a sorted list of words in an alien language, determine the character order
 #### Explanation
 Adjacent words in the sorted list reveal ordering constraints: the first position where they differ tells us `word1[j]` comes before `word2[j]` in the alien alphabet. We build a directed graph of these constraints. A valid alphabet is a topological ordering of that graph; a cycle means no valid ordering exists. The DFS uses a three-state visited map: unseen, `True` (currently in DFS stack — cycle if revisited), and `False` (fully processed). The edge case where a longer word precedes a prefix of itself (e.g., `["abc", "ab"]`) is invalid — we detect and return `""` immediately.
 
-#### Solution
+#### Python
+
+Comprehension `{c: set() for w in words for c in w}` collects all characters up front — even chars with no constraints get an empty adjacency set. The longer-word-before-prefix case (`['abc', 'ab']`) is detected before the DFS and returns `""`.
 
 ```python
 def alienOrder(words):
@@ -10179,6 +11669,10 @@ def alienOrder(words):
             return ""
     return "".join(res[::-1])
 ```
+
+#### Rust
+
+Pre-collect words into `Vec<char>` for indexable comparison — Rust strings can't be indexed by byte without UTF-8 boundary checks. The prefix-mismatch invalid case checks `w1[..min_len] == w2[..min_len]` via slice equality.
 
 ```rust
 use std::collections::{HashMap, HashSet};
@@ -10233,6 +11727,10 @@ fn alien_order(words: Vec<String>) -> String {
 }
 ```
 
+#### Go
+
+`map[byte]map[byte]bool` — nested map as adjacency-set. Byte-level string slicing is safe for ASCII inputs. Manual reverse via index swap.
+
 ```go
 func alienOrder(words []string) string {
     adj := map[byte]map[byte]bool{}
@@ -10279,6 +11777,10 @@ func alienOrder(words []string) string {
 }
 ```
 
+#### C++
+
+`adj[c]` accessed for-effect (creates empty bucket) to pre-register every character. `substr(0, minLen) == ...` for the prefix-equality check; structured binding `auto& [c, _]` in C++17.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -10317,6 +11819,7 @@ std::string alienOrder(std::vector<std::string>& words) {
 }
 ```
 
+
 ### 101. Cheapest Flights Within K Stops
 
 #### Problem
@@ -10328,7 +11831,9 @@ Given `n` cities, a list of directed flights `[from, to, price]`, a source `src`
 #### Explanation
 Standard Dijkstra can't enforce a stop limit because it may greedily settle a node via a long path before trying a shorter-hop one. Bellman-Ford relaxes edges in `k+1` rounds, where each round represents one more edge (flight) used. Crucially we copy `prices` into `tmp` before each round so a single relaxation round only uses distances computed from the previous round — preventing multi-hop chaining within one iteration. After `k+1` rounds, `prices[dst]` holds the cheapest cost reachable in at most `k+1` edges, or infinity if unreachable.
 
-#### Solution
+#### Python
+
+`prices[:]` copy each round is what makes this a true Bellman-Ford 'one more edge' iteration — using the live array would let one round chain multiple hops. `float('inf')` sentinel sidesteps overflow.
 
 ```python
 def findCheapestPrice(n, flights, src, dst, k):
@@ -10342,6 +11847,10 @@ def findCheapestPrice(n, flights, src, dst, k):
         prices = tmp
     return prices[dst] if prices[dst] != float('inf') else -1
 ```
+
+#### Rust
+
+`i64::MAX / 2` as sentinel to avoid overflow when adding edge weights. `prices.clone()` per round mirrors the Python slice copy.
 
 ```rust
 fn find_cheapest_price(n: i32, flights: Vec<Vec<i32>>, src: i32, dst: i32, k: i32) -> i32 {
@@ -10363,6 +11872,10 @@ fn find_cheapest_price(n: i32, flights: Vec<Vec<i32>>, src: i32, dst: i32, k: i3
 }
 ```
 
+#### Go
+
+`append([]int(nil), prices...)` is the standard 'clone a slice' idiom — `nil` source creates a fresh underlying array. Otherwise reads like the Python form.
+
 ```go
 func findCheapestPrice(n int, flights [][]int, src int, dst int, k int) int {
     const inf = 1<<31 - 1
@@ -10383,6 +11896,10 @@ func findCheapestPrice(n int, flights [][]int, src int, dst int, k int) int {
     return prices[dst]
 }
 ```
+
+#### C++
+
+`std::vector<int> tmp = prices` is a deep copy (vector copy semantics). `INT_MAX / 2` prevents overflow on the `prices[u] + w` addition.
 
 ```cpp
 #include <vector>
@@ -10406,6 +11923,7 @@ int findCheapestPrice(int n, std::vector<std::vector<int>>& flights, int src, in
 }
 ```
 
+
 ### 102. Climbing Stairs
 
 #### Problem
@@ -10417,7 +11935,9 @@ You can climb `1` or `2` steps at a time. Count the number of distinct ways to r
 #### Explanation
 Let `f(n)` = number of ways to reach step `n`. From step `n`, you arrived from either step `n-1` (one step) or step `n-2` (two steps), so `f(n) = f(n-1) + f(n-2)` — exactly the Fibonacci recurrence. Base cases: `f(1) = 1`, `f(2) = 2`. We only ever need the previous two values, so rolling variables `a` and `b` give O(1) space. A naive recursive approach without memoization re-computes subproblems exponentially; even top-down memo uses O(n) space unnecessarily.
 
-#### Solution
+#### Python
+
+Tuple swap `a, b = b, a + b` does the rolling update in one line. Two rolling vars beat a full DP array for O(1) space.
 
 ```python
 def climbStairs(n):
@@ -10426,6 +11946,10 @@ def climbStairs(n):
         a, b = b, a + b
     return b
 ```
+
+#### Rust
+
+Explicit temp `c` because Rust can't tuple-swap two `let mut` variables in one expression. `1..n` for `n-1` iterations.
 
 ```rust
 fn climb_stairs(n: i32) -> i32 {
@@ -10439,6 +11963,10 @@ fn climb_stairs(n: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Tuple swap `a, b = b, a+b` — Go's parallel assignment matches Python's shape exactly. No `c` temp needed.
+
 ```go
 func climbStairs(n int) int {
     a, b := 1, 1
@@ -10448,6 +11976,10 @@ func climbStairs(n int) int {
     return b
 }
 ```
+
+#### C++
+
+Explicit `int c` temp for the swap — C++ has no parallel assignment. `for (int i = 1; i < n; ++i)` runs `n-1` times.
 
 ```cpp
 int climbStairs(int n) {
@@ -10461,6 +11993,7 @@ int climbStairs(int n) {
 }
 ```
 
+
 ### 103. Min Cost Climbing Stairs
 
 #### Problem
@@ -10472,7 +12005,9 @@ Given an array `cost` where `cost[i]` is the cost of stepping on stair `i`, find
 #### Explanation
 `cost[i]` represents the cost to leave stair `i`. We build up the minimum cost to reach each stair in place: `cost[i] += min(cost[i-1], cost[i-2])`. This makes `cost[i]` the total minimum cost to step on and leave stair `i`. The "top" is one step beyond the last stair, so it's reachable from either the last or second-to-last stair — we return `min(cost[-1], cost[-2])`. Modifying the input array gives O(1) space; if we can't mutate input, two rolling variables suffice.
 
-#### Solution
+#### Python
+
+In-place mutation of `cost` is the cleanest O(1) space form. Negative indices `cost[-1]` and `cost[-2]` for the final two elements — Pythonic.
 
 ```python
 def minCostClimbingStairs(cost):
@@ -10480,6 +12015,10 @@ def minCostClimbingStairs(cost):
         cost[i] += min(cost[i - 1], cost[i - 2])
     return min(cost[-1], cost[-2])
 ```
+
+#### Rust
+
+Mutates owned `cost: Vec<i32>` (shadowed with `let mut`). `cost[i-1].min(cost[i-2])` for the recurrence.
 
 ```rust
 fn min_cost_climbing_stairs(cost: Vec<i32>) -> i32 {
@@ -10491,6 +12030,10 @@ fn min_cost_climbing_stairs(cost: Vec<i32>) -> i32 {
     cost[n - 1].min(cost[n - 2])
 }
 ```
+
+#### Go
+
+Pre-1.21 Go needs the explicit if-else for `min` — verbose but unavoidable. In-place mutation matches the Python shape.
 
 ```go
 func minCostClimbingStairs(cost []int) int {
@@ -10509,6 +12052,10 @@ func minCostClimbingStairs(cost []int) int {
 }
 ```
 
+#### C++
+
+`std::min` from `<algorithm>` for the recurrence. In-place mutation of the input vector.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -10521,6 +12068,7 @@ int minCostClimbingStairs(std::vector<int>& cost) {
 }
 ```
 
+
 ### 104. House Robber
 
 #### Problem
@@ -10532,7 +12080,9 @@ Given an array of non-negative integers representing money in each house, return
 #### Explanation
 At each house `i` there are two choices: skip it (best profit stays `curr`) or rob it (profit becomes `prev + nums[i]`, where `prev` is the best from two houses ago). The recurrence is `new_curr = max(curr, prev + nums[i])`. Only the two previous values are needed, so we maintain `prev` and `curr` as rolling scalars rather than a full DP array. A greedy approach (always rob the richer of adjacent houses) fails on inputs like `[2, 1, 1, 2]` where skipping two houses is optimal.
 
-#### Solution
+#### Python
+
+Tuple swap `prev, curr = curr, max(curr, prev + n)` does the entire state update in one line. The clearest expression of the recurrence among the four.
 
 ```python
 def rob(nums):
@@ -10541,6 +12091,10 @@ def rob(nums):
         prev, curr = curr, max(curr, prev + n)
     return curr
 ```
+
+#### Rust
+
+Explicit `next` temp because parallel assignment of `let mut` vars requires an intermediate.
 
 ```rust
 fn rob(nums: Vec<i32>) -> i32 {
@@ -10553,6 +12107,10 @@ fn rob(nums: Vec<i32>) -> i32 {
     curr
 }
 ```
+
+#### Go
+
+Two-statement update with explicit `next` and an if-comparison (pre-builtin `max`). Same shape but more lines.
 
 ```go
 func rob(nums []int) int {
@@ -10569,6 +12127,10 @@ func rob(nums []int) int {
 }
 ```
 
+#### C++
+
+Explicit `next` temp with `std::max`. Same control flow as Rust.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -10584,6 +12146,7 @@ int rob(std::vector<int>& nums) {
 }
 ```
 
+
 ### 105. House Robber II
 
 #### Problem
@@ -10595,7 +12158,9 @@ Houses are arranged in a circle so the first and last are adjacent. Return the m
 #### Explanation
 The circular constraint means you can't take both `nums[0]` and `nums[n-1]`. We handle this by splitting into two independent linear House Robber problems: one over `nums[1:]` (exclude first) and one over `nums[:-1]` (exclude last). Each subproblem is the standard linear rob with rolling variables. Taking the maximum of those two answers covers all valid cases. We also consider taking just `nums[0]` alone for the edge case where `n == 1`. This clean decomposition avoids any bespoke circular logic.
 
-#### Solution
+#### Python
+
+`max(nums[0], rob_line(nums[1:]), rob_line(nums[:-1]))` — three-argument max with the n=1 edge case folded in via `nums[0]`. Nested function captures nothing — could be top-level.
 
 ```python
 def rob(nums):
@@ -10606,6 +12171,10 @@ def rob(nums):
         return curr
     return max(nums[0], rob_line(nums[1:]), rob_line(nums[:-1]))
 ```
+
+#### Rust
+
+`&nums[1..]` and `&nums[..n-1]` slices borrow without copying — Rust's slicing wins here over Python's `nums[1:]` which copies. Method-chained `max`.
 
 ```rust
 fn rob2(nums: Vec<i32>) -> i32 {
@@ -10623,6 +12192,10 @@ fn rob2(nums: Vec<i32>) -> i32 {
     nums[0].max(rob_line(&nums[1..]).max(rob_line(&nums[..n-1])))
 }
 ```
+
+#### Go
+
+Inline closure for `robLine`. Three-way `max` via two `if` statements — annoying but pre-1.21 Go has no `max` builtin or variadic.
 
 ```go
 func rob2(nums []int) int {
@@ -10643,6 +12216,10 @@ func rob2(nums []int) int {
     return a
 }
 ```
+
+#### C++
+
+Iterator-based lambda `rob_line(begin, end)` — avoids copying the input slice. `std::max({...})` brace-list initializer for variadic max.
 
 ```cpp
 #include <vector>
@@ -10666,6 +12243,7 @@ int rob2(std::vector<int>& nums) {
 }
 ```
 
+
 ### 106. Palindromic Substrings
 
 #### Problem
@@ -10677,7 +12255,9 @@ Given a string `s`, return the number of substrings that are palindromes (single
 #### Explanation
 Every palindrome has a center: a single character (odd length) or the gap between two characters (even length). There are `2n - 1` possible centers. For each center, expand outward while the characters match, incrementing the count at each successful expansion. This is simpler and more space-efficient than Manacher's `O(n)` algorithm, which is rarely needed in interviews. A DP table approach also works but uses `O(n²)` space and gives no speed advantage over this approach. The key insight: palindromes are self-similar around their center, so expansion naturally enumerates all of them.
 
-#### Solution
+#### Python
+
+List `[(i, i), (i, i + 1)]` iterates both center types in one loop body. Single `count` variable, no need to track positions of palindromes.
 
 ```python
 def countSubstrings(s):
@@ -10690,6 +12270,10 @@ def countSubstrings(s):
                 r += 1
     return count
 ```
+
+#### Rust
+
+Two separate expand blocks because Rust doesn't have a clean Python-style 'two-tuple inline iteration'. `i32` for `l` to allow negative values as the loop-termination signal.
 
 ```rust
 fn count_substrings(s: String) -> i32 {
@@ -10714,6 +12298,10 @@ fn count_substrings(s: String) -> i32 {
 }
 ```
 
+#### Go
+
+Closure `expand` captures `count` and `n` — clean reuse. Same two-call shape as Python.
+
 ```go
 func countSubstrings(s string) int {
     count := 0
@@ -10733,6 +12321,10 @@ func countSubstrings(s string) int {
 }
 ```
 
+#### C++
+
+Lambda `expand` with `[&]` capture; `--l; ++r` in one line keeps the inner loop dense.
+
 ```cpp
 #include <string>
 
@@ -10751,6 +12343,7 @@ int countSubstrings(std::string& s) {
 }
 ```
 
+
 ### 107. Decode Ways
 
 #### Problem
@@ -10762,7 +12355,9 @@ A string of digits can be decoded where `'1'→'A'`, `'2'→'B'`, ..., `'26'→'
 #### Explanation
 At each position `i` we have two choices: decode `s[i]` as a single digit (valid as long as `s[i] != '0'`) or decode `s[i:i+2]` as a two-digit number (valid when `10 <= val <= 26`). `'0'` can never stand alone, which is the critical edge case — a leading `'0'` at any position yields zero decodings from that point. We memoize `dfs(i)` to avoid exponential recomputation; the call tree branches only when both single and double decodes are valid. The base case `dp[len(s)] = 1` represents the empty suffix having exactly one decoding (the empty string).
 
-#### Solution
+#### Python
+
+Top-down memo via `dp` dict. `int(s[i:i+2]) <= 26` is the validity check for the two-digit decode; the slice + `int` is clean but allocates per call.
 
 ```python
 def numDecodings(s):
@@ -10782,6 +12377,10 @@ def numDecodings(s):
     return dfs(0)
 ```
 
+#### Rust
+
+Bottom-up DP avoids recursion. Byte arithmetic `(b[i] - b'0') as i32 * 10 + ...` for the two-digit value — no allocation.
+
 ```rust
 fn num_decodings(s: String) -> i32 {
     let b = s.as_bytes();
@@ -10800,6 +12399,10 @@ fn num_decodings(s: String) -> i32 {
 }
 ```
 
+#### Go
+
+Bottom-up iterative. `int(s[i]-'0')*10 + int(s[i+1]-'0')` computes the two-digit value without allocation, using byte arithmetic.
+
 ```go
 func numDecodings(s string) int {
     n := len(s)
@@ -10816,6 +12419,10 @@ func numDecodings(s string) int {
     return dp[0]
 }
 ```
+
+#### C++
+
+Bottom-up with `std::vector<int>(n+1, 0)` initialized DP. Same byte-arithmetic two-digit construction as Go/Rust.
 
 ```cpp
 #include <string>
@@ -10837,6 +12444,7 @@ int numDecodings(std::string& s) {
 }
 ```
 
+
 ### 108. Coin Change
 
 #### Problem
@@ -10848,7 +12456,9 @@ Given an array of coin denominations and a target `amount`, return the minimum n
 #### Explanation
 This is the classic unbounded knapsack variant — each coin can be used any number of times. We build `dp[a]` = fewest coins to make amount `a`. The base case is `dp[0] = 0`; everything else starts at infinity. For each amount from `1` to `amount`, we try every coin: if `a - c >= 0` and `dp[a - c]` is reachable, we can reach `a` in one more coin. A greedy (always use the largest coin) fails for denominations like `[1, 3, 4]` with amount `6`, where `3+3` beats `4+1+1`. Bottom-up avoids recursive overhead and naturally builds all subproblems before they're needed.
 
-#### Solution
+#### Python
+
+`dp[0] = 0`, rest `float('inf')`. Outer amount loop, inner coin loop — unbounded knapsack form. Returns `-1` when `dp[amount]` remained infinity.
 
 ```python
 def coinChange(coins, amount):
@@ -10860,6 +12470,10 @@ def coinChange(coins, amount):
                 dp[a] = min(dp[a], dp[a - c] + 1)
     return dp[amount] if dp[amount] != float('inf') else -1
 ```
+
+#### Rust
+
+`i32::MAX` as the unreachable sentinel; `dp[a - c] != i32::MAX` guard prevents `MAX + 1` overflow.
 
 ```rust
 fn coin_change(coins: Vec<i32>, amount: i32) -> i32 {
@@ -10877,6 +12491,10 @@ fn coin_change(coins: Vec<i32>, amount: i32) -> i32 {
     if dp[amount] == i32::MAX { -1 } else { dp[amount] }
 }
 ```
+
+#### Go
+
+Same sentinel-and-guard pattern; explicit `if ... { dp[a] = ... }` because Go has no `min` builtin pre-1.21.
 
 ```go
 func coinChange(coins []int, amount int) int {
@@ -10896,6 +12514,10 @@ func coinChange(coins []int, amount int) int {
 }
 ```
 
+#### C++
+
+`INT_MAX` sentinel with the guard. `std::min` keeps the body single-line.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -10914,6 +12536,7 @@ int coinChange(std::vector<int>& coins, int amount) {
 }
 ```
 
+
 ### 109. Maximum Product Subarray
 
 #### Problem
@@ -10925,7 +12548,9 @@ Given an integer array `nums`, find the contiguous subarray with the largest pro
 #### Explanation
 Unlike Maximum Subarray (where negatives just reset), products can flip sign: multiplying a very negative `curMin` by a negative number can suddenly produce the largest value. So we track both `curMax` and `curMin` simultaneously. At each element we consider three candidates: start fresh with just `n`, extend the current max subarray, or extend the current min subarray (in case `n` is negative). We reset both to `1` when `n == 0` since a zero breaks any ongoing product. The answer is the running maximum of all `curMax` values. Initializing `res = max(nums)` handles single-element arrays correctly.
 
-#### Solution
+#### Python
+
+Three-way `max(n, cur_max * n, cur_min * n)` captures the sign-flip insight — multiplying by a negative can promote the previous min to the new max. `tmp = cur_max * n` saves the old max before overwriting it.
 
 ```python
 def maxProduct(nums):
@@ -10941,6 +12566,10 @@ def maxProduct(nums):
         res = max(res, cur_max)
     return res
 ```
+
+#### Rust
+
+Chained `.max(...).max(...)` for three-way max; same for `.min(...).min(...)`. `tmp` saves the pre-update `cur_max`.
 
 ```rust
 fn max_product(nums: Vec<i32>) -> i32 {
@@ -10959,6 +12588,10 @@ fn max_product(nums: Vec<i32>) -> i32 {
     res
 }
 ```
+
+#### Go
+
+Helper `max3`/`min3` functions — variadic max with three args, pre-1.21. The reset on `n == 0` is the same trick as the other languages.
 
 ```go
 func maxProduct(nums []int) int {
@@ -10991,6 +12624,10 @@ func min3(a, b, c int) int {
 }
 ```
 
+#### C++
+
+`std::max({n, cur_max * n, cur_min * n})` brace-list initializer for variadic max — C++11 onwards. Cleanest of the four for the three-way comparison.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -11009,6 +12646,7 @@ int maxProduct(std::vector<int>& nums) {
 }
 ```
 
+
 ### 110. Word Break
 
 #### Problem
@@ -11020,7 +12658,9 @@ Given a string `s` and a dictionary `wordDict`, return `true` if `s` can be segm
 #### Explanation
 `dp[i]` means the suffix `s[i:]` can be fully segmented. The base case `dp[n] = True` represents the empty suffix. For each position `i` from right to left, we try every word `w` in the dictionary: if `s[i:i+len(w)] == w` and `dp[i + len(w)]` is true, then `dp[i]` is true and we can break early. A recursive approach without memoization leads to exponential recomputation; converting to a trie can improve inner loop efficiency but adds complexity. The key edge case: words can overlap in unexpected ways, but the DP naturally handles all combinations.
 
-#### Solution
+#### Python
+
+Right-to-left DP with early `break` once `dp[i]` is found true. Slicing `s[i:i+len(w)]` allocates per check; for huge inputs a trie would be faster.
 
 ```python
 def wordBreak(s, wordDict):
@@ -11034,6 +12674,10 @@ def wordBreak(s, wordDict):
                 break
     return dp[0]
 ```
+
+#### Rust
+
+Byte-slice comparison `&sb[i..i+wn] == w.as_bytes()` avoids the `String` allocation. `i + wn <= n` guard prevents slice OOB before the comparison.
 
 ```rust
 fn word_break(s: String, word_dict: Vec<String>) -> bool {
@@ -11054,6 +12698,10 @@ fn word_break(s: String, word_dict: Vec<String>) -> bool {
 }
 ```
 
+#### Go
+
+`s[i:i+wn] == w` — Go string equality on slices is O(n) but doesn't allocate (the slice is a view). Same right-to-left + early break.
+
 ```go
 func wordBreak(s string, wordDict []string) bool {
     n := len(s)
@@ -11071,6 +12719,10 @@ func wordBreak(s string, wordDict []string) bool {
     return dp[0]
 }
 ```
+
+#### C++
+
+`s.substr(i, wn) == w` allocates the substring; an iterator-based compare would avoid it. For typical inputs the allocation cost is negligible.
 
 ```cpp
 #include <vector>
@@ -11093,6 +12745,7 @@ bool wordBreak(std::string& s, std::vector<std::string>& wordDict) {
 }
 ```
 
+
 ### 111. Longest Increasing Subsequence
 
 #### Problem
@@ -11104,7 +12757,9 @@ Given an integer array `nums`, return the length of the longest strictly increas
 #### Explanation
 The `O(n²)` DP approach maintains `dp[i]` = length of LIS ending at index `i`, which is correct but slow. The faster approach maintains a `tails` array where `tails[k]` is the smallest tail value of all increasing subsequences of length `k+1`. For each number `n`, we binary search `tails` for the leftmost position where `tails[pos] >= n` and replace it with `n`. If `n` is larger than everything in `tails`, we append it. The length of `tails` at the end is the LIS length. Note: `tails` does not itself represent an actual LIS (elements might not form a valid subsequence), but its length is always correct.
 
-#### Solution
+#### Python
+
+`bisect.bisect_left` finds the leftmost insertion point — exactly the patience-sorting position. Replacing in place (vs. inserting) keeps `tails` the same length.
 
 ```python
 import bisect
@@ -11120,6 +12775,10 @@ def lengthOfLIS(nums):
     return len(tails)
 ```
 
+#### Rust
+
+`partition_point` is the binary search primitive Rust uses for this — returns the index where the predicate flips false→true. `|&x| x < n` gives the equivalent of `bisect_left`.
+
 ```rust
 fn length_of_lis(nums: Vec<i32>) -> i32 {
     let mut tails: Vec<i32> = Vec::new();
@@ -11134,6 +12793,10 @@ fn length_of_lis(nums: Vec<i32>) -> i32 {
     tails.len() as i32
 }
 ```
+
+#### Go
+
+`sort.SearchInts(tails, n)` is the type-specific binary search; returns the insertion index. Modern Go would use `slices.BinarySearch`.
 
 ```go
 import "sort"
@@ -11152,6 +12815,10 @@ func lengthOfLIS(nums []int) int {
 }
 ```
 
+#### C++
+
+`std::lower_bound` returns an iterator to the first element ≥ `n` — exactly the patience-sort position. Iterator comparison `it == tails.end()` checks for 'beyond the back'.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -11167,6 +12834,7 @@ int lengthOfLIS(std::vector<int>& nums) {
 }
 ```
 
+
 ### 112. Partition Equal Subset Sum
 
 #### Problem
@@ -11178,7 +12846,9 @@ Given an integer array `nums`, determine whether it can be partitioned into two 
 #### Explanation
 If the total sum is odd, partitioning is impossible — return early. Otherwise, the question becomes: can any subset sum to `total / 2`? We maintain a set `dp` of all subset sums reachable so far. For each number `n`, we extend every existing reachable sum by adding `n`. This is the 0/1 knapsack: each element is used at most once, so we build the new set from the old one without in-place mutation. An optimized approach uses a bitset (shift and OR), giving the same asymptotic complexity with much better constants; the set version is clearer to reason about in interviews.
 
-#### Solution
+#### Python
+
+Set union `{s + n for s in dp} | dp` — concise expression of the 'extend or skip' choice. Set grows to O(target) at worst; a bool array would be faster but less elegant.
 
 ```python
 def canPartition(nums):
@@ -11190,6 +12860,10 @@ def canPartition(nums):
         dp = {s + n for s in dp} | dp
     return target in dp
 ```
+
+#### Rust
+
+Bool array DP with backwards iteration `(n..=target).rev()` — the reverse traversal is what makes 0/1 knapsack work in-place (each element used at most once).
 
 ```rust
 fn can_partition(nums: Vec<i32>) -> bool {
@@ -11208,6 +12882,10 @@ fn can_partition(nums: Vec<i32>) -> bool {
 }
 ```
 
+#### Go
+
+Same backwards-iteration trick — `for s := target; s >= n; s--`. Bool slice for the DP table; pre-1.21 has no `min` but only equality assignment is needed.
+
 ```go
 func canPartition(nums []int) bool {
     total := 0
@@ -11224,6 +12902,10 @@ func canPartition(nums []int) bool {
     return dp[target]
 }
 ```
+
+#### C++
+
+`std::vector<bool>` (bit-packed) for the DP table; same backwards-iteration trick. `std::accumulate` for the sum.
 
 ```cpp
 #include <vector>
@@ -11244,6 +12926,7 @@ bool canPartition(std::vector<int>& nums) {
 }
 ```
 
+
 ### 113. Unique Paths
 
 #### Problem
@@ -11255,7 +12938,9 @@ A robot starts at the top-left of an `m x n` grid and can only move right or dow
 #### Explanation
 `dp[j]` represents the number of ways to reach column `j` in the current row. Initially every cell in the first row has exactly one path (only rightward moves). For each subsequent row, the value at column `j` equals the number of paths from above (`dp[j]`, unchanged) plus paths from the left (`dp[j-1]`, just updated). We update left-to-right in-place, so each update correctly uses the freshly computed left value. The mathematically closed form `C(m+n-2, m-1)` computes the answer in O(min(m,n)) but requires careful handling of large intermediate values; the DP is simpler to verify.
 
-#### Solution
+#### Python
+
+1-D rolling DP: `dp[j] += dp[j - 1]` updates left-to-right, so the freshly-updated left value is correctly used. Initialization `[1] * n` represents the first row.
 
 ```python
 def uniquePaths(m, n):
@@ -11265,6 +12950,10 @@ def uniquePaths(m, n):
             dp[j] += dp[j - 1]
     return dp[-1]
 ```
+
+#### Rust
+
+`vec![1i32; n]` for the initial row. Identical structure to Python — DP collapses to one row because each cell only depends on (above, left).
 
 ```rust
 fn unique_paths(m: i32, n: i32) -> i32 {
@@ -11279,6 +12968,10 @@ fn unique_paths(m: i32, n: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Plain `make([]int, n)` then a loop to fill with 1s. Same rolling-row pattern; the algorithm is language-independent here.
+
 ```go
 func uniquePaths(m int, n int) int {
     dp := make([]int, n)
@@ -11292,6 +12985,10 @@ func uniquePaths(m int, n int) int {
 }
 ```
 
+#### C++
+
+`std::vector<int>(n, 1)` constructor fills with 1. Two nested loops, no algorithm tricks.
+
 ```cpp
 #include <vector>
 
@@ -11304,6 +13001,7 @@ int uniquePaths(int m, int n) {
 }
 ```
 
+
 ### 114. Longest Common Subsequence
 
 #### Problem
@@ -11315,7 +13013,9 @@ Given two strings `text1` and `text2`, return the length of their longest common
 #### Explanation
 `dp[i][j]` = length of the LCS of `text1[i:]` and `text2[j:]`. We fill it bottom-up from the ends. When characters match, `dp[i][j] = 1 + dp[i+1][j+1]` — we consume both. When they differ, we skip one character from either string and take the better result: `dp[i][j] = max(dp[i+1][j], dp[i][j+1])`. This two-choice structure is the hallmark of subsequence DP. Space can be reduced to O(n) by keeping only two rows at a time, but the full table is easier to reason about and reconstruct the actual sequence if needed.
 
-#### Solution
+#### Python
+
+Bottom-up 2-D DP, iterating from the end. The match case (`1 + dp[i+1][j+1]`) vs. the mismatch case (`max` of skip-from-either) is the heart of LCS.
 
 ```python
 def longestCommonSubsequence(text1, text2):
@@ -11328,6 +13028,10 @@ def longestCommonSubsequence(text1, text2):
                 dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
     return dp[0][0]
 ```
+
+#### Rust
+
+Pre-collect both strings into `Vec<u8>` — byte indexing is O(1) and equality is just byte compare. Avoids per-call string indexing overhead.
 
 ```rust
 fn longest_common_subsequence(text1: String, text2: String) -> i32 {
@@ -11346,6 +13050,10 @@ fn longest_common_subsequence(text1: String, text2: String) -> i32 {
     dp[0][0]
 }
 ```
+
+#### Go
+
+Direct byte indexing `text1[i] == text2[j]` works for ASCII. The `else if / else` ladder replaces a `max` builtin.
 
 ```go
 func longestCommonSubsequence(text1 string, text2 string) int {
@@ -11367,6 +13075,10 @@ func longestCommonSubsequence(text1 string, text2 string) int {
 }
 ```
 
+#### C++
+
+Ternary `?:` for the recurrence keeps it tight. `std::max` from `<algorithm>` for the mismatch case.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -11384,6 +13096,7 @@ int longestCommonSubsequence(std::string& text1, std::string& text2) {
 }
 ```
 
+
 ### 115. Best Time to Buy and Sell Stock with Cooldown
 
 #### Problem
@@ -11395,7 +13108,9 @@ Given an array of stock prices, maximize profit where after selling you must wai
 #### Explanation
 The state machine has three states: `hold` (currently own a share), `sold` (just sold — must rest tomorrow), and `rest` (in cooldown or idle, can buy). Transitions: from `hold` you can sell → `sold`; from `rest` you can buy → `hold` or stay in `rest`; from `sold` you must go to `rest`. Initialization: `hold = -prices[0]` (paid for first day's share), `sold = 0`, `rest = 0`. Each day these three states update simultaneously using previous-day values, so one pass suffices. The answer is `max(sold, rest)` since we'd never end on a `hold` state.
 
-#### Solution
+#### Python
+
+Three-tuple assignment `hold, sold, rest = ...` updates all three states simultaneously — correctly uses pre-update values on the right side.
 
 ```python
 def maxProfit(prices):
@@ -11404,6 +13119,10 @@ def maxProfit(prices):
         hold, sold, rest = max(hold, rest - p), hold + p, max(rest, sold)
     return max(sold, rest)
 ```
+
+#### Rust
+
+Destructuring `let (new_hold, new_sold, new_rest) = (...)` then individual assignments — Rust has no parallel assignment for `let mut` variables.
 
 ```rust
 fn max_profit_cooldown(prices: Vec<i32>) -> i32 {
@@ -11420,6 +13139,10 @@ fn max_profit_cooldown(prices: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+Parallel assignment `hold, sold, rest = ...` works like Python. Helper `max2` because pre-1.21 Go lacks a builtin.
+
 ```go
 func maxProfitCooldown(prices []int) int {
     hold, sold, rest := -prices[0], 0, 0
@@ -11434,6 +13157,10 @@ func max2(a, b int) int {
     return b
 }
 ```
+
+#### C++
+
+Three temps (`nh`, `ns`, `nr`) then assignments — same as Rust because C++ lacks parallel assignment. `std::max` keeps the body terse.
 
 ```cpp
 #include <vector>
@@ -11451,6 +13178,7 @@ int maxProfitCooldown(std::vector<int>& prices) {
 }
 ```
 
+
 ### 116. Target Sum
 
 #### Problem
@@ -11462,7 +13190,9 @@ Given an integer array `nums` and an integer `target`, assign `+` or `-` to each
 #### Explanation
 The naive approach explores all `2ⁿ` assignments — exponential. Instead, treat it as a DP over reachable sums: after processing each number, `dp[s]` is the number of ways to reach sum `s`. For each new number `n`, every existing sum `s` spawns two new sums: `s + n` and `s - n`. Using a dictionary avoids fixing array bounds for potentially negative sums. An equivalent algebraic trick lets you rephrase this as a 0/1 knapsack on a subset sum, but the dict-based approach is more intuitive. Edge case: if `target` isn't in `dp` after all numbers, return `0` via `dict.get`.
 
-#### Solution
+#### Python
+
+`dp.get(s + n, 0) + count` is the upsert pattern — defaults missing keys to 0. Dict allows negative keys without bounds checks.
 
 ```python
 def findTargetSumWays(nums, target):
@@ -11475,6 +13205,10 @@ def findTargetSumWays(nums, target):
         dp = next_dp
     return dp.get(target, 0)
 ```
+
+#### Rust
+
+`*next.entry(s + n).or_insert(0) += cnt` is the canonical entry-API upsert. Dict keys are `i32` so negatives work directly.
 
 ```rust
 use std::collections::HashMap;
@@ -11494,6 +13228,10 @@ fn find_target_sum_ways(nums: Vec<i32>, target: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Maps default-read to zero, so `next[s+n] += cnt` is the entire upsert in one line. Most concise of the four.
+
 ```go
 func findTargetSumWays(nums []int, target int) int {
     dp := map[int]int{0: 1}
@@ -11508,6 +13246,10 @@ func findTargetSumWays(nums []int, target int) int {
     return dp[target]
 }
 ```
+
+#### C++
+
+`unordered_map<int,int>::operator[]` default-constructs to 0 for missing keys — same one-liner upsert as Go. `std::move(next)` to avoid copying when swapping into `dp`.
 
 ```cpp
 #include <vector>
@@ -11528,6 +13270,7 @@ int findTargetSumWays(std::vector<int>& nums, int target) {
 }
 ```
 
+
 ### 117. Interleaving String
 
 #### Problem
@@ -11539,7 +13282,9 @@ Given strings `s1`, `s2`, and `s3`, determine whether `s3` can be formed by inte
 #### Explanation
 `dp[i][j]` = can `s3[i+j:]` be formed by interleaving `s1[i:]` and `s2[j:]`. We fill from bottom-right. Base case: `dp[m][n] = True` (both strings fully consumed). From `(i, j)`, we can advance in `s1` if `s1[i] == s3[i+j]` and `dp[i+1][j]` is true, or advance in `s2` if `s2[j] == s3[i+j]` and `dp[i][j+1]` is true. The length check `len(s1) + len(s2) != len(s3)` is a necessary early exit. Space can be reduced to `O(n)` by rolling a single row, since each row only depends on the row below and the element to its right.
 
-#### Solution
+#### Python
+
+2-D bool DP, suffix-based (`dp[i][j]` = can suffix `s3[i+j:]` be formed). Bottom-right corner is the base case; iterate towards top-left.
 
 ```python
 def isInterleave(s1, s2, s3):
@@ -11556,6 +13301,10 @@ def isInterleave(s1, s2, s3):
                 dp[i][j] = True
     return dp[0][0]
 ```
+
+#### Rust
+
+Pre-collect all three strings to byte slices. The same suffix-DP shape; `vec![vec![false; ...]; ...]` for the 2-D table.
 
 ```rust
 fn is_interleave(s1: String, s2: String, s3: String) -> bool {
@@ -11574,6 +13323,10 @@ fn is_interleave(s1: String, s2: String, s3: String) -> bool {
 }
 ```
 
+#### Go
+
+Manual 2-D slice via nested `make`. Direct byte indexing on string slices — safe for the ASCII inputs.
+
 ```go
 func isInterleave(s1 string, s2 string, s3 string) bool {
     m, n := len(s1), len(s2)
@@ -11590,6 +13343,10 @@ func isInterleave(s1 string, s2 string, s3 string) bool {
     return dp[0][0]
 }
 ```
+
+#### C++
+
+`std::vector<std::vector<bool>>` is the bit-packed 2-D bool grid. Same suffix DP shape across all four.
 
 ```cpp
 #include <vector>
@@ -11610,6 +13367,7 @@ bool isInterleave(std::string& s1, std::string& s2, std::string& s3) {
 }
 ```
 
+
 ### 118. Longest Increasing Path in a Matrix
 
 #### Problem
@@ -11621,7 +13379,9 @@ Given an `m x n` integer matrix, return the length of the longest strictly incre
 #### Explanation
 Treat the matrix as a DAG: there is a directed edge from cell `(r, c)` to a neighbor only if the neighbor's value is strictly greater. The longest increasing path equals the longest path in this DAG, which has no cycles (values are strictly increasing). We use DFS from every cell with a memo table: `memo[(r, c)]` = the longest path starting from `(r, c)`. Because the graph is acyclic, memoization is safe — we'll never revisit a cell in the same DFS chain. Each cell is computed at most once, giving `O(m * n)` total work. No explicit visited set is needed since the strictly-greater condition prevents cycles.
 
-#### Solution
+#### Python
+
+Memo via dict keyed on `(r, c)` tuple. No visited set needed because the strictly-increasing edge condition rules out cycles.
 
 ```python
 def longestIncreasingPath(matrix):
@@ -11641,6 +13401,10 @@ def longestIncreasingPath(matrix):
 
     return max(dfs(r, c) for r in range(rows) for c in range(cols))
 ```
+
+#### Rust
+
+`memo[r][c] != 0` as the 'already computed' check — 0 sentinel works because the answer is always ≥1. Function takes `&Vec<Vec<i32>>` to avoid moving the matrix.
 
 ```rust
 fn longest_increasing_path(matrix: Vec<Vec<i32>>) -> i32 {
@@ -11676,6 +13440,10 @@ fn longest_increasing_path(matrix: Vec<Vec<i32>>) -> i32 {
 }
 ```
 
+#### Go
+
+Closure recursion via `var dfs func`. The 0-sentinel-as-memo-marker is the same pattern as Rust.
+
 ```go
 func longestIncreasingPath(matrix [][]int) int {
     rows, cols := len(matrix), len(matrix[0])
@@ -11704,6 +13472,10 @@ func longestIncreasingPath(matrix [][]int) int {
     return ans
 }
 ```
+
+#### C++
+
+Return-assign trick `return memo[r][c] = res;` — assigns and returns in one statement. `std::function` for the recursive lambda.
 
 ```cpp
 #include <vector>
@@ -11734,6 +13506,7 @@ int longestIncreasingPath(std::vector<std::vector<int>>& matrix) {
 }
 ```
 
+
 ### 119. Distinct Subsequences
 
 #### Problem
@@ -11745,7 +13518,9 @@ Given strings `s` and `t`, return the number of distinct subsequences of `s` tha
 #### Explanation
 `dp[i][j]` = number of ways to form `t[j:]` using the characters in `s[i:]`. Base case: `dp[i][n] = 1` for all `i` — an empty `t` can always be matched (the empty subsequence). At each cell, we can always skip `s[i]` by inheriting from `dp[i+1][j]`. If `s[i] == t[j]`, we also add `dp[i+1][j+1]` (the count of ways to match the rest of `t` using the rest of `s`). The two choices — skip or match — are the core of this DP. Numbers can be large; the problem guarantees the answer fits in a 32-bit integer.
 
-#### Solution
+#### Python
+
+Suffix-DP: `dp[i][j]` = ways to form `t[j:]` from `s[i:]`. Always inherit `dp[i+1][j]` (skip s[i]); add `dp[i+1][j+1]` only when chars match.
 
 ```python
 def numDistinct(s, t):
@@ -11760,6 +13535,10 @@ def numDistinct(s, t):
                 dp[i][j] += dp[i + 1][j + 1]
     return dp[0][0]
 ```
+
+#### Rust
+
+`u64` for the DP cells to defend against int overflow during the additions (the final cast to `i32` is fine per the problem). Byte slices for fast indexing.
 
 ```rust
 fn num_distinct(s: String, t: String) -> i32 {
@@ -11777,6 +13556,10 @@ fn num_distinct(s: String, t: String) -> i32 {
 }
 ```
 
+#### Go
+
+`int` is 64-bit on most platforms so plain `int` suffices for the DP. Manual 2-D slice construction via `make`-in-loop.
+
 ```go
 func numDistinct(s string, t string) int {
     m, n := len(s), len(t)
@@ -11792,6 +13575,10 @@ func numDistinct(s string, t string) int {
     return dp[0][0]
 }
 ```
+
+#### C++
+
+`long long` for the DP cells — overflow defense during additions. Same suffix-DP shape; ternary would tighten the body further.
 
 ```cpp
 #include <vector>
@@ -11810,6 +13597,7 @@ int numDistinct(std::string& s, std::string& t) {
 }
 ```
 
+
 ### 120. Edit Distance
 
 #### Problem
@@ -11821,7 +13609,9 @@ Given two strings `word1` and `word2`, return the minimum number of operations (
 #### Explanation
 The classic Levenshtein distance. `dp[i][j]` = min edits to convert `word1[:i]` to `word2[:j]`. Base cases: converting to/from an empty string costs `i` or `j` deletions/insertions. When characters match (`word1[i-1] == word2[j-1]`), no edit is needed and we inherit the diagonal `dp[i-1][j-1]`. When they differ, we take 1 + the minimum of three options: delete from `word1` (`dp[i-1][j]`), insert into `word1` (`dp[i][j-1]`), or replace (`dp[i-1][j-1]`). The 1-D rolling array reuses the single-row `dp`, tracking the "previous diagonal" in `prev` before overwriting.
 
-#### Solution
+#### Python
+
+1-D rolling DP with explicit `prev = dp[:]` copy per row — captures the entire previous row before overwriting. `dp[0] = i` resets the column-0 invariant per row.
 
 ```python
 def minDistance(word1, word2):
@@ -11837,6 +13627,10 @@ def minDistance(word1, word2):
                 dp[j] = 1 + min(prev[j], dp[j - 1], prev[j - 1])
     return dp[n]
 ```
+
+#### Rust
+
+`(0..=n as i32).collect()` for the initial row `[0, 1, 2, ..., n]`. `prev = dp.clone()` per row is the same explicit copy as Python. The unused `let _ = prev` is a no-op to silence a warning.
 
 ```rust
 fn min_distance(word1: String, word2: String) -> i32 {
@@ -11858,6 +13652,10 @@ fn min_distance(word1: String, word2: String) -> i32 {
     dp[n]
 }
 ```
+
+#### Go
+
+`append([]int(nil), dp...)` for the row clone. Helper `minOf3` because pre-1.21 Go has no variadic min.
 
 ```go
 func minDistance(word1 string, word2 string) int {
@@ -11884,6 +13682,10 @@ func minOf3(a, b, c int) int {
 }
 ```
 
+#### C++
+
+`std::vector<int> prev = dp;` is a deep copy. `std::min({a, b, c})` brace-init for variadic min — C++11 onwards.
+
 ```cpp
 #include <vector>
 #include <string>
@@ -11907,7 +13709,9 @@ int minDistance(std::string& word1, std::string& word2) {
 }
 ```
 
+
 ### 121. Burst Balloons
+
 #### Problem
 Given `n` balloons with integer values, burst them one at a time; when you burst balloon `i`, you earn `nums[i-1] * nums[i] * nums[i+1]` coins (using 1 for out-of-bounds neighbors). Return the maximum coins collectable.
 
@@ -11917,7 +13721,9 @@ Given `n` balloons with integer values, burst them one at a time; when you burst
 #### Explanation
 The naive approach tries all permutations of burst order — `O(n!)`. The key insight is to think in reverse: instead of asking "which balloon do I burst first?", ask "which balloon do I burst *last* in this interval `[l, r]`?" When balloon `i` is the last to be burst in `[l, r]`, its neighbors are exactly the sentinels at `l-1` and `r+1` (since all others in the interval are already gone), so coins are `nums[l-1] * nums[i] * nums[r+1]`. Then the subproblems `dfs(l, i-1)` and `dfs(i+1, r)` are independent. Pad `nums` with `1` sentinels on both ends so boundary cases vanish. Memoize each `(l, r)` pair; there are `O(n²)` states, each iterated over `O(n)` choices, giving `O(n³)`.
 
-#### Solution
+#### Python
+
+Generator inside `max(...)` for the per-position search — concise, no intermediate list. `nums = [1] + nums + [1]` pads with sentinels so boundary multiplications are well-defined.
 
 ```python
 def maxCoins(nums):
@@ -11936,6 +13742,10 @@ def maxCoins(nums):
         return dp[(l, r)]
     return dfs(1, n - 2)
 ```
+
+#### Rust
+
+`nums.insert(0, 1)` + `push(1)` for the sentinel padding. `i.wrapping_sub(1)` for the `l, i-1` recursive call to avoid `usize` underflow when `i == 0` (the guard `l > r` catches it next).
 
 ```rust
 use std::collections::HashMap;
@@ -11967,6 +13777,10 @@ fn max_coins(mut nums: Vec<i32>) -> i32 {
     dfs(1, n - 2, &nums, &mut dp)
 }
 ```
+
+#### Go
+
+2-D `[][]int` initialized to `-1` as the 'not yet memoized' sentinel — faster than a map for dense index ranges. `append([]int{1}, append(nums, 1)...)` for sentinel padding.
 
 ```go
 func maxCoins(nums []int) int {
@@ -12001,6 +13815,10 @@ func maxCoins(nums []int) int {
 }
 ```
 
+#### C++
+
+`nums.insert(nums.begin(), 1)` then `push_back(1)` — same padding. 2-D vector initialized to `-1`; return-assign `return dp[l][r] = best;` saves a line.
+
 ```cpp
 #include <vector>
 #include <functional>
@@ -12025,7 +13843,9 @@ int maxCoins(std::vector<int>& nums) {
 }
 ```
 
+
 ### 122. Regular Expression Matching
+
 #### Problem
 Given string `s` and pattern `p` with `.` (matches any char) and `*` (matches zero or more of the preceding element), return whether `p` fully matches `s`.
 
@@ -12035,7 +13855,9 @@ Given string `s` and pattern `p` with `.` (matches any char) and `*` (matches ze
 #### Explanation
 The naive recursive solution re-evaluates the same `(i, j)` state many times. The state is "does `s[i:]` match `p[j:]`?" — memoize it. The tricky case is `*`: it can match zero of the preceding character (`dp(i, j+2)`, skipping the `x*` pair) or one-or-more if the current characters agree (`first and dp(i+1, j)`, advancing `s` while staying at the same `*` pattern position). `first` checks both literal match and `.` wildcard in one expression. Base case: if `j == len(p)`, valid only when `s` is also exhausted. Because pattern consumes from left, every recursive call moves at least one index forward, bounding depth to `O(m + n)` with `O(m·n)` unique states.
 
-#### Solution
+#### Python
+
+`p[j] in {s[i], "."}` is a set membership — handles both literal match and wildcard in one expression. The `or` chain on the `*` branch tries zero-match before one-or-more.
 
 ```python
 def isMatch(s, p):
@@ -12054,6 +13876,10 @@ def isMatch(s, p):
         return res
     return dp(0, 0)
 ```
+
+#### Rust
+
+Pre-collect to `Vec<char>` once. `dp(i, j + 2, ...)` is the zero-match-of-star branch; `dp(i + 1, j, ...)` is the consume-one-and-stay branch.
 
 ```rust
 use std::collections::HashMap;
@@ -12084,6 +13910,10 @@ fn is_match(s: String, p: String) -> bool {
 }
 ```
 
+#### Go
+
+Array-key `[2]int` for the memo map — Go map keys must be comparable, arrays are but slices aren't. `byte` comparison on `p[j]` works for ASCII.
+
 ```go
 func isMatch(s string, p string) bool {
     memo := map[[2]int]bool{}
@@ -12110,6 +13940,10 @@ func isMatch(s string, p string) bool {
 }
 ```
 
+#### C++
+
+`std::vector<std::vector<int>>` with `-1` sentinel for three-state memo (unvisited/false/true). Return-assign trick `return memo[i][j] = res;`.
+
 ```cpp
 #include <string>
 #include <vector>
@@ -12134,7 +13968,9 @@ bool isMatch(std::string s, std::string p) {
 }
 ```
 
+
 ### 123. Maximum Subarray
+
 #### Problem
 Given an integer array `nums`, find the contiguous subarray with the largest sum and return that sum. The array may contain negative numbers.
 
@@ -12144,7 +13980,9 @@ Given an integer array `nums`, find the contiguous subarray with the largest sum
 #### Explanation
 A naive approach enumerates all O(n²) subarrays. Kadane's insight: the best subarray ending at position `i` is either just `nums[i]` alone, or `nums[i]` appended to the best subarray ending at `i-1`. If the running sum `cur` goes negative, it can only hurt any future subarray, so restart from `nums[i]`. This greedy decision is locally optimal and provably globally optimal. Track the overall maximum in `res` as you go. Initialize both to `nums[0]` to handle all-negative arrays correctly — returning the largest single element rather than zero.
 
-#### Solution
+#### Python
+
+Two-line update: `cur = max(n, cur + n)` (start fresh or extend), `res = max(res, cur)` (track best). Init both to `nums[0]` to handle all-negative arrays.
 
 ```python
 def maxSubArray(nums):
@@ -12154,6 +13992,10 @@ def maxSubArray(nums):
         res = max(res, cur)
     return res
 ```
+
+#### Rust
+
+`nums.iter().skip(1)` for the slice from index 1 — borrows the tail without allocation. Method-form `n.max(cur + n)` and `res.max(cur)`.
 
 ```rust
 fn max_sub_array(nums: Vec<i32>) -> i32 {
@@ -12166,6 +14008,10 @@ fn max_sub_array(nums: Vec<i32>) -> i32 {
     res
 }
 ```
+
+#### Go
+
+Pre-1.21 explicit if-else for both `max` calls. Otherwise identical control flow to the others.
 
 ```go
 func maxSubArray(nums []int) int {
@@ -12184,6 +14030,10 @@ func maxSubArray(nums []int) int {
 }
 ```
 
+#### C++
+
+`std::max` from `<algorithm>`. Indexed loop from 1 because we initialize cur/res from index 0.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -12198,7 +14048,9 @@ int maxSubArray(std::vector<int>& nums) {
 }
 ```
 
+
 ### 124. Jump Game
+
 #### Problem
 Given an array `nums` where `nums[i]` is the maximum jump length from index `i`, return whether you can reach the last index starting from index 0.
 
@@ -12208,7 +14060,9 @@ Given an array `nums` where `nums[i]` is the maximum jump length from index `i`,
 #### Explanation
 A BFS/DP approach tracks reachability for every index — O(n) space and conceptually heavier. The greedy insight: scan right-to-left, maintaining a `goal` (the leftmost index that can reach the end). If index `i` can jump to `goal` or beyond (`i + nums[i] >= goal`), then `i` itself becomes the new goal. By the time you reach index 0, if `goal == 0` then index 0 can transitively reach the end. Zeros in the array are the only real obstacles — an index with `nums[i] == 0` can't propagate the goal leftward. This single left-to-right goal-update pass is optimal.
 
-#### Solution
+#### Python
+
+Right-to-left greedy: track the leftmost reachable goal. If `i + nums[i] >= goal`, then `i` itself reaches the goal — promote it to the new goal.
 
 ```python
 def canJump(nums):
@@ -12218,6 +14072,10 @@ def canJump(nums):
             goal = i
     return goal == 0
 ```
+
+#### Rust
+
+`nums[i] as usize` cast inside the comparison. `(0..nums.len() - 1).rev()` for backwards iteration; range-rev is the idiomatic form.
 
 ```rust
 fn can_jump(nums: Vec<i32>) -> bool {
@@ -12231,6 +14089,10 @@ fn can_jump(nums: Vec<i32>) -> bool {
 }
 ```
 
+#### Go
+
+Manual reverse for-loop. No casts needed — Go's `int` for everything.
+
 ```go
 func canJump(nums []int) bool {
     goal := len(nums) - 1
@@ -12242,6 +14104,10 @@ func canJump(nums []int) bool {
     return goal == 0
 }
 ```
+
+#### C++
+
+`(int)nums.size() - 2` cast to keep `i` signed for the `>= 0` termination. Same right-to-left greedy.
 
 ```cpp
 #include <vector>
@@ -12255,7 +14121,9 @@ bool canJump(std::vector<int>& nums) {
 }
 ```
 
+
 ### 125. Jump Game II
+
 #### Problem
 Given `nums` where `nums[i]` is the max jump from index `i`, return the minimum number of jumps to reach the last index. A solution is guaranteed to exist.
 
@@ -12265,7 +14133,9 @@ Given `nums` where `nums[i]` is the max jump from index `i`, return the minimum 
 #### Explanation
 BFS on jump levels works but requires a queue. The greedy insight models BFS levels implicitly with two pointers: `cur_end` (end of the current BFS level) and `cur_far` (farthest we can reach from any position in this level). At each index `i`, extend `cur_far`. When `i` hits `cur_end`, we must take a jump — increment `jumps` and advance `cur_end` to `cur_far`. We stop the loop at `len(nums) - 1` (not inclusive) because reaching the last index itself doesn't require an additional jump. This is equivalent to BFS expanding level by level, but uses O(1) space instead of a queue.
 
-#### Solution
+#### Python
+
+Three-state greedy: `cur_end` is the level boundary, `cur_far` is the next-level's farthest reach. Increment jumps when `i` hits `cur_end`.
 
 ```python
 def jump(nums):
@@ -12277,6 +14147,10 @@ def jump(nums):
             cur_end = cur_far
     return jumps
 ```
+
+#### Rust
+
+`nums[i] as usize` for safe addition with the index. Stop one short of the last index — reaching it doesn't need a new jump.
 
 ```rust
 fn jump(nums: Vec<i32>) -> i32 {
@@ -12294,6 +14168,10 @@ fn jump(nums: Vec<i32>) -> i32 {
 }
 ```
 
+#### Go
+
+Pre-1.21 explicit if for the `cur_far` update. Same level-boundary pattern.
+
 ```go
 func jump(nums []int) int {
     jumps, curEnd, curFar := 0, 0, 0
@@ -12309,6 +14187,10 @@ func jump(nums []int) int {
     return jumps
 }
 ```
+
+#### C++
+
+`std::max` for the `cur_far` extension. Stops the loop at `size() - 1` to avoid an unnecessary final jump.
 
 ```cpp
 #include <vector>
@@ -12327,7 +14209,9 @@ int jump(std::vector<int>& nums) {
 }
 ```
 
+
 ### 126. Gas Station
+
 #### Problem
 Given `gas[i]` and `cost[i]` for `n` stations in a circle, find the starting station index that allows you to complete the circuit without running dry, or return -1 if none exists.
 
@@ -12337,7 +14221,9 @@ Given `gas[i]` and `cost[i]` for `n` stations in a circle, find the starting sta
 #### Explanation
 First check feasibility: if total gas is less than total cost, no solution exists. This can be proven: the problem guarantees at most one valid start, so if the total is sufficient, exactly one exists. For the single-pass approach, track a running `tank` surplus. Whenever `tank` drops below zero, the current `start` through index `i` is invalid (any sub-segment of a failing segment also fails), so reset `tank = 0` and move `start` to `i + 1`. The last candidate `start` when the loop ends is the answer, because the feasibility check already guarantees a solution exists. No need to simulate the second loop from `start`.
 
-#### Solution
+#### Python
+
+Two passes folded into one: total feasibility check, then greedy reset-on-deficit. The `start = i + 1` reset is the key — a failing prefix can never be part of a valid start.
 
 ```python
 def canCompleteCircuit(gas, cost):
@@ -12351,6 +14237,10 @@ def canCompleteCircuit(gas, cost):
             start = i + 1
     return start
 ```
+
+#### Rust
+
+`gas.iter().zip(cost.iter()).map(|(g, c)| g - c).sum()` chains the total computation in one expression. The reset logic mirrors Python.
 
 ```rust
 fn can_complete_circuit(gas: Vec<i32>, cost: Vec<i32>) -> i32 {
@@ -12370,6 +14260,10 @@ fn can_complete_circuit(gas: Vec<i32>, cost: Vec<i32>) -> i32 {
     start as i32
 }
 ```
+
+#### Go
+
+Two explicit loops — one for the total, one for the greedy scan. No iterator chaining, but the algorithm shape is identical.
 
 ```go
 func canCompleteCircuit(gas []int, cost []int) int {
@@ -12392,6 +14286,10 @@ func canCompleteCircuit(gas []int, cost []int) int {
 }
 ```
 
+#### C++
+
+`std::numeric_limits`-free version — manual sum loop. The reset trick (`tank = 0; start = i + 1`) is the language-independent core.
+
 ```cpp
 #include <vector>
 #include <numeric>
@@ -12409,7 +14307,9 @@ int canCompleteCircuit(std::vector<int>& gas, std::vector<int>& cost) {
 }
 ```
 
+
 ### 127. Hand of Straights
+
 #### Problem
 Given a hand of cards and a `groupSize`, determine if the cards can be rearranged into groups of `groupSize` consecutive cards.
 
@@ -12419,7 +14319,9 @@ Given a hand of cards and a `groupSize`, determine if the cards can be rearrange
 #### Explanation
 If `len(hand) % groupSize != 0`, it's immediately impossible. The greedy strategy: always form groups starting from the smallest available card. Sorting the unique card values gives the correct order to process. For each smallest card with a non-zero count `n`, we need `n` groups starting there, so we consume `n` copies of each of the next `groupSize` cards. If any of those cards has fewer than `n` copies, return False. Using a plain dict with sorted keys is equivalent to using a sorted map — we visit keys in ascending order and decrement counts. A missing key means zero count, which triggers the failure.
 
-#### Solution
+#### Python
+
+Plain dict with `sorted(count)` to iterate keys in order — works for the small key range. `count.get(i, 0)` defaults missing keys to 0.
 
 ```python
 def isNStraightHand(hand, groupSize):
@@ -12437,6 +14339,10 @@ def isNStraightHand(hand, groupSize):
                 count[i] -= n
     return True
 ```
+
+#### Rust
+
+`BTreeMap` keeps keys sorted automatically — avoids the manual sort. The `keys: Vec<i32> = ...collect()` snapshots before mutation to avoid borrow conflicts during the inner loop.
 
 ```rust
 use std::collections::BTreeMap;
@@ -12465,6 +14371,10 @@ fn is_n_straight_hand(hand: Vec<i32>, group_size: i32) -> bool {
     true
 }
 ```
+
+#### Go
+
+Two-step: collect keys, `sort.Ints(keys)`. Map reads default to zero, so `count[i] < n` works without comma-ok.
 
 ```go
 import "sort"
@@ -12497,6 +14407,10 @@ func isNStraightHand(hand []int, groupSize int) bool {
 }
 ```
 
+#### C++
+
+`std::map<int,int>` (red-black tree) iterates in key order — no separate sort. Structured binding `auto& [card, n]` in the range-for.
+
 ```cpp
 #include <vector>
 #include <map>
@@ -12517,7 +14431,9 @@ bool isNStraightHand(std::vector<int>& hand, int groupSize) {
 }
 ```
 
+
 ### 128. Merge Triplets to Form Target Triplet
+
 #### Problem
 Given a list of triplets and a `target` triplet, you can merge any triplets by taking the element-wise maximum. Return whether it's possible to form exactly `target` by merging some subset of triplets.
 
@@ -12527,7 +14443,9 @@ Given a list of triplets and a `target` triplet, you can merge any triplets by t
 #### Explanation
 Any triplet with an element exceeding the corresponding target element would contaminate the merge (element-wise max can only grow, never shrink), so we discard those upfront. Among the remaining "safe" triplets, the best we can do is take the element-wise max — this represents using all safe triplets simultaneously. If that maximum equals `target`, we can achieve it; otherwise we cannot. No sorting or backtracking needed: the filter and max are independent per element. Edge case: if `target` itself is not achievable, `res` will fall short on at least one dimension.
 
-#### Solution
+#### Python
+
+Filter triplets in place via `if t[0] <= target[0] and ...`; element-wise max grows `res` toward the target. Final equality check confirms success.
 
 ```python
 def mergeTriplets(triplets, target):
@@ -12537,6 +14455,10 @@ def mergeTriplets(triplets, target):
             res = [max(res[i], t[i]) for i in range(3)]
     return res == target
 ```
+
+#### Rust
+
+Fixed `[i32; 3]` array on the stack. Method-form `res[i].max(t[i])` for the per-element max.
 
 ```rust
 fn merge_triplets(triplets: Vec<Vec<i32>>, target: Vec<i32>) -> bool {
@@ -12551,6 +14473,10 @@ fn merge_triplets(triplets: Vec<Vec<i32>>, target: Vec<i32>) -> bool {
     res[0] == target[0] && res[1] == target[1] && res[2] == target[2]
 }
 ```
+
+#### Go
+
+Stack-allocated `[3]int` array. Pre-1.21 explicit `if` for the max comparison.
 
 ```go
 func mergeTriplets(triplets [][]int, target []int) bool {
@@ -12568,6 +14494,10 @@ func mergeTriplets(triplets [][]int, target []int) bool {
 }
 ```
 
+#### C++
+
+`std::vector<int>(3, 0)` initialized to zeros. `res == target` is element-wise vector equality — concise final check.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -12584,7 +14514,9 @@ bool mergeTriplets(std::vector<std::vector<int>>& triplets, std::vector<int>& ta
 }
 ```
 
+
 ### 129. Partition Labels
+
 #### Problem
 Given string `s`, partition it into as many parts as possible such that each letter appears in at most one part. Return the list of partition sizes.
 
@@ -12594,7 +14526,9 @@ Given string `s`, partition it into as many parts as possible such that each let
 #### Explanation
 To ensure a character stays within one part, the part must extend at least to the last occurrence of that character. Precompute `last[c]` — the last index where each character appears — in one scan. Then do a second scan: at each index `i`, extend the current partition's `end` to `max(end, last[c])`. When `i == end`, no character in the current window has a later occurrence, so we close this partition, record its size, and start a fresh one. The alphabet size is constant (26), so the `last` dict is O(1) space. The algorithm is essentially interval merging driven by character constraints.
 
-#### Solution
+#### Python
+
+Dict comprehension `{c: i for i, c in enumerate(s)}` writes the last-occurrence map in one pass (later writes overwrite). Two-pass total: build map, then scan with boundary extension.
 
 ```python
 def partitionLabels(s):
@@ -12608,6 +14542,10 @@ def partitionLabels(s):
             start = i + 1
     return res
 ```
+
+#### Rust
+
+Fixed `[usize; 26]` array for the last-occurrence table — stack-allocated. Byte arithmetic `(b - b'a') as usize` for the index.
 
 ```rust
 fn partition_labels(s: String) -> Vec<i32> {
@@ -12631,6 +14569,10 @@ fn partition_labels(s: String) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Stack-allocated `[26]int` array. Same two-pass structure as Python/Rust.
+
 ```go
 func partitionLabels(s string) []int {
     last := [26]int{}
@@ -12651,6 +14593,10 @@ func partitionLabels(s string) []int {
     return res
 }
 ```
+
+#### C++
+
+`int last[26] = {}` value-initializes to zero on the stack. `std::max` for the boundary extension.
 
 ```cpp
 #include <vector>
@@ -12674,7 +14620,9 @@ std::vector<int> partitionLabels(std::string s) {
 }
 ```
 
+
 ### 130. Valid Parenthesis String
+
 #### Problem
 Given a string containing `(`, `)`, and `*` (which can be `(`, `)`, or empty), return whether the string can be valid.
 
@@ -12684,7 +14632,9 @@ Given a string containing `(`, `)`, and `*` (which can be `(`, `)`, or empty), r
 #### Explanation
 A DP approach over all possible assignments of `*` is O(n²). The greedy insight: instead of tracking one exact open count, track the range `[lo, hi]` of possible open-paren counts across all valid wildcard choices. `(` increments both bounds; `)` decrements both; `*` widens the range (decrement `lo`, increment `hi`). If `hi` drops below zero, even the most optimistic interpretation has more closes than opens — impossible. Clamp `lo` to zero because a negative open count is meaningless. At the end, valid iff `lo == 0` (there exists an assignment that closes all opens).
 
-#### Solution
+#### Python
+
+Track `[lo, hi]` range of possible open counts; `*` widens the range. `lo = max(lo, 0)` clamps negative opens (can't have less than zero).
 
 ```python
 def checkValidString(s):
@@ -12702,6 +14652,10 @@ def checkValidString(s):
     return lo == 0
 ```
 
+#### Rust
+
+Pattern match on `char` with three arms. The `if lo < 0 { lo = 0 }` clamp is explicit; no method-form `max` for this in-place mutation.
+
 ```rust
 fn check_valid_string(s: String) -> bool {
     let (mut lo, mut hi) = (0i32, 0i32);
@@ -12717,6 +14671,10 @@ fn check_valid_string(s: String) -> bool {
     lo == 0
 }
 ```
+
+#### Go
+
+`switch c { case '(': ... }` for the three-way branch. The `if lo < 0` clamp is the same shape as Rust.
 
 ```go
 func checkValidString(s string) bool {
@@ -12741,6 +14699,10 @@ func checkValidString(s string) bool {
 }
 ```
 
+#### C++
+
+if-else-if ladder for the three branches. `std::max(lo, 0)` for the clamp.
+
 ```cpp
 #include <string>
 #include <algorithm>
@@ -12758,7 +14720,9 @@ bool checkValidString(std::string s) {
 }
 ```
 
+
 ### 131. Insert Interval
+
 #### Problem
 Given a sorted list of non-overlapping intervals and a `newInterval`, insert it into the list (merging if necessary) and return the updated sorted list.
 
@@ -12768,7 +14732,9 @@ Given a sorted list of non-overlapping intervals and a `newInterval`, insert it 
 #### Explanation
 The scan naturally falls into three phases: (1) intervals that end before `newInterval` starts — copy as-is; (2) intervals that overlap with `newInterval` — merge by expanding `newInterval`'s bounds; (3) intervals that start after `newInterval` ends — append `newInterval` then copy the rest. Because the input is already sorted, phases 1 and 3 are simply prefix/suffix copies. The merging in phase 2 works by extending `newInterval` greedily. When we first detect the new interval no longer overlaps (phase 3), we can short-circuit with a slice copy. The empty-input edge case is handled naturally — we exit the loop and append `newInterval`.
 
-#### Solution
+#### Python
+
+Three-phase scan with the early `return res + intervals[i:]` short-circuit — slice concatenation in one line. The merging phase mutates `newInterval` so the final append uses the expanded version.
 
 ```python
 def insert(intervals, newInterval):
@@ -12784,6 +14750,10 @@ def insert(intervals, newInterval):
     res.append(newInterval)
     return res
 ```
+
+#### Rust
+
+`inserted` flag tracks whether `new_iv` has been appended — needed because we don't have Python's early-return-with-slice form. `.clone()` on each `iv` because we're pushing into a new `Vec`.
 
 ```rust
 fn insert(intervals: Vec<Vec<i32>>, new_interval: Vec<i32>) -> Vec<Vec<i32>> {
@@ -12806,6 +14776,10 @@ fn insert(intervals: Vec<Vec<i32>>, new_interval: Vec<i32>) -> Vec<Vec<i32>> {
 }
 ```
 
+#### Go
+
+`append(res, intervals[i:]...)` for the early-exit suffix copy — exact mirror of Python's slice concat. Slices are cheap views, so no per-element copy.
+
 ```go
 func insert(intervals [][]int, newInterval []int) [][]int {
     res := [][]int{}
@@ -12823,6 +14797,10 @@ func insert(intervals [][]int, newInterval []int) [][]int {
     return append(res, newInterval)
 }
 ```
+
+#### C++
+
+Manual `for (int j = i; ...)` to copy the suffix — no `append(slice...)` equivalent. The `newInterval` is mutated in place during the merge phase.
 
 ```cpp
 #include <vector>
@@ -12848,7 +14826,9 @@ std::vector<std::vector<int>> insert(std::vector<std::vector<int>>& intervals, s
 }
 ```
 
+
 ### 132. Merge Intervals
+
 #### Problem
 Given a list of intervals, merge all overlapping intervals and return the minimal non-overlapping list.
 
@@ -12858,7 +14838,9 @@ Given a list of intervals, merge all overlapping intervals and return the minima
 #### Explanation
 Without sorting, you'd need O(n²) to find all overlapping pairs. After sorting by start time, any interval that overlaps the previous one must have its start ≤ the previous end (since starts are non-decreasing). When overlap is detected, extend the last result interval's end to the max of both ends — this handles the case where one interval is fully contained within another. When no overlap, push a new interval. Sorting dominates the runtime; the merge pass is O(n). Edge: a single interval is handled correctly since we initialize `res` with `intervals[0]`.
 
-#### Solution
+#### Python
+
+`intervals.sort()` sorts by first element by default — `[s, e]` lists compare lexicographically. `res[-1][1] = max(...)` mutates the last result in place.
 
 ```python
 def merge(intervals):
@@ -12871,6 +14853,10 @@ def merge(intervals):
             res.append([s, e])
     return res
 ```
+
+#### Rust
+
+`sort_by_key(|iv| iv[0])` is explicit about the sort key. `res.last_mut().unwrap()` to mutate the last interval — borrow checker requires the explicit `.unwrap()`.
 
 ```rust
 fn merge(mut intervals: Vec<Vec<i32>>) -> Vec<Vec<i32>> {
@@ -12887,6 +14873,10 @@ fn merge(mut intervals: Vec<Vec<i32>>) -> Vec<Vec<i32>> {
     res
 }
 ```
+
+#### Go
+
+`sort.Slice` with a closure comparator. `res[len(res)-1]` indexes the last interval — pre-1.21 has no `slices.LastIndex` helper.
 
 ```go
 import "sort"
@@ -12908,6 +14898,10 @@ func merge(intervals [][]int) [][]int {
 }
 ```
 
+#### C++
+
+Default `std::sort` on `vector<vector<int>>` compares lexicographically. `res.back()[1]` accesses the last interval's end — `back()` returns a reference.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -12926,7 +14920,9 @@ std::vector<std::vector<int>> merge(std::vector<std::vector<int>>& intervals) {
 }
 ```
 
+
 ### 133. Non-overlapping Intervals
+
 #### Problem
 Given intervals, return the minimum number of intervals to remove so that no two intervals overlap.
 
@@ -12936,7 +14932,9 @@ Given intervals, return the minimum number of intervals to remove so that no two
 #### Explanation
 This is the classic activity selection problem in disguise. Sorting by end time and greedily keeping the interval that finishes earliest maximizes the number of non-overlapping intervals we keep — equivalently, minimizing removals. Why sort by end and not start? An interval with a smaller end leaves more room for subsequent intervals; keeping it is always at least as good as keeping a later-ending alternative that also starts at the same time. Walk left to right: if the current interval starts at or after `end`, keep it (update `end`); otherwise it overlaps — count it as a removal. `end` is initialized to negative infinity so the first interval is always kept.
 
-#### Solution
+#### Python
+
+Sort by end (`key=lambda x: x[1]`) — the activity-selection insight. `float('-inf')` initial `end` ensures the first interval is always kept.
 
 ```python
 def eraseOverlapIntervals(intervals):
@@ -12950,6 +14948,10 @@ def eraseOverlapIntervals(intervals):
             res += 1
     return res
 ```
+
+#### Rust
+
+`sort_by_key(|iv| iv[1])` sorts by end. `i32::MIN` as the initial sentinel; `i32::MIN` won't overflow when compared.
 
 ```rust
 fn erase_overlap_intervals(mut intervals: Vec<Vec<i32>>) -> i32 {
@@ -12966,6 +14968,10 @@ fn erase_overlap_intervals(mut intervals: Vec<Vec<i32>>) -> i32 {
     res
 }
 ```
+
+#### Go
+
+Manual closure for the by-end sort. `-1 << 62` for a very negative sentinel — avoids importing `math.MinInt64`.
 
 ```go
 import "sort"
@@ -12987,6 +14993,10 @@ func eraseOverlapIntervals(intervals [][]int) int {
 }
 ```
 
+#### C++
+
+Lambda comparator `[](auto& a, auto& b){ return a[1] < b[1]; }` for the by-end sort. `INT_MIN` from `<climits>` for the initial sentinel.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -13004,7 +15014,9 @@ int eraseOverlapIntervals(std::vector<std::vector<int>>& intervals) {
 }
 ```
 
+
 ### 134. Meeting Rooms
+
 #### Problem
 Given a list of meeting time intervals `[start, end]`, determine if a person can attend all meetings without any overlap.
 
@@ -13014,7 +15026,9 @@ Given a list of meeting time intervals `[start, end]`, determine if a person can
 #### Explanation
 After sorting by start time, any overlap must occur between adjacent intervals — a later interval can only overlap with its predecessor because predecessors are sorted. Check each consecutive pair: if the next meeting starts before the current one ends (`intervals[i][0] < intervals[i-1][1]`), return False. If `end` equals `start` exactly, that is not an overlap (meetings are back-to-back). The sort is necessary; without it, a meeting starting much later but appearing earlier in the list could mask an overlap. An empty or single-element input trivially returns True.
 
-#### Solution
+#### Python
+
+Default sort puts intervals by start time. The adjacent-pair check `intervals[i][0] < intervals[i-1][1]` — `<` not `<=` because back-to-back meetings (`end == start`) don't conflict.
 
 ```python
 def canAttendMeetings(intervals):
@@ -13024,6 +15038,10 @@ def canAttendMeetings(intervals):
             return False
     return True
 ```
+
+#### Rust
+
+`sort_by_key(|iv| iv[0])` for explicit by-start. Loop with `1..intervals.len()` for the adjacent comparison.
 
 ```rust
 fn can_attend_meetings(mut intervals: Vec<Vec<i32>>) -> bool {
@@ -13036,6 +15054,10 @@ fn can_attend_meetings(mut intervals: Vec<Vec<i32>>) -> bool {
     true
 }
 ```
+
+#### Go
+
+Closure comparator; otherwise identical. The strict `<` on the overlap check is the language-independent invariant.
 
 ```go
 import "sort"
@@ -13053,6 +15075,10 @@ func canAttendMeetings(intervals [][]int) bool {
 }
 ```
 
+#### C++
+
+Default `std::sort` does lexicographic comparison — works because start is the first element. Same adjacent-pair check shape.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -13066,7 +15092,9 @@ bool canAttendMeetings(std::vector<std::vector<int>>& intervals) {
 }
 ```
 
+
 ### 135. Meeting Rooms II
+
 #### Problem
 Given meeting time intervals, return the minimum number of conference rooms required to hold all meetings simultaneously.
 
@@ -13076,7 +15104,9 @@ Given meeting time intervals, return the minimum number of conference rooms requ
 #### Explanation
 The minimum rooms equals the maximum number of overlapping meetings at any instant. After sorting by start time, process meetings in order: the min-heap tracks the earliest end time among all currently occupied rooms. If the next meeting starts at or after that earliest end (`heap[0] <= s`), the room is free — replace its end time with the new meeting's end (same room count). Otherwise, a new room is needed — push the new end time. `heapreplace` is an atomic pop-push that's slightly more efficient than separate operations. The heap size at the end equals the peak simultaneous count. Don't forget to import `heapq` in Python.
 
-#### Solution
+#### Python
+
+`heapreplace` is pop-then-push in one O(log n) operation — slightly faster than the two separate calls. The heap holds end times only; the count is the room count.
 
 ```python
 import heapq
@@ -13091,6 +15121,10 @@ def minMeetingRooms(intervals):
             heapq.heappush(heap, e)
     return len(heap)
 ```
+
+#### Rust
+
+`Reverse(i32)` for min-heap behavior. Pattern destructure `if let Some(&Reverse(top)) = heap.peek()` to inspect without popping.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -13110,6 +15144,10 @@ fn min_meeting_rooms(mut intervals: Vec<Vec<i32>>) -> i32 {
     heap.len() as i32
 }
 ```
+
+#### Go
+
+Custom `MinHeap` via the heap interface. `(*h)[0]` to peek the top — Go's heap doesn't expose `Peek` directly.
 
 ```go
 import (
@@ -13142,6 +15180,10 @@ func minMeetingRooms(intervals [][]int) int {
 }
 ```
 
+#### C++
+
+`std::priority_queue<int, vector<int>, greater<int>>` is the min-heap incantation. `heap.top()` peeks without popping.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -13158,7 +15200,9 @@ int minMeetingRooms(std::vector<std::vector<int>>& intervals) {
 }
 ```
 
+
 ### 136. Minimum Interval to Include Each Query
+
 #### Problem
 Given intervals and queries, for each query value return the size (`end - start + 1`) of the smallest interval containing it, or -1 if none.
 
@@ -13168,7 +15212,9 @@ Given intervals and queries, for each query value return the size (`end - start 
 #### Explanation
 Processing queries offline (sorted) lets us sweep through intervals left to right. As we advance each query `q`, we add all intervals whose start ≤ `q` to a min-heap keyed by size. The heap always contains candidates that have started by `q`. Before reading the answer, evict stale intervals whose end < `q` (they no longer contain `q`). The top of the heap is then the smallest valid interval. Storing results in a dict keyed by query value lets us reconstruct answers in original query order at the end. Eviction is lazy — only pop when the top is invalid — so each interval is pushed and popped at most once.
 
-#### Solution
+#### Python
+
+Three-way state: (a) sorted intervals advance with a pointer `i`, (b) min-heap of (size, end) candidates, (c) lazy eviction of stale intervals. Dict for result reordering to original query order.
 
 ```python
 import heapq
@@ -13188,6 +15234,10 @@ def minInterval(intervals, queries):
         res[q] = heap[0][0] if heap else -1
     return [res[q] for q in queries]
 ```
+
+#### Rust
+
+`Reverse((i32, i32))` for the min-heap on tuples. Borrow gymnastics around `peek()` returning `Option<&Reverse<(i32,i32)>>` — pattern destructure is verbose but explicit.
 
 ```rust
 use std::collections::BinaryHeap;
@@ -13216,6 +15266,10 @@ fn min_interval(mut intervals: Vec<Vec<i32>>, queries: Vec<i32>) -> Vec<i32> {
     queries.iter().map(|q| *res_map.get(q).unwrap_or(&-1)).collect()
 }
 ```
+
+#### Go
+
+Custom `SizeEndHeap` storing `[2]int` arrays — keys must be comparable but arrays are. The lazy eviction `(*h)[0][1] < q` reads the top size+end without popping.
 
 ```go
 import (
@@ -13264,6 +15318,10 @@ func minInterval(intervals [][]int, queries []int) []int {
 }
 ```
 
+#### C++
+
+`priority_queue<pair<int,int>, vector<pair<int,int>>, greater<P>>` — the min-heap by tuple-lex. `heap.top().first` for size, `.second` for end.
+
 ```cpp
 #include <vector>
 #include <queue>
@@ -13294,7 +15352,9 @@ std::vector<int> minInterval(std::vector<std::vector<int>>& intervals, std::vect
 }
 ```
 
+
 ### 137. Rotate Image
+
 #### Problem
 Given an `n x n` matrix, rotate it 90 degrees clockwise in-place without using extra space.
 
@@ -13304,7 +15364,9 @@ Given an `n x n` matrix, rotate it 90 degrees clockwise in-place without using e
 #### Explanation
 A naive approach using a copy matrix is O(n²) space. The in-place trick decomposes the 90° clockwise rotation into two simple operations: (1) transpose — swap `matrix[i][j]` with `matrix[j][i]` for all `i < j`; (2) reverse each row horizontally. After transposing, element `(i, j)` sits at `(j, i)`, and reversing rows maps `(j, i)` to `(j, n-1-i)`, which is exactly the 90° clockwise destination of original `(i, j)`. Both steps are in-place and require only pair swaps. The loop bound `j in range(i+1, n)` avoids double-swapping the diagonal.
 
-#### Solution
+#### Python
+
+Two-step rotation: transpose (swap across the diagonal) then reverse each row. `row.reverse()` is in-place. The `j in range(i + 1, n)` upper-triangle bound avoids double-swapping the diagonal.
 
 ```python
 def rotate(matrix):
@@ -13315,6 +15377,10 @@ def rotate(matrix):
     for row in matrix:
         row.reverse()
 ```
+
+#### Rust
+
+Explicit `tmp` temp — Rust can't index-swap two `matrix[i][j]` and `matrix[j][i]` via parallel assignment because both borrow `matrix`. `row.reverse()` for the row reversal.
 
 ```rust
 fn rotate(matrix: &mut Vec<Vec<i32>>) {
@@ -13332,6 +15398,10 @@ fn rotate(matrix: &mut Vec<Vec<i32>>) {
 }
 ```
 
+#### Go
+
+Parallel assignment `matrix[i][j], matrix[j][i] = matrix[j][i], matrix[i][j]` — Go allows this swap. Manual two-pointer reverse on each row because `slices.Reverse` is post-1.21.
+
 ```go
 func rotate(matrix [][]int) {
     n := len(matrix)
@@ -13348,6 +15418,10 @@ func rotate(matrix [][]int) {
 }
 ```
 
+#### C++
+
+`std::swap(matrix[i][j], matrix[j][i])` for the transpose. `std::reverse(row.begin(), row.end())` for the row reversal.
+
 ```cpp
 #include <vector>
 #include <algorithm>
@@ -13362,7 +15436,9 @@ void rotate(std::vector<std::vector<int>>& matrix) {
 }
 ```
 
+
 ### 138. Spiral Matrix
+
 #### Problem
 Given an `m x n` matrix, return all elements in spiral order (right, down, left, up, repeat inward).
 
@@ -13372,7 +15448,9 @@ Given an `m x n` matrix, return all elements in spiral order (right, down, left,
 #### Explanation
 Track four boundaries: `top`, `bottom`, `left`, `right`. Each iteration of the outer loop traverses one full ring: left-to-right on the top row, top-to-bottom on the right column, right-to-left on the bottom row (only if rows remain), bottom-to-top on the left column (only if columns remain). After each traversal, shrink the corresponding boundary inward. The inner guards (`if top <= bottom` and `if left <= right`) prevent double-counting the same row or column when the matrix has an odd number of rows or columns — otherwise a single remaining row would be traversed twice (once top-to-right, once bottom right-to-left).
 
-#### Solution
+#### Python
+
+Slice `matrix[top][left:right+1]` for the top row in one shot; reverse slice `matrix[bottom][left:right+1][::-1]` for the bottom. Saves explicit indexed loops.
 
 ```python
 def spiralOrder(matrix):
@@ -13394,6 +15472,10 @@ def spiralOrder(matrix):
             left += 1
     return res
 ```
+
+#### Rust
+
+All four directions via explicit loops — Rust has no equivalent of Python's `[::-1]` slice-and-reverse for `Vec`. `(left..=right).rev()` for the right-to-left traversal.
 
 ```rust
 fn spiral_order(matrix: Vec<Vec<i32>>) -> Vec<i32> {
@@ -13418,6 +15500,10 @@ fn spiral_order(matrix: Vec<Vec<i32>>) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+Four explicit indexed loops. `range` not used because the column-traversal needs decreasing direction.
+
 ```go
 func spiralOrder(matrix [][]int) []int {
     res := []int{}
@@ -13440,6 +15526,10 @@ func spiralOrder(matrix [][]int) []int {
     return res
 }
 ```
+
+#### C++
+
+Four explicit indexed loops; no slice operations. The inner-guard `if (top <= bottom)` / `if (left <= right)` checks are the language-independent correctness anchors.
 
 ```cpp
 #include <vector>
@@ -13466,7 +15556,9 @@ std::vector<int> spiralOrder(std::vector<std::vector<int>>& matrix) {
 }
 ```
 
+
 ### 139. Set Matrix Zeroes
+
 #### Problem
 Given an `m x n` matrix, if any element is 0, set its entire row and column to 0, in-place.
 
@@ -13476,7 +15568,9 @@ Given an `m x n` matrix, if any element is 0, set its entire row and column to 0
 #### Explanation
 A naive approach stores all zero positions in a set — O(m + n) space. The trick: repurpose `matrix[r][0]` and `matrix[0][c]` as markers for "row r should be zeroed" and "column c should be zeroed". But this collides on `matrix[0][0]`, so track the first row and first column separately with two booleans before any marking. Then scan the interior (rows/cols 1+) to mark. Then zero the interior based on markers. Finally, zero the first row and column if their original booleans were set. The order matters: mark before zeroing, and handle the first row/col last to avoid using a zeroed marker prematurely.
 
-#### Solution
+#### Python
+
+`any(... for c in range(cols))` generator + first-row/col flags. The interior is processed first; first row and col are zeroed last to avoid using stale markers.
 
 ```python
 def setZeroes(matrix):
@@ -13498,6 +15592,10 @@ def setZeroes(matrix):
         for r in range(rows):
             matrix[r][0] = 0
 ```
+
+#### Rust
+
+`(0..cols).any(|c| matrix[0][c] == 0)` — closure-based any. Same first-row/col-flag pattern; explicit `for` loops for the zeroing phases.
 
 ```rust
 fn set_zeroes(matrix: &mut Vec<Vec<i32>>) {
@@ -13525,6 +15623,10 @@ fn set_zeroes(matrix: &mut Vec<Vec<i32>>) {
 }
 ```
 
+#### Go
+
+Two explicit linear scans for the first-row/col flags. Pre-1.21 has no `slices.Contains` or `Any` — manual is unavoidable.
+
 ```go
 func setZeroes(matrix [][]int) {
     rows, cols := len(matrix), len(matrix[0])
@@ -13546,6 +15648,10 @@ func setZeroes(matrix [][]int) {
 }
 ```
 
+#### C++
+
+Linear scans for the flags. The three-phase order (flags → interior mark → interior zero → first row/col zero) is the language-independent correctness anchor.
+
 ```cpp
 #include <vector>
 
@@ -13565,7 +15671,9 @@ void setZeroes(std::vector<std::vector<int>>& matrix) {
 }
 ```
 
+
 ### 140. Happy Number
+
 #### Problem
 A number is "happy" if repeatedly replacing it with the sum of squares of its digits eventually reaches 1. Return whether `n` is happy.
 
@@ -13575,7 +15683,9 @@ A number is "happy" if repeatedly replacing it with the sum of squares of its di
 #### Explanation
 If `n` is not happy, the digit-square sequence enters a cycle (it's proven to always include 4). A hashset approach detects the cycle but uses O(k) space for cycle length `k`. Floyd's algorithm avoids that: run a slow pointer one step at a time and a fast pointer two steps at a time. If they meet and `fast != 1`, a cycle was detected (unhappy). If `fast == 1`, the number is happy. The `next_n` function converts to string to cleanly iterate digits — simple and correct. In practice the cycle is short, so this terminates quickly.
 
-#### Solution
+#### Python
+
+`sum(int(d) ** 2 for d in str(x))` — string conversion + comprehension for digit-square sum. Floyd's slow/fast eliminates the O(k) cycle-set.
 
 ```python
 def isHappy(n):
@@ -13587,6 +15697,10 @@ def isHappy(n):
         fast = next_n(next_n(fast))
     return fast == 1
 ```
+
+#### Rust
+
+Pure integer arithmetic for `next_n` — `x % 10` and `x /= 10` extracts digits. Faster than string conversion for tight loops.
 
 ```rust
 fn is_happy(n: i32) -> bool {
@@ -13609,6 +15723,10 @@ fn is_happy(n: i32) -> bool {
 }
 ```
 
+#### Go
+
+Same integer-arithmetic `nextN`. Closure captures nothing — just for scoping.
+
 ```go
 func isHappy(n int) bool {
     nextN := func(x int) int {
@@ -13629,6 +15747,10 @@ func isHappy(n int) bool {
 }
 ```
 
+#### C++
+
+Lambda `nextN` with `auto` parameter inference (C++14+). Same integer-arithmetic digit extraction.
+
 ```cpp
 #include <functional>
 
@@ -13647,7 +15769,9 @@ bool isHappy(int n) {
 }
 ```
 
+
 ### 141. Plus One
+
 #### Problem
 Given a non-negative integer represented as an array of its digits (most significant first), increment it by one and return the resulting array.
 
@@ -13657,7 +15781,9 @@ Given a non-negative integer represented as an array of its digits (most signifi
 #### Explanation
 Iterate from the least significant digit (rightmost) toward the most significant. If the current digit is less than 9, simply increment it and return — no carry propagates. If it is 9, set it to 0 (carries over) and continue left. The only case requiring an extra digit is an all-9 number (e.g., `[9,9,9]` → `[1,0,0,0]`): after the loop exits all digits are 0, so prepend a 1. This is equivalent to grade-school addition but without needing to handle general multi-digit addends.
 
-#### Solution
+#### Python
+
+Early return as soon as you hit a non-9 — most inputs exit on the first iteration. `[1] + digits` prepends only when every digit was 9.
 
 ```python
 def plusOne(digits):
@@ -13668,6 +15794,10 @@ def plusOne(digits):
         digits[i] = 0
     return [1] + digits
 ```
+
+#### Rust
+
+`digits.insert(0, 1)` is O(n) but only happens in the all-9s case. Early return on first non-9 keeps the typical case at O(1) modifications.
 
 ```rust
 fn plus_one(mut digits: Vec<i32>) -> Vec<i32> {
@@ -13683,6 +15813,10 @@ fn plus_one(mut digits: Vec<i32>) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+`append([]int{1}, digits...)` — the standard 'prepend to slice' idiom, allocating a new backing array.
+
 ```go
 func plusOne(digits []int) []int {
     for i := len(digits) - 1; i >= 0; i-- {
@@ -13695,6 +15829,10 @@ func plusOne(digits []int) []int {
     return append([]int{1}, digits...)
 }
 ```
+
+#### C++
+
+`digits.insert(digits.begin(), 1)` is O(n) — `std::vector` doesn't have an O(1) push_front. Rare hit case so acceptable.
 
 ```cpp
 #include <vector>
@@ -13709,7 +15847,9 @@ std::vector<int> plusOne(std::vector<int>& digits) {
 }
 ```
 
+
 ### 142. Pow(x, n)
+
 #### Problem
 Implement `pow(x, n)` — compute `x` raised to the power `n`, where `n` can be negative.
 
@@ -13719,7 +15859,9 @@ Implement `pow(x, n)` — compute `x` raised to the power `n`, where `n` can be 
 #### Explanation
 Naive repeated multiplication is O(n). Binary exponentiation halves the exponent each step: if `n` is odd, multiply the result by the current `x` (capturing the "leftover" factor), then square `x` and halve `n`. This processes each bit of `n` once, giving O(log n) multiplications. Negative exponents are handled by inverting `x` and negating `n` upfront. Watch for the edge case where `n == INT_MIN` in languages with fixed-width integers: `-INT_MIN` overflows — use unsigned or cast to 64-bit before negating. Python handles this transparently with arbitrary-precision integers.
 
-#### Solution
+#### Python
+
+Arbitrary-precision int means `-n` after `n = INT_MIN` works without overflow concern. `n % 2` and `n //= 2` are the bit operations expressed arithmetically.
 
 ```python
 def myPow(x, n):
@@ -13733,6 +15875,10 @@ def myPow(x, n):
         n //= 2
     return res
 ```
+
+#### Rust
+
+Cast through `i64` then to `u64` defends against `INT_MIN` negation overflow. Bit ops (`m & 1`, `m >>= 1`) are unsigned-safe.
 
 ```rust
 fn my_pow(mut x: f64, mut n: i32) -> f64 {
@@ -13759,6 +15905,10 @@ fn my_pow(mut x: f64, mut n: i32) -> f64 {
 }
 ```
 
+#### Go
+
+Go's `int` is 64-bit on most platforms — `-n` doesn't overflow even at the LeetCode int32 input range. Plain arithmetic, no casting.
+
 ```go
 func myPow(x float64, n int) float64 {
     if n < 0 {
@@ -13777,6 +15927,10 @@ func myPow(x float64, n int) float64 {
 }
 ```
 
+#### C++
+
+Cast to `long long m = n` first so `-m` doesn't overflow when `n == INT_MIN`. Bit ops use unsigned-safe shifts on the widened type.
+
 ```cpp
 #include <cstdint>
 
@@ -13793,7 +15947,9 @@ double myPow(double x, int n) {
 }
 ```
 
+
 ### 143. Multiply Strings
+
 #### Problem
 Given two non-negative integers as strings `num1` and `num2`, return their product as a string without converting them to integers directly.
 
@@ -13803,7 +15959,9 @@ Given two non-negative integers as strings `num1` and `num2`, return their produ
 #### Explanation
 Digit `num1[i]` and `num2[j]` contribute to positions `i+j` (tens carry) and `i+j+1` (units) in the result array (both indices from the left, with the result array of length `m+n`). Process digits right-to-left for both numbers. At each pair, multiply the digits, add to `res[p2]`, then propagate the carry to `res[p1]`. This is exactly what you do by hand. At the end, strip leading zeros and convert. The early-exit for "0" avoids leading-zero issues in the output (`lstrip("0")` on an empty product would return `""` instead of `"0"`).
 
-#### Solution
+#### Python
+
+`if "0" in [num1, num2]` is the early-exit for the leading-zero pitfall — `lstrip("0")` of "000" would return "" instead of "0". `int(num1[i])` converts each char to int.
 
 ```python
 def multiply(num1, num2):
@@ -13819,6 +15977,10 @@ def multiply(num1, num2):
             res[p1] += total // 10
     return "".join(map(str, res)).lstrip("0")
 ```
+
+#### Rust
+
+Pre-convert each string to `Vec<u32>` of digit values via `(b - b'0') as u32` — saves repeated byte arithmetic in the inner loop. `char::from_digit` for the result formatting.
 
 ```rust
 fn multiply(num1: String, num2: String) -> String {
@@ -13841,6 +16003,10 @@ fn multiply(num1: String, num2: String) -> String {
 }
 ```
 
+#### Go
+
+`strings.Builder` for the result composition. `byte('0' + d)` to convert digit back to ASCII char. `strings.TrimLeft` for the leading-zero strip.
+
 ```go
 import "strings"
 
@@ -13862,6 +16028,10 @@ func multiply(num1 string, num2 string) string {
     return strings.TrimLeft(sb.String(), "0")
 }
 ```
+
+#### C++
+
+`s.find_first_not_of('0')` returns the first non-zero index; `npos` means the entire string was zeros. The substr from that index strips leading zeros.
 
 ```cpp
 #include <string>
@@ -13887,7 +16057,9 @@ std::string multiply(std::string num1, std::string num2) {
 }
 ```
 
+
 ### 144. Detect Squares
+
 #### Problem
 Design a data structure supporting `add(point)` and `count(point)` — the latter returns the number of ways to form an axis-aligned square using the query point as one corner and three previously added points.
 
@@ -13897,7 +16069,9 @@ Design a data structure supporting `add(point)` and `count(point)` — the latte
 #### Explanation
 An axis-aligned square is fully determined by any diagonal pair of its corners. Fix the query point `(px, py)` as one corner. For every other point `(x, y)` in the set, check if it forms a valid diagonal with `(px, py)`: the distances along both axes must be equal and non-zero (`abs(py - y) == abs(px - x)` and `x != px`). If so, the other two corners are `(x, py)` and `(px, y)` — multiply their counts (duplicate points can independently contribute). Iterating over a deduplicated point set keeps the count loop at O(distinct points). Storing separate `pt_counts` and `pts` set makes it easy to handle duplicate additions.
 
-#### Solution
+#### Python
+
+`tuple(point)` because lists aren't hashable. Iterating `self.pts` (unique points) keeps the count loop O(distinct points) — not O(adds).
 
 ```python
 class DetectSquares:
@@ -13919,6 +16093,10 @@ class DetectSquares:
             res += self.pt_counts.get((x, py), 0) * self.pt_counts.get((px, y), 0)
         return res
 ```
+
+#### Rust
+
+`HashSet<(i32, i32)>` for distinct points; tuples are `Hash` automatically. The `*self.pt_counts.get(&...).unwrap_or(&0)` dereferences-or-default pattern.
 
 ```rust
 use std::collections::{HashMap, HashSet};
@@ -13951,6 +16129,10 @@ impl DetectSquares {
 }
 ```
 
+#### Go
+
+`[2]int` arrays as map keys — Go requires comparable types, arrays qualify (slices don't). Manual abs because pre-1.21 has no `int` `Abs`.
+
 ```go
 type DetectSquares struct {
     ptCounts map[[2]int]int
@@ -13981,6 +16163,10 @@ func (ds *DetectSquares) Count(point []int) int {
     return res
 }
 ```
+
+#### C++
+
+Custom `PairHash` for `unordered_map<pair<int,int>, ..., PairHash>` — pair isn't hashable by default in C++. The hash combines two `int`s into a `long long` for the underlying hash.
 
 ```cpp
 #include <unordered_map>
@@ -14018,7 +16204,9 @@ public:
 };
 ```
 
+
 ### 145. Single Number
+
 #### Problem
 Given an array where every element appears exactly twice except one, find that single element. Must run in O(n) time and O(1) space.
 
@@ -14028,7 +16216,9 @@ Given an array where every element appears exactly twice except one, find that s
 #### Explanation
 A hashset approach finds the answer in O(n) time but uses O(n) space. XOR is the key: `a ^ a == 0` (any value XORed with itself cancels) and `a ^ 0 == a` (identity). XOR is also commutative and associative, so XORing all elements together causes every duplicated number to cancel, leaving only the single element. No sorting, no extra memory, just one pass. This is one of the most elegant constant-space tricks in competitive programming.
 
-#### Solution
+#### Python
+
+Three-line `for / res ^= n / return`. XOR's self-cancelling property does all the work.
 
 ```python
 def singleNumber(nums):
@@ -14038,11 +16228,19 @@ def singleNumber(nums):
     return res
 ```
 
+#### Rust
+
+`nums.iter().fold(0, |acc, &n| acc ^ n)` — fold with XOR is the canonical reduce pattern, one line.
+
 ```rust
 fn single_number(nums: Vec<i32>) -> i32 {
     nums.iter().fold(0, |acc, &n| acc ^ n)
 }
 ```
+
+#### Go
+
+Plain accumulating loop — Go has no `Reduce` or `fold` in the stdlib (pre-1.21 even with generics).
 
 ```go
 func singleNumber(nums []int) int {
@@ -14054,6 +16252,10 @@ func singleNumber(nums []int) int {
 }
 ```
 
+#### C++
+
+`std::reduce` / `std::accumulate` with bit-xor lambda would also work, but the plain loop is the canonical form for clarity.
+
 ```cpp
 #include <vector>
 
@@ -14064,7 +16266,9 @@ int singleNumber(std::vector<int>& nums) {
 }
 ```
 
+
 ### 146. Number of 1 Bits
+
 #### Problem
 Return the number of `1` bits (Hamming weight) in the binary representation of an unsigned 32-bit integer.
 
@@ -14074,7 +16278,9 @@ Return the number of `1` bits (Hamming weight) in the binary representation of a
 #### Explanation
 A naive approach tests each of the 32 bits individually — always 32 iterations. Brian Kernighan's trick is faster: `n & (n - 1)` clears the lowest set bit of `n` in one operation. Why? Subtracting 1 flips the lowest set bit to 0 and all bits below it to 1; ANDing with the original clears those bits. Incrementing a counter each iteration counts exactly as many set bits as there are. The loop runs only `k` times (number of set bits), which is at most 32. For sparse bit patterns this is meaningfully faster, and it reads more clearly than masking each bit individually.
 
-#### Solution
+#### Python
+
+Brian Kernighan's `n &= n - 1` clears the lowest set bit per iteration — runs `k` times where `k` is the popcount. Faster than checking every bit when input is sparse.
 
 ```python
 def hammingWeight(n):
@@ -14085,11 +16291,19 @@ def hammingWeight(n):
     return res
 ```
 
+#### Rust
+
+`n.count_ones()` is the standard library popcount — single instruction on modern hardware. Cleanest of the four.
+
 ```rust
 fn hamming_weight(n: u32) -> i32 {
     n.count_ones() as i32
 }
 ```
+
+#### Go
+
+`bits.OnesCount32(n)` from `math/bits` — same single-instruction popcount.
 
 ```go
 import "math/bits"
@@ -14098,6 +16312,10 @@ func hammingWeight(n uint32) int {
     return bits.OnesCount32(n)
 }
 ```
+
+#### C++
+
+`__builtin_popcount` is the GCC/Clang intrinsic; `std::popcount` from `<bit>` is the C++20 portable equivalent.
 
 ```cpp
 #include <cstdint>
@@ -14108,7 +16326,9 @@ int hammingWeight(uint32_t n) {
 }
 ```
 
+
 ### 147. Counting Bits
+
 #### Problem
 Given `n`, return an array `ans` of length `n + 1` where `ans[i]` is the number of `1` bits in `i`.
 
@@ -14118,7 +16338,9 @@ Given `n`, return an array `ans` of length `n + 1` where `ans[i]` is the number 
 #### Explanation
 Computing popcount for each number independently is O(n · 32) — fine for small n but wastes prior work. The recurrence `dp[i] = dp[i >> 1] + (i & 1)` reuses already-computed results: `i >> 1` is `i` with its last bit removed (already in `dp`), and `(i & 1)` adds 1 if `i` is odd. Since `i >> 1 < i`, `dp[i >> 1]` is always available when computing `dp[i]`. Base case `dp[0] = 0` is correct. This builds the entire table in a single O(n) pass with no branching or popcount instruction needed.
 
-#### Solution
+#### Python
+
+Recurrence `dp[i] = dp[i >> 1] + (i & 1)` — the bit-shift trick gives O(n) total work, beats per-element popcount.
 
 ```python
 def countBits(n):
@@ -14127,6 +16349,10 @@ def countBits(n):
         dp[i] = dp[i >> 1] + (i & 1)
     return dp
 ```
+
+#### Rust
+
+Cast `(i & 1) as i32` because `usize & usize` returns `usize`. Same one-line recurrence as Python.
 
 ```rust
 fn count_bits(n: i32) -> Vec<i32> {
@@ -14138,6 +16364,10 @@ fn count_bits(n: i32) -> Vec<i32> {
 }
 ```
 
+#### Go
+
+`dp[i>>1] + i&1` — Go's operator precedence makes the parens unnecessary (`+` binds tighter than `&`, but here it works out).
+
 ```go
 func countBits(n int) []int {
     dp := make([]int, n+1)
@@ -14147,6 +16377,10 @@ func countBits(n int) []int {
     return dp
 }
 ```
+
+#### C++
+
+Identical to Python in structure; could use `std::popcount` per element but the recurrence is asymptotically the same and cache-friendlier.
 
 ```cpp
 #include <vector>
@@ -14159,7 +16393,9 @@ std::vector<int> countBits(int n) {
 }
 ```
 
+
 ### 148. Reverse Bits
+
 #### Problem
 Reverse the bits of a given 32-bit unsigned integer and return the result.
 
@@ -14169,7 +16405,9 @@ Reverse the bits of a given 32-bit unsigned integer and return the result.
 #### Explanation
 There are exactly 32 bits to reverse. At each step: shift `res` left by 1 to make room, then OR in the least significant bit of `n` (`n & 1`), then shift `n` right by 1 to expose the next bit. After 32 iterations, `res` holds the reversed bit pattern. This is O(1) because the loop bound is constant (32). Rust and Go expose this as a standard library intrinsic (`reverse_bits` / `bits.Reverse32`) backed by a single CPU instruction on modern hardware. Python integers are arbitrary-precision, so no special masking is needed — the problem constraints guarantee a 32-bit input.
 
-#### Solution
+#### Python
+
+Plain shift-and-OR loop because Python has no fixed-width int. 32 iterations is constant, so O(1).
 
 ```python
 def reverseBits(n):
@@ -14180,11 +16418,19 @@ def reverseBits(n):
     return res
 ```
 
+#### Rust
+
+`n.reverse_bits()` is a single CPU instruction (RBIT on ARM, software emulation otherwise). One line.
+
 ```rust
 fn reverse_bits(n: u32) -> u32 {
     n.reverse_bits()
 }
 ```
+
+#### Go
+
+`bits.Reverse32(num)` from `math/bits` — same intrinsic. Cleanest of the four.
 
 ```go
 import "math/bits"
@@ -14193,6 +16439,10 @@ func reverseBits(num uint32) uint32 {
     return bits.Reverse32(num)
 }
 ```
+
+#### C++
+
+Plain shift-and-OR loop because there's no `std::reverse_bits` in standard C++. The compiler may optimize this into a single instruction depending on target.
 
 ```cpp
 #include <cstdint>
@@ -14207,7 +16457,9 @@ uint32_t reverseBits(uint32_t n) {
 }
 ```
 
+
 ### 149. Missing Number
+
 #### Problem
 Given an array `nums` containing `n` distinct numbers in the range `[0, n]`, return the one number missing from the range.
 
@@ -14217,7 +16469,9 @@ Given an array `nums` containing `n` distinct numbers in the range `[0, n]`, ret
 #### Explanation
 A sorting approach is O(n log n). A hashset approach is O(n) time but O(n) space. The Gauss formula `n * (n + 1) / 2` gives the expected sum of `0..n`. Subtracting the actual array sum leaves exactly the missing number — neat, branchless, and constant space. An XOR alternative also works: XOR all indices 0..n with all array values; every present number cancels, leaving the missing one. The Gauss approach is slightly more readable. Watch for integer overflow in languages with fixed-width types — use 64-bit integers if `n` is large.
 
-#### Solution
+#### Python
+
+`n * (n + 1) // 2 - sum(nums)` — Gauss formula in one expression. Python's arbitrary-precision int sidesteps overflow.
 
 ```python
 def missingNumber(nums):
@@ -14225,12 +16479,20 @@ def missingNumber(nums):
     return n * (n + 1) // 2 - sum(nums)
 ```
 
+#### Rust
+
+`nums.iter().sum::<i32>()` with turbofish to disambiguate the sum's type. Risk of overflow for very large `n` but fine within LeetCode bounds.
+
 ```rust
 fn missing_number(nums: Vec<i32>) -> i32 {
     let n = nums.len() as i32;
     n * (n + 1) / 2 - nums.iter().sum::<i32>()
 }
 ```
+
+#### Go
+
+Manual sum loop — pre-generics Go has no `slices.Sum`. `int` is 64-bit so no overflow on typical inputs.
 
 ```go
 func missingNumber(nums []int) int {
@@ -14244,6 +16506,10 @@ func missingNumber(nums []int) int {
 }
 ```
 
+#### C++
+
+`std::accumulate` for the sum. `expected - sum` is the answer in one expression after.
+
 ```cpp
 #include <vector>
 #include <numeric>
@@ -14255,7 +16521,9 @@ int missingNumber(std::vector<int>& nums) {
 }
 ```
 
+
 ### 150. Sum of Two Integers
+
 #### Problem
 Calculate the sum of two integers `a` and `b` without using the `+` or `-` operators.
 
@@ -14265,7 +16533,9 @@ Calculate the sum of two integers `a` and `b` without using the `+` or `-` opera
 #### Explanation
 A hardware full adder computes sum and carry separately. `a ^ b` gives the sum bits with no carry; `(a & b) << 1` gives the carry bits shifted into the next position. Repeat until carry is zero — at most 32 iterations for 32-bit integers. In Python, integers are arbitrary-precision and can be negative without a fixed width, so `b` might never reach zero with naive shifting. The fix: apply `mask = 0xFFFFFFFF` to keep `b` in 32-bit range during iteration, then interpret `a` as a signed 32-bit value at the end (`a & mask` converts it). In Rust/Go/C++ the fixed-width types handle this naturally without masking.
 
-#### Solution
+#### Python
+
+Python's arbitrary-precision int needs `mask = 0xFFFFFFFF` to keep `b` in 32-bit range — otherwise the carry shift could grow forever. Final `& mask` reinterprets the result as a 32-bit signed value.
 
 ```python
 def getSum(a, b):
@@ -14276,6 +16546,10 @@ def getSum(a, b):
         b = carry
     return a if b == 0 else a & mask
 ```
+
+#### Rust
+
+Fixed-width `i32` handles overflow naturally — `((a & b) as u32) << 1` casts to unsigned for the shift, then back to `i32`. The bit pattern is the same.
 
 ```rust
 fn get_sum(mut a: i32, mut b: i32) -> i32 {
@@ -14288,6 +16562,10 @@ fn get_sum(mut a: i32, mut b: i32) -> i32 {
 }
 ```
 
+#### Go
+
+Plain integer ops — `int` is 64-bit but the bit pattern math works regardless. Shifts in Go don't undefined-behavior on signed overflow like C.
+
 ```go
 func getSum(a int, b int) int {
     for b != 0 {
@@ -14298,6 +16576,10 @@ func getSum(a int, b int) int {
     return a
 }
 ```
+
+#### C++
+
+Cast through `unsigned` for the shift to avoid signed-overflow UB. Same bit-pattern math, just safer compile-time.
 
 ```cpp
 int getSum(int a, int b) {
