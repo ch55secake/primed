@@ -45,6 +45,20 @@
       ]
     },
     {
+      "id": "dsa-patterns",
+      "file": "/dsa-patterns-primer.md",
+      "title": "Patterns",
+      "category": "DSA",
+      "itemLabel": "Topic",
+      "itemsPlural": "DSA patterns",
+      "storagePrefix": "ip:dsa-patterns",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
+    },
+    {
       "id": "neetcode",
       "file": "/neetcode-150.md",
       "title": "NeetCode 150",
