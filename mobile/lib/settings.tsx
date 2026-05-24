@@ -36,6 +36,19 @@ export interface Settings {
    * Default off — explicitly opt in via Settings.
    */
   autoRevealSummary: boolean;
+  /**
+   * E-reader rendering for the section cards in the reader. When on:
+   *  - Card border / surface background removed (e-ink can't render subtle
+   *    borders + tinted backgrounds crisply; they wash out)
+   *  - Section header becomes a plain bold heading with a high-contrast
+   *    ASCII chevron (`▼` / `▶`) instead of the coloured triangle glyph
+   *  - No press-state background flash (e-ink ghosts on rapid colour
+   *    changes)
+   *  - Wider tap target on the whole header row
+   * Default off — the bubble UI looks fine on OLED / LCD; this is the
+   * dedicated e-reader optimisation.
+   */
+  eReaderMode: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -43,6 +56,7 @@ const DEFAULTS: Settings = {
   layoutMode: "auto",
   fontScale: 1.0,
   autoRevealSummary: false,
+  eReaderMode: false,
 };
 
 const STORAGE_KEY = "drilly:settings";

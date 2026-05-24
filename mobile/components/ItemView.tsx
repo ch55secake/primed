@@ -39,7 +39,10 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
   const palette = useTheme();
   const router = useRouter();
   const settings = useSettings();
-  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const styles = useMemo(
+    () => makeStyles(palette, settings.eReaderMode),
+    [palette, settings.eReaderMode],
+  );
   const markdownStyles = useMemo(
     () => makeMarkdownStyles(palette, settings.fontScale),
     [palette, settings.fontScale],
@@ -243,7 +246,17 @@ export function ItemView({ source, item, onNeighbourItem }: Props) {
   );
 }
 
-function makeStyles(p: Palette) {
+/**
+ * `eink` toggles the e-reader rendering for the section cards:
+ *  - No card border / no surface background (e-ink can't render subtle
+ *    chrome crisply; it washes to mid-grey)
+ *  - Section header is a flat heading (no card chrome, no press flash)
+ *  - High-contrast chevron + label (palette.textStrong, no muted greys)
+ *  - Body flows directly under the header with no border-top divider
+ * All other UI (top header, footer nav, progress text) stays the same;
+ * those are minor surfaces that already look fine on e-ink.
+ */
+function makeStyles(p: Palette, eink: boolean) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: p.bg },
     header: {
@@ -299,39 +312,79 @@ function makeStyles(p: Palette) {
       fontSize: 12,
       fontVariant: ["tabular-nums"],
     },
-    sectionCard: {
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: p.border,
-      borderRadius: 8,
-      backgroundColor: p.surface,
-      overflow: "hidden",
-    },
-    sectionHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-    },
-    sectionHeaderPressed: { backgroundColor: p.surfacePressed },
-    sectionToggle: {
-      color: p.textMuted,
-      fontSize: 14,
-      width: 18,
-    },
-    sectionName: {
-      color: p.textStrong,
-      fontSize: 15,
-      fontWeight: "600",
-      flex: 1,
-    },
-    sectionBody: {
-      paddingHorizontal: 14,
-      paddingBottom: 14,
-      borderTopWidth: 1,
-      borderTopColor: p.border,
-      backgroundColor: p.bg,
-    },
+    sectionCard: eink
+      ? {
+          marginBottom: 4,
+          // No border, no rounded chrome, no surface tint — flat layout
+          // so the page reads as one continuous document with bold
+          // section dividers.
+        }
+      : {
+          marginBottom: 10,
+          borderWidth: 1,
+          borderColor: p.border,
+          borderRadius: 8,
+          backgroundColor: p.surface,
+          overflow: "hidden",
+        },
+    sectionHeader: eink
+      ? {
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 0,
+          paddingVertical: 14,
+          borderTopWidth: 1,
+          borderTopColor: p.text,
+        }
+      : {
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+        },
+    // E-ink: no press-state background flash (ghosting). Bubble: tinted
+    // surfacePressed for the tap affordance.
+    sectionHeaderPressed: eink ? {} : { backgroundColor: p.surfacePressed },
+    sectionToggle: eink
+      ? {
+          color: p.textStrong,
+          fontSize: 18,
+          fontWeight: "700",
+          width: 22,
+        }
+      : {
+          color: p.textMuted,
+          fontSize: 14,
+          width: 18,
+        },
+    sectionName: eink
+      ? {
+          color: p.textStrong,
+          fontSize: 18,
+          fontWeight: "700",
+          flex: 1,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+        }
+      : {
+          color: p.textStrong,
+          fontSize: 15,
+          fontWeight: "600",
+          flex: 1,
+        },
+    sectionBody: eink
+      ? {
+          paddingHorizontal: 0,
+          paddingTop: 4,
+          paddingBottom: 16,
+        }
+      : {
+          paddingHorizontal: 14,
+          paddingBottom: 14,
+          borderTopWidth: 1,
+          borderTopColor: p.border,
+          backgroundColor: p.bg,
+        },
     footerNav: {
       marginTop: 16,
       flexDirection: "row",

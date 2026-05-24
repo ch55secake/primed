@@ -110,6 +110,25 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
+      <Section title="E-reader mode" palette={palette}>
+        <View style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.hint}>
+              Render section cards as flat drop-downs with high-contrast
+              headers — no borders, no tinted backgrounds, no press flash.
+              Designed for Boox / Kindle / Kobo e-ink screens where the
+              bubble UI's subtle colours wash out.
+            </Text>
+          </View>
+          <Switch
+            value={settings.eReaderMode}
+            onValueChange={(eReaderMode) => update({ eReaderMode })}
+            trackColor={{ false: palette.border, true: palette.accent }}
+            thumbColor={palette.surface}
+          />
+        </View>
+      </Section>
+
       <Section title="Android app" palette={palette}>
         <Pressable
           onPress={() => Linking.openURL("/drilly.apk")}
