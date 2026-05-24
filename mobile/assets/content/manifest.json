@@ -112,6 +112,17 @@
       "sectionOrder": []
     },
     {
+      "id": "sql-practice",
+      "file": "/sql-practice.md",
+      "title": "SQL Practice",
+      "category": "Databases",
+      "itemLabel": "Problem",
+      "itemsPlural": "SQL problems",
+      "storagePrefix": "sdf:sql-practice",
+      "defaultRevealedSections": ["Problem"],
+      "sectionOrder": ["Problem", "Pattern", "Explanation", "Solution"]
+    },
+    {
       "id": "csharp",
       "file": "/csharp-interview-primer.md",
       "title": "C#",
