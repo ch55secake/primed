@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Re-sync content files from the Obsidian vault into web/public/.
+# Re-sync content files from a local Obsidian vault into web/public/.
 # Run after editing the canonical notes in Obsidian. The committed
 # copies in web/public/ are what Vercel reads at build time.
 # Also bundles into mobile/assets/content/ for the Android app's
 # offline fallback.
+#
+# Configure the vault path via the VAULT_PATH env var, e.g.
+#   VAULT_PATH=~/Documents/my-vault/notes ./scripts/sync-content.sh
 set -euo pipefail
 
-VAULT="$HOME/Documents/private-vault/Notes"
+VAULT="${VAULT_PATH:-$HOME/notes}"
+if [ ! -d "$VAULT" ]; then
+  echo "Vault not found at $VAULT" >&2
+  echo "Set VAULT_PATH to your Obsidian vault directory." >&2
+  exit 1
+fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WEB="$ROOT/web/public"
 MOBILE="$ROOT/mobile/assets/content"

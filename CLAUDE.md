@@ -47,11 +47,23 @@ Every `## Topic` must open with a `### Summary` card (~700-900 words, 6 subsecti
 
 ## Memory files
 
-User-level memory for this repo lives at `~/.claude/projects/-Users-aliceredacted-WebstormProjects-drilly/memory/`. Key entries:
+User-level memory for this repo lives in the Claude Code user-memory directory for this project. Key entries:
 - `drilly-merge-policy.md` — "merge approved branches straight to main"
 - `drilly-vercel-deploy.md` — project IDs, alias-vs-domain trap, prod URLs
 
 Update those when you discover something new and operational. Don't duplicate code-discoverable facts there.
+
+## Privacy hygiene
+
+This is a public repository. Do not commit:
+
+- Real names. In code examples, use generic placeholders (`alice`, `bob`, `user1`, `Acme Corp`) — not the maintainer's name or any real person.
+- Personal email addresses. Git commits use the GitHub noreply email (`<id>+<username>@users.noreply.github.com`) so commit metadata doesn't leak a personal inbox.
+- Absolute paths that identify the maintainer's machine (e.g. home directory, personal vault names). Use env vars (`VAULT_PATH`, `$HOME/notes`) instead.
+- API keys, tokens, .env contents. Should never be committed; if one slips, rotate immediately and rewrite history.
+- References to the maintainer's employer, current projects outside this repo, or any other identifying context.
+
+If you spot leaked PII while editing, redact it in the same commit and surface it to the user — don't ship the leak forward. If it's in committed history, use `git filter-repo` to rewrite and force-push (see the 2026-05-24 scrub commit for the pattern).
 
 ## What NOT to touch without asking
 

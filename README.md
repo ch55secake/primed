@@ -1,6 +1,6 @@
 # DRILLY
 
-Personal interview-prep system covering System Design, DSA, and Java. Web app for desk study, Android app for the commute. Three sources backed by markdown notes from `~/Documents/private-vault/`:
+Personal interview-prep system covering System Design, DSA, and Java. Web app for desk study, Android app for the commute. Sources backed by markdown notes synced from a local Obsidian vault (configurable via `VAULT_PATH`):
 
 - **System Design** — 41 system design interview patterns. Each pattern's High-Level Design renders as a Mermaid diagram (dark theme); other sections collapse / reveal incrementally.
 - **NeetCode 150** — 150 LeetCode problems with multi-language solutions (Python / Rust / Go / C++) via tabs.
