@@ -2,2374 +2,3581 @@
 type: sql-practice
 ---
 
-# SQL Practice — pgexercises
+# SQL Practice — LeetCode 50 + Hard Tier
 
-Postgres-flavoured SQL practice against a tennis country-club schema (members / facilities / bookings). 71 problems sourced from [pgexercises.com](https://pgexercises.com/) by Alisdair Owens (CC-BY-NC-SA 3.0). Solutions are the canonical site answers; explanations are written for senior-engineer interview prep.
+Senior-interview-grade SQL drill. ~70 problems sourced from LeetCode's curated [SQL 50 study plan](https://leetcode.com/studyplan/top-sql-50/) plus the Hard tier of LeetCode's Database problem set. All solutions written in **Postgres** syntax (LeetCode's default is MySQL; differences are noted where relevant).
 
-## Schema
+Problems are organised by primary pattern: Aggregation & Counting → Joins → Subqueries & Set Logic → Window Functions → Self-Joins & Hierarchies → Date / Time → String Manipulation → Recursive CTEs → Advanced Patterns.
 
-```
-cd.members
-  memid          integer        PRIMARY KEY
-  surname        varchar(200)
-  firstname      varchar(200)
-  address        varchar(300)
-  zipcode        integer
-  telephone      varchar(20)
-  recommendedby  integer        FK → cd.members(memid)  ON DELETE SET NULL
-  joindate       timestamp
-
-cd.facilities
-  facid                integer    PRIMARY KEY
-  name                 varchar(100)
-  membercost           numeric
-  guestcost            numeric
-  initialoutlay        numeric
-  monthlymaintenance   numeric
-
-cd.bookings
-  bookid     integer    PRIMARY KEY
-  facid      integer    FK → cd.facilities(facid)
-  memid      integer    FK → cd.members(memid)
-  starttime  timestamp
-  slots      integer    -- one slot = 30 minutes
-```
-
-The guest member is always `memid = 0`. Booking cost depends on whether the booker is a guest (`guestcost`) or a member (`membercost`), multiplied by `slots`.
+*Prompts are paraphrased for educational use. Solutions are written for senior-interview Postgres prep, not as LeetCode submissions.*
 
 ---
 
-### 1. Retrieve everything from a table
+## Aggregation & Counting
+
+### 1. Big Countries
 
 #### Problem
-Retrieve all of the information from the `cd.facilities` table.
 
-**Tables:** `cd.facilities`
+Given a `world` table of countries with area and population, return the countries that qualify as "big" — either at least 3,000,000 km² in area or at least 25,000,000 in population. Output the name, population, and area.
+
+**Schema:**
+
+```
+world
+  name        varchar  PRIMARY KEY
+  continent   varchar
+  area        integer
+  population  bigint
+  gdp         bigint
+```
 
 **Expected output (sample):**
-| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
-|-------|------|------------|-----------|---------------|--------------------|
-| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
-| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
-| 2 | Badminton Court | 0 | 15.5 | 4000 | 50 |
-| 3 | Table Tennis | 0 | 5 | 320 | 10 |
-| 4 | Massage Room 1 | 35 | 80 | 4000 | 3000 |
-| ... | ... | ... | ... | ... | ... |
+
+| name        | population  | area     |
+|-------------|-------------|----------|
+| Afghanistan | 25500100    | 652230   |
+| Algeria     | 37100000    | 2381741  |
 
 #### Pattern
-Basic SELECT
+
+Simple filter with OR.
 
 #### Explanation
-`SELECT *` returns every column. Fine for ad-hoc exploration, but in production code prefer naming columns explicitly so a schema change (added column, reordered columns) doesn't silently break callers.
+
+Trivial filter. The only thing worth saying: prefer `OR` here over `UNION` of two queries — the planner can use a single sequential scan with a disjunctive predicate, and you avoid materialising and de-duplicating two result sets.
 
 #### Solution
+
 ```sql
-select * from cd.facilities;
+SELECT name, population, area
+FROM world
+WHERE area >= 3000000
+   OR population >= 25000000;
 ```
+
+*Source: LeetCode #595 — Big Countries*
 
 ---
 
-### 2. Retrieve specific columns from a table
+### 2. Recyclable and Low Fat Products
 
 #### Problem
-Produce a list of facility names and their cost to members.
 
-**Tables:** `cd.facilities`
+From a `products` table with `low_fats` and `recyclable` flags (each `'Y'` or `'N'`), return the IDs of products that are both low-fat and recyclable.
+
+**Schema:**
+
+```
+products
+  product_id  integer  PRIMARY KEY
+  low_fats    char(1)  CHECK (low_fats IN ('Y','N'))
+  recyclable  char(1)  CHECK (recyclable IN ('Y','N'))
+```
 
 **Expected output (sample):**
-| name | membercost |
-|------|------------|
-| Tennis Court 1 | 5 |
-| Tennis Court 2 | 5 |
-| Badminton Court | 0 |
-| Table Tennis | 0 |
-| Massage Room 1 | 35 |
-| ... | ... |
+
+| product_id |
+|------------|
+| 1          |
+| 3          |
 
 #### Pattern
-Basic SELECT
+
+Compound boolean filter.
 
 #### Explanation
-Name only the columns you need. Smaller projection means smaller network payload and lets the planner skip touching unused columns in some access paths (notably index-only scans).
+
+A single-pass `WHERE` with two `=` predicates. If this table were enormous, a partial expression index on `(low_fats, recyclable) WHERE low_fats='Y' AND recyclable='Y'` would matter; in practice it doesn't.
 
 #### Solution
+
 ```sql
-select name, membercost from cd.facilities;
+SELECT product_id
+FROM products
+WHERE low_fats = 'Y' AND recyclable = 'Y';
 ```
+
+*Source: LeetCode #1757 — Recyclable and Low Fat Products*
 
 ---
 
-### 3. Control which rows are retrieved
+### 3. Number of Unique Subjects Taught by Each Teacher
 
 #### Problem
-Produce a list of facilities that charge a fee to members.
 
-**Tables:** `cd.facilities`
+Given `teacher(teacher_id, subject_id, dept_id)`, return for each teacher the count of distinct subjects they teach. Note: the same subject taught in two departments counts once.
+
+**Schema:**
+
+```
+teacher
+  teacher_id  integer
+  subject_id  integer
+  dept_id     integer
+  PRIMARY KEY (subject_id, dept_id)
+```
 
 **Expected output (sample):**
-| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
-|-------|------|------------|-----------|---------------|--------------------|
-| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
-| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
-| 4 | Massage Room 1 | 35 | 80 | 4000 | 3000 |
-| 5 | Massage Room 2 | 35 | 80 | 4000 | 3000 |
-| 6 | Squash Court | 3.5 | 17.5 | 5000 | 80 |
+
+| teacher_id | cnt |
+|------------|-----|
+| 1          | 2   |
+| 2          | 4   |
 
 #### Pattern
-WHERE filter
+
+`COUNT(DISTINCT ...)` with `GROUP BY`.
 
 #### Explanation
-`membercost > 0` filters out the free facilities. The predicate is sargable — a btree index on `membercost` could be used if the column were selective enough, though for a six-row table the planner will just seqscan.
+
+`COUNT(DISTINCT subject_id)` per teacher — the natural fit. Faster than `GROUP BY teacher_id, subject_id` followed by an outer count, and reads better.
 
 #### Solution
+
 ```sql
-select * from cd.facilities where membercost > 0;
+SELECT teacher_id, COUNT(DISTINCT subject_id) AS cnt
+FROM teacher
+GROUP BY teacher_id;
 ```
+
+*Source: LeetCode #2356 — Number of Unique Subjects Taught by Each Teacher*
 
 ---
 
-### 4. Control which rows are retrieved — part 2
+### 4. Find Followers Count
 
 #### Problem
-Produce a list of facilities that charge a fee to members and whose fee is less than 1/50th of the monthly maintenance cost. Return facid, name, membercost, monthlymaintenance.
 
-**Tables:** `cd.facilities`
+Given a `followers(user_id, follower_id)` table, return each user's follower count, sorted by `user_id` ascending.
+
+**Schema:**
+
+```
+followers
+  user_id      integer
+  follower_id  integer
+  PRIMARY KEY (user_id, follower_id)
+```
 
 **Expected output (sample):**
-| facid | name | membercost | monthlymaintenance |
-|-------|------|------------|--------------------|
-| 4 | Massage Room 1 | 35 | 3000 |
-| 5 | Massage Room 2 | 35 | 3000 |
+
+| user_id | followers_count |
+|---------|-----------------|
+| 0       | 2               |
+| 1       | 1               |
+| 2       | 1               |
 
 #### Pattern
-WHERE filter
+
+`GROUP BY` + `COUNT(*)`.
 
 #### Explanation
-Two-condition filter combined with `AND`. Note the `/50.0` rather than `/50` — without the decimal, Postgres would do integer division and round the threshold down, hiding edge cases.
+
+The PK guarantees `(user_id, follower_id)` is unique, so `COUNT(*)` is sufficient — no need for `COUNT(DISTINCT)`. Knowing your constraints lets you skip needless work.
 
 #### Solution
+
 ```sql
-select facid, name, membercost, monthlymaintenance
-    from cd.facilities
-    where
-        membercost > 0 and
-        (membercost < monthlymaintenance/50.0);
+SELECT user_id, COUNT(*) AS followers_count
+FROM followers
+GROUP BY user_id
+ORDER BY user_id;
 ```
+
+*Source: LeetCode #1729 — Find Followers Count*
 
 ---
 
-### 5. Basic string searches
+### 5. Classes More Than 5 Students
 
 #### Problem
-Produce a list of all facilities with the word 'Tennis' in their name.
 
-**Tables:** `cd.facilities`
+From a `courses(student, class)` table, return the names of classes that have at least 5 students.
+
+**Schema:**
+
+```
+courses
+  student  varchar
+  class    varchar
+  PRIMARY KEY (student, class)
+```
 
 **Expected output (sample):**
-| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
-|-------|------|------------|-----------|---------------|--------------------|
-| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
-| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
-| 3 | Table Tennis | 0 | 5 | 320 | 10 |
+
+| class    |
+|----------|
+| Math     |
 
 #### Pattern
-WHERE filter
+
+`GROUP BY` + `HAVING`.
 
 #### Explanation
-`LIKE` with `%` wildcards on both sides matches anywhere in the string. A leading wildcard kills index usage — for case-insensitive substring search on a large table you'd reach for a trigram index (`pg_trgm` + GIN).
+
+`HAVING` filters groups after aggregation. The PK already guarantees student uniqueness per class, so `COUNT(*)` is fine — no `DISTINCT` needed.
 
 #### Solution
+
 ```sql
-select *
-    from cd.facilities
-    where
-        name like '%Tennis%';
+SELECT class
+FROM courses
+GROUP BY class
+HAVING COUNT(*) >= 5;
 ```
+
+*Source: LeetCode #596 — Classes More Than 5 Students*
 
 ---
 
-### 6. Matching against multiple possible values
+### 6. Confirmation Rate
 
 #### Problem
-Retrieve the details of facilities with ID 1 and 5, without using `OR`.
 
-**Tables:** `cd.facilities`
+Given `signups(user_id, time_stamp)` and `confirmations(user_id, time_stamp, action)` where `action` is `'confirmed'` or `'timeout'`, return each signed-up user's confirmation rate (confirmed / total messages), rounded to two decimals. Users with no messages get rate 0.00.
+
+**Schema:**
+
+```
+signups
+  user_id     integer  PRIMARY KEY
+  time_stamp  timestamp
+
+confirmations
+  user_id     integer  FK → signups
+  time_stamp  timestamp
+  action      varchar  CHECK (action IN ('confirmed','timeout'))
+  PRIMARY KEY (user_id, time_stamp)
+```
 
 **Expected output (sample):**
-| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
-|-------|------|------------|-----------|---------------|--------------------|
-| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
-| 5 | Massage Room 2 | 35 | 80 | 4000 | 3000 |
+
+| user_id | confirmation_rate |
+|---------|-------------------|
+| 6       | 0.00              |
+| 3       | 0.00              |
+| 7       | 1.00              |
+| 2       | 0.50              |
 
 #### Pattern
-WHERE filter
+
+`LEFT JOIN` + conditional aggregation.
 
 #### Explanation
-`IN (...)` is the idiomatic alternative to a chain of `OR`s — same semantics, far more readable, and the planner expands it to either a hash lookup or an `= ANY(array)` depending on cardinality.
+
+The classic "rate of X out of total" — express the numerator as `AVG((action='confirmed')::int)`. Postgres handles the bool→int cast cleanly; in MySQL you'd write `AVG(action = 'confirmed')`. `LEFT JOIN` plus `COALESCE`/grouping keeps users with no messages.
 
 #### Solution
+
 ```sql
-select *
-    from cd.facilities
-    where
-        facid in (1,5);
+SELECT s.user_id,
+       ROUND(COALESCE(AVG((c.action = 'confirmed')::int)::numeric, 0), 2) AS confirmation_rate
+FROM signups s
+LEFT JOIN confirmations c USING (user_id)
+GROUP BY s.user_id;
 ```
+
+*Source: LeetCode #1934 — Confirmation Rate*
 
 ---
 
-### 7. Classify results into buckets
+### 7. Queries Quality and Percentage
 
 #### Problem
-Produce a list of facilities labelled 'cheap' or 'expensive' depending on whether their monthly maintenance cost is more than $100. Return name and monthly maintenance.
 
-**Tables:** `cd.facilities`
+From a `queries(query_name, result, position, rating)` table, for each query name return the quality (average of `rating / position`) and the poor-query percentage (rating < 3), both rounded to two decimals.
+
+**Schema:**
+
+```
+queries
+  query_name  varchar
+  result      varchar
+  position    integer
+  rating      integer
+```
 
 **Expected output (sample):**
-| name | cost |
-|------|------|
-| Tennis Court 1 | expensive |
-| Tennis Court 2 | expensive |
-| Badminton Court | cheap |
-| Table Tennis | cheap |
-| Massage Room 1 | expensive |
-| ... | ... |
+
+| query_name | quality | poor_query_percentage |
+|------------|---------|-----------------------|
+| Dog        | 2.50    | 0.00                  |
+| Cat        | 0.66    | 33.33                 |
 
 #### Pattern
-CASE WHEN (pivot)
+
+Conditional aggregation with `AVG`.
 
 #### Explanation
-`CASE` is the SQL conditional expression. Use it inside `SELECT` to compute derived columns, inside `ORDER BY` for custom sort orders, and inside aggregates (`SUM(CASE WHEN ...)`) for conditional roll-ups — the workhorse of analytical SQL.
+
+Two derived metrics in one pass. Cast to `numeric` before dividing — integer division would zero out fractional ratings. The poor-query percentage is `100 * AVG((rating < 3)::int)`.
 
 #### Solution
+
 ```sql
-select name,
-    case when (monthlymaintenance > 100) then
-        'expensive'
-    else
-        'cheap'
-    end as cost
-    from cd.facilities;
+SELECT query_name,
+       ROUND(AVG(rating::numeric / position), 2)            AS quality,
+       ROUND(100 * AVG((rating < 3)::int)::numeric, 2)      AS poor_query_percentage
+FROM queries
+WHERE query_name IS NOT NULL
+GROUP BY query_name;
 ```
+
+*Source: LeetCode #1211 — Queries Quality and Percentage*
 
 ---
 
-### 8. Working with dates
+### 8. Monthly Transactions I
 
 #### Problem
-Produce a list of members who joined after the start of September 2012. Return memid, surname, firstname, joindate.
 
-**Tables:** `cd.members`
+For each (month, country) pair in `transactions`, return the total transaction count, the count of approved transactions, the total amount, and the approved amount. Month format `YYYY-MM`.
+
+**Schema:**
+
+```
+transactions
+  id        integer  PRIMARY KEY
+  country   varchar
+  state     varchar  CHECK (state IN ('approved','declined'))
+  amount    integer
+  trans_date date
+```
 
 **Expected output (sample):**
-| memid | surname | firstname | joindate |
-|-------|---------|-----------|----------|
-| 24 | Sarwin | Ramnaresh | 2012-09-01 08:44:42 |
-| 26 | Jones | Douglas | 2012-09-02 18:43:05 |
-| 27 | Rumney | Henrietta | 2012-09-05 08:42:35 |
-| 28 | Farrell | David | 2012-09-15 08:22:05 |
-| 29 | Worthington-Smyth | Henry | 2012-09-17 12:27:15 |
-| ... | ... | ... | ... |
+
+| month   | country | trans_count | approved_count | trans_total_amount | approved_total_amount |
+|---------|---------|-------------|----------------|--------------------|-----------------------|
+| 2018-12 | US      | 2           | 1              | 3000               | 1000                  |
+| 2019-01 | US      | 1           | 1              | 2000               | 2000                  |
 
 #### Pattern
-WHERE filter, Date arithmetic
+
+`GROUP BY` on a derived month + conditional sums.
 
 #### Explanation
-String comparison against a date literal works because Postgres implicitly casts `'2012-09-01'` to `timestamp` for the comparison. Use a half-open range (`>=` start, `<` next-period start) rather than `BETWEEN` so end-of-period boundary semantics are unambiguous.
+
+`TO_CHAR(trans_date, 'YYYY-MM')` gives the month bucket. Conditional `SUM(CASE WHEN ...)` and `COUNT(... FILTER (WHERE ...))` are equivalent; `FILTER` reads better and is standard SQL.
 
 #### Solution
+
 ```sql
-select memid, surname, firstname, joindate
-    from cd.members
-    where joindate >= '2012-09-01';
+SELECT TO_CHAR(trans_date, 'YYYY-MM')                    AS month,
+       country,
+       COUNT(*)                                          AS trans_count,
+       COUNT(*) FILTER (WHERE state = 'approved')        AS approved_count,
+       SUM(amount)                                       AS trans_total_amount,
+       SUM(amount) FILTER (WHERE state = 'approved')     AS approved_total_amount
+FROM transactions
+GROUP BY 1, country;
 ```
+
+*Source: LeetCode #1193 — Monthly Transactions I*
 
 ---
 
-### 9. Removing duplicates, and ordering results
+### 9. Average Time of Process per Machine
 
 #### Problem
-Produce an ordered list of the first 10 surnames in the members table. The list must not contain duplicates.
 
-**Tables:** `cd.members`
+Given `activity(machine_id, process_id, activity_type, timestamp)` where `activity_type` is `'start'` or `'end'`, compute the average processing time (end − start) per machine, rounded to three decimals.
+
+**Schema:**
+
+```
+activity
+  machine_id     integer
+  process_id     integer
+  activity_type  varchar  CHECK (activity_type IN ('start','end'))
+  timestamp      float
+  PRIMARY KEY (machine_id, process_id, activity_type)
+```
 
 **Expected output (sample):**
-| surname |
-|---------|
-| Bader |
-| Baker |
-| Boothe |
-| Butters |
-| Coplin |
-| Crumpet |
-| Dare |
-| Farrell |
-| GUEST |
-| Genting |
+
+| machine_id | processing_time |
+|------------|-----------------|
+| 0          | 0.712           |
+| 1          | 1.103           |
+| 2          | 4.456           |
 
 #### Pattern
-DISTINCT, ORDER BY, LIMIT
+
+Self-join on `(machine_id, process_id)` or conditional aggregation.
 
 #### Explanation
-`DISTINCT` deduplicates the projected columns, `ORDER BY` sorts, `LIMIT` truncates. Order matters in the pipeline: `LIMIT` runs after sort, so you get the lexicographically first 10 — not 10 arbitrary rows then sorted.
+
+A self-join works but is wasteful — two passes plus a join. Cleaner: aggregate in one pass with `SUM(... FILTER ...)`. For each machine, average the (end − start) deltas per process.
 
 #### Solution
+
 ```sql
-select distinct surname
-    from cd.members
-order by surname
-limit 10;
+SELECT machine_id,
+       ROUND(
+         AVG(end_ts - start_ts)::numeric,
+         3
+       ) AS processing_time
+FROM (
+  SELECT machine_id,
+         process_id,
+         MAX(timestamp) FILTER (WHERE activity_type = 'end')   AS end_ts,
+         MAX(timestamp) FILTER (WHERE activity_type = 'start') AS start_ts
+  FROM activity
+  GROUP BY machine_id, process_id
+) t
+GROUP BY machine_id;
 ```
+
+*Source: LeetCode #1661 — Average Time of Process per Machine*
 
 ---
 
-### 10. Combining results from multiple queries
+### 10. Number of Employees Which Report to Each Employee
 
 #### Problem
-Produce a combined list of all member surnames and all facility names.
 
-**Tables:** `cd.members`, `cd.facilities`
+From an `employees(employee_id, name, reports_to, age)` table, for each manager who has at least one direct report return their id, name, the count of direct reports, and the average reportee age rounded to the nearest integer. Sort by `employee_id`.
+
+**Schema:**
+
+```
+employees
+  employee_id  integer  PRIMARY KEY
+  name         varchar
+  reports_to   integer  FK → employees(employee_id)
+  age          integer
+```
 
 **Expected output (sample):**
-| surname |
-|---------|
-| Tennis Court 2 |
-| Worthington-Smyth |
-| Badminton Court |
-| Pinker |
-| Dare |
-| Bader |
-| ... |
+
+| employee_id | name  | reports_count | average_age |
+|-------------|-------|---------------|-------------|
+| 1           | Alice | 1             | 31          |
+| 2           | Bob   | 2             | 26          |
 
 #### Pattern
-Set ops (UNION / INTERSECT / EXCEPT)
+
+Self-join on `reports_to = employee_id` + aggregation.
 
 #### Explanation
-`UNION` concatenates two result sets and removes duplicates; `UNION ALL` skips the dedup and is cheaper if you know rows can't collide. Both sides must project the same number of columns with compatible types.
+
+Standard inner self-join: managers on the left, reports on the right. Inner join automatically drops managers with no reports. `ROUND(AVG(age))` for the integer rounding — note Postgres rounds halves away from zero, MySQL banker's-rounds.
 
 #### Solution
+
 ```sql
-select surname
-    from cd.members
-union
-select name
-    from cd.facilities;
+SELECT m.employee_id,
+       m.name,
+       COUNT(*)              AS reports_count,
+       ROUND(AVG(r.age))::int AS average_age
+FROM employees m
+JOIN employees r ON r.reports_to = m.employee_id
+GROUP BY m.employee_id, m.name
+ORDER BY m.employee_id;
 ```
+
+*Source: LeetCode #1731 — The Number of Employees Which Report to Each Employee*
 
 ---
 
-### 11. Simple aggregation
+## Joins
+
+### 11. Replace Employee ID with the Unique Identifier
 
 #### Problem
-Get the signup date of the most recent member.
 
-**Tables:** `cd.members`
+Given `employees(id, name)` and `employee_uni(id, unique_id)`, return each employee's `unique_id` and `name`. If no unique id exists, show `NULL`.
+
+**Schema:**
+
+```
+employees
+  id    integer  PRIMARY KEY
+  name  varchar
+
+employee_uni
+  id          integer  FK → employees(id)
+  unique_id   integer
+  PRIMARY KEY (id, unique_id)
+```
 
 **Expected output (sample):**
-| latest |
-|--------|
-| 2012-09-26 18:08:45 |
+
+| unique_id | name     |
+|-----------|----------|
+| NULL      | Alice    |
+| NULL      | Bob      |
+| 3         | Meir     |
 
 #### Pattern
-MAX
+
+`LEFT JOIN`.
 
 #### Explanation
-`MAX` over a timestamp returns the latest value. With no `GROUP BY`, the aggregate reduces the whole table to a single row.
+
+A clean left-join with employees on the left so unmatched rows are preserved. Order of tables matters semantically — left table is the "anchor" you must keep.
 
 #### Solution
+
 ```sql
-select max(joindate) as latest
-    from cd.members;
+SELECT eu.unique_id, e.name
+FROM employees e
+LEFT JOIN employee_uni eu ON eu.id = e.id;
 ```
+
+*Source: LeetCode #1378 — Replace Employee ID with the Unique Identifier*
 
 ---
 
-### 12. More aggregation
+### 12. Product Sales Analysis I
 
 #### Problem
-Get the first name, surname, and join date of the member(s) who signed up most recently.
 
-**Tables:** `cd.members`
+Given `sales(sale_id, product_id, year, quantity, price)` and `product(product_id, product_name)`, return for each sale the `product_name`, `year`, and `price`.
+
+**Schema:**
+
+```
+sales
+  sale_id     integer
+  product_id  integer  FK → product
+  year        integer
+  quantity    integer
+  price       integer
+  PRIMARY KEY (sale_id, year)
+
+product
+  product_id    integer  PRIMARY KEY
+  product_name  varchar
+```
 
 **Expected output (sample):**
-| firstname | surname | joindate |
-|-----------|---------|----------|
-| Darren | Smith | 2012-09-26 18:08:45 |
+
+| product_name | year | price |
+|--------------|------|-------|
+| LCPHONE      | 2018 | 5000  |
+| LCPHONE      | 2019 | 5000  |
 
 #### Pattern
-Subquery
+
+Inner join.
 
 #### Explanation
-You can't reference an aggregate from `SELECT` directly alongside non-aggregated columns without grouping. The pattern is to compute the aggregate in a subquery and filter the outer query against it. This naturally handles ties — multiple members sharing the max date all come back.
+
+A no-frills join. `USING (product_id)` works because the column name is shared and you avoid the qualifier salad.
 
 #### Solution
+
 ```sql
-select firstname, surname, joindate
-    from cd.members
-    where joindate =
-        (select max(joindate)
-            from cd.members);
+SELECT p.product_name, s.year, s.price
+FROM sales s
+JOIN product p USING (product_id);
 ```
+
+*Source: LeetCode #1068 — Product Sales Analysis I*
 
 ---
 
-### 13. Retrieve the start times of members' bookings
+### 13. Customer Who Visited but Did Not Make Any Transactions
 
 #### Problem
-Produce a list of the start times for bookings by members named 'David Farrell'.
 
-**Tables:** `cd.bookings`, `cd.members`
+Given `visits(visit_id, customer_id)` and `transactions(transaction_id, visit_id, amount)`, return each customer who has at least one visit with zero transactions, along with the count of such visits.
+
+**Schema:**
+
+```
+visits
+  visit_id     integer  PRIMARY KEY
+  customer_id  integer
+
+transactions
+  transaction_id  integer  PRIMARY KEY
+  visit_id        integer  FK → visits
+  amount          integer
+```
 
 **Expected output (sample):**
-| starttime |
+
+| customer_id | count_no_trans |
+|-------------|----------------|
+| 54          | 2              |
+| 30          | 1              |
+| 96          | 1              |
+
+#### Pattern
+
+Anti-join via `LEFT JOIN ... IS NULL`.
+
+#### Explanation
+
+Two equivalent shapes: `LEFT JOIN transactions WHERE transaction_id IS NULL` or `WHERE NOT EXISTS (...)`. Both produce the same plan in Postgres (anti-join). I prefer `NOT EXISTS` for the intent; `LEFT JOIN ... IS NULL` is fine when you also want columns from the right side.
+
+#### Solution
+
+```sql
+SELECT v.customer_id, COUNT(*) AS count_no_trans
+FROM visits v
+LEFT JOIN transactions t ON t.visit_id = v.visit_id
+WHERE t.transaction_id IS NULL
+GROUP BY v.customer_id;
+```
+
+*Source: LeetCode #1581 — Customer Who Visited but Did Not Make Any Transactions*
+
+---
+
+### 14. Students and Examinations
+
+#### Problem
+
+Given `students(student_id, student_name)`, `subjects(subject_name)`, and `examinations(student_id, subject_name)`, return every (student, subject) pair with the attendance count (zero allowed). Order by `student_id`, then `subject_name`.
+
+**Schema:**
+
+```
+students
+  student_id    integer  PRIMARY KEY
+  student_name  varchar
+
+subjects
+  subject_name  varchar  PRIMARY KEY
+
+examinations
+  student_id    integer  FK → students
+  subject_name  varchar  FK → subjects
+```
+
+**Expected output (sample):**
+
+| student_id | student_name | subject_name | attended_exams |
+|------------|--------------|--------------|----------------|
+| 1          | Alice        | Math         | 3              |
+| 1          | Alice        | Physics      | 2              |
+| 1          | Alice        | Programming  | 1              |
+
+#### Pattern
+
+`CROSS JOIN` (Cartesian) + `LEFT JOIN`.
+
+#### Explanation
+
+Generate every (student, subject) pair via `CROSS JOIN`, then `LEFT JOIN` the exam history to count attendances. The cartesian product is the only honest way to materialise pairs that may have zero attendances.
+
+#### Solution
+
+```sql
+SELECT st.student_id,
+       st.student_name,
+       su.subject_name,
+       COUNT(e.student_id) AS attended_exams
+FROM students st
+CROSS JOIN subjects su
+LEFT JOIN examinations e
+       ON e.student_id   = st.student_id
+      AND e.subject_name = su.subject_name
+GROUP BY st.student_id, st.student_name, su.subject_name
+ORDER BY st.student_id, su.subject_name;
+```
+
+*Source: LeetCode #1280 — Students and Examinations*
+
+---
+
+### 15. Managers with At Least 5 Direct Reports
+
+#### Problem
+
+From `employees(id, name, department, managerId)`, return the names of managers who have at least five direct reports.
+
+**Schema:**
+
+```
+employees
+  id          integer  PRIMARY KEY
+  name        varchar
+  department  varchar
+  manager_id  integer  FK → employees(id)
+```
+
+**Expected output (sample):**
+
+| name |
+|------|
+| John |
+
+#### Pattern
+
+Self-join + `HAVING COUNT(*) >= 5`.
+
+#### Explanation
+
+The pattern: aggregate the report side, threshold with `HAVING`, then join to the manager side for the name. You can do this in one statement with a self-join + group by; either way is fine.
+
+#### Solution
+
+```sql
+SELECT e.name
+FROM employees e
+JOIN employees r ON r.manager_id = e.id
+GROUP BY e.id, e.name
+HAVING COUNT(*) >= 5;
+```
+
+*Source: LeetCode #570 — Managers with at Least 5 Direct Reports*
+
+---
+
+### 16. Employee Bonus
+
+#### Problem
+
+Given `employee(empId, name, supervisor, salary)` and `bonus(empId, bonus)`, return name and bonus for every employee whose bonus is less than 1000 or has no bonus row.
+
+**Schema:**
+
+```
+employee
+  emp_id     integer  PRIMARY KEY
+  name       varchar
+  supervisor integer
+  salary     integer
+
+bonus
+  emp_id  integer  FK → employee
+  bonus   integer
+```
+
+**Expected output (sample):**
+
+| name   | bonus |
+|--------|-------|
+| Brad   | NULL  |
+| John   | NULL  |
+| Dan    | 500   |
+
+#### Pattern
+
+`LEFT JOIN` + `WHERE` on NULL-permitting predicate.
+
+#### Explanation
+
+Watch the NULL semantics: `bonus < 1000` is FALSE when bonus is NULL, so you must add `OR bonus IS NULL`. This is the kind of off-by-one that bites in interviews.
+
+#### Solution
+
+```sql
+SELECT e.name, b.bonus
+FROM employee e
+LEFT JOIN bonus b USING (emp_id)
+WHERE b.bonus < 1000 OR b.bonus IS NULL;
+```
+
+*Source: LeetCode #577 — Employee Bonus*
+
+---
+
+### 17. Article Views I
+
+#### Problem
+
+Given `views(article_id, author_id, viewer_id, view_date)`, return the distinct ids of authors who have viewed at least one of their own articles, sorted ascending.
+
+**Schema:**
+
+```
+views
+  article_id  integer
+  author_id   integer
+  viewer_id   integer
+  view_date   date
+```
+
+**Expected output (sample):**
+
+| id |
+|----|
+| 4  |
+| 7  |
+
+#### Pattern
+
+Self-equality filter + `DISTINCT`.
+
+#### Explanation
+
+No join needed — the predicate is on the same row. `DISTINCT` because an author can view many of their own articles.
+
+#### Solution
+
+```sql
+SELECT DISTINCT author_id AS id
+FROM views
+WHERE author_id = viewer_id
+ORDER BY id;
+```
+
+*Source: LeetCode #1148 — Article Views I*
+
+---
+
+### 18. Find Customer Referee
+
+#### Problem
+
+From `customer(id, name, referee_id)`, return the names of customers whose `referee_id` is not 2 (including those with no referee).
+
+**Schema:**
+
+```
+customer
+  id          integer  PRIMARY KEY
+  name        varchar
+  referee_id  integer
+```
+
+**Expected output (sample):**
+
+| name |
+|------|
+| Will |
+| Jane |
+| Bill |
+| Zack |
+
+#### Pattern
+
+NULL-safe inequality.
+
+#### Explanation
+
+`referee_id != 2` returns UNKNOWN for NULLs, which are then dropped. To keep them: `referee_id IS DISTINCT FROM 2` (Postgres-native, NULL-safe) or `referee_id != 2 OR referee_id IS NULL`.
+
+#### Solution
+
+```sql
+SELECT name
+FROM customer
+WHERE referee_id IS DISTINCT FROM 2;
+```
+
+*Source: LeetCode #584 — Find Customer Referee*
+
+---
+
+### 19. Project Employees I
+
+#### Problem
+
+Given `project(project_id, employee_id)` and `employee(employee_id, name, experience_years)`, return each project's average employee experience years rounded to two decimals.
+
+**Schema:**
+
+```
+project
+  project_id   integer
+  employee_id  integer  FK → employee
+  PRIMARY KEY (project_id, employee_id)
+
+employee
+  employee_id       integer  PRIMARY KEY
+  name              varchar
+  experience_years  integer
+```
+
+**Expected output (sample):**
+
+| project_id | average_years |
+|------------|---------------|
+| 1          | 2.00          |
+| 2          | 2.50          |
+
+#### Pattern
+
+Join + `AVG` per group.
+
+#### Explanation
+
+Straightforward — join, group, average. Cast to `numeric` before rounding to avoid integer division surprises.
+
+#### Solution
+
+```sql
+SELECT p.project_id,
+       ROUND(AVG(e.experience_years)::numeric, 2) AS average_years
+FROM project p
+JOIN employee e USING (employee_id)
+GROUP BY p.project_id;
+```
+
+*Source: LeetCode #1075 — Project Employees I*
+
+---
+
+### 20. Sales Person
+
+#### Problem
+
+Given `salesperson(sales_id, name, ...)`, `company(com_id, name, ...)`, and `orders(order_id, order_date, com_id, sales_id, amount)`, return the names of salespeople who have **never** placed an order with the company named "RED".
+
+**Schema:**
+
+```
+salesperson
+  sales_id  integer  PRIMARY KEY
+  name      varchar
+
+company
+  com_id  integer  PRIMARY KEY
+  name    varchar
+
+orders
+  order_id    integer  PRIMARY KEY
+  order_date  date
+  com_id      integer  FK → company
+  sales_id    integer  FK → salesperson
+  amount      integer
+```
+
+**Expected output (sample):**
+
+| name |
+|------|
+| Abe  |
+| Pat  |
+
+#### Pattern
+
+Anti-join via `NOT IN` / `NOT EXISTS`.
+
+#### Explanation
+
+`NOT IN` is fine here only if the inner subquery cannot return NULLs (if it can, the whole predicate becomes UNKNOWN and you get zero rows). `NOT EXISTS` is NULL-safe and reads better — use that as your default.
+
+#### Solution
+
+```sql
+SELECT name
+FROM salesperson sp
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM orders o
+  JOIN company c ON c.com_id = o.com_id
+  WHERE o.sales_id = sp.sales_id
+    AND c.name = 'RED'
+);
+```
+
+*Source: LeetCode #607 — Sales Person*
+
+---
+
+## Subqueries & Set Logic
+
+### 21. Customers Who Bought All Products
+
+#### Problem
+
+Given `customer(customer_id, product_key)` and `product(product_key)`, return the customers who have bought every product in the catalogue.
+
+**Schema:**
+
+```
+product
+  product_key  integer  PRIMARY KEY
+
+customer
+  customer_id  integer
+  product_key  integer  FK → product
+```
+
+**Expected output (sample):**
+
+| customer_id |
+|-------------|
+| 1           |
+| 3           |
+
+#### Pattern
+
+Division: `COUNT(DISTINCT)` per customer vs. catalogue size.
+
+#### Explanation
+
+Classic relational division. Group by customer, count distinct products purchased, compare to the catalogue size (a scalar subquery). The alternative `NOT EXISTS (... product NOT IN customer's set ...)` is the literal translation of the universal quantifier but is harder to read.
+
+#### Solution
+
+```sql
+SELECT customer_id
+FROM customer
+GROUP BY customer_id
+HAVING COUNT(DISTINCT product_key) = (SELECT COUNT(*) FROM product);
+```
+
+*Source: LeetCode #1045 — Customers Who Bought All Products*
+
+---
+
+### 22. Customers Who Bought Products A and B but Not C
+
+#### Problem
+
+Given `customers(customer_id, customer_name)` and `orders(order_id, customer_id, product_name)`, return the customers who have bought products `'A'` and `'B'` but not `'C'`.
+
+**Schema:**
+
+```
+customers
+  customer_id    integer  PRIMARY KEY
+  customer_name  varchar
+
+orders
+  order_id      integer  PRIMARY KEY
+  customer_id   integer  FK → customers
+  product_name  varchar
+```
+
+**Expected output (sample):**
+
+| customer_id | customer_name |
+|-------------|---------------|
+| 1           | Daniel        |
+
+#### Pattern
+
+`GROUP BY` + `HAVING` with `BOOL_OR`/`SUM(CASE)` flags.
+
+#### Explanation
+
+Aggregate three booleans per customer and threshold them in one `HAVING`. `BOOL_OR` is the Postgres idiom and reads cleanly; MySQL would use `MAX(product_name='A')`. Avoid three subqueries with `EXISTS` — one pass beats three.
+
+#### Solution
+
+```sql
+SELECT c.customer_id, c.customer_name
+FROM customers c
+JOIN orders o USING (customer_id)
+GROUP BY c.customer_id, c.customer_name
+HAVING BOOL_OR(o.product_name = 'A')
+   AND BOOL_OR(o.product_name = 'B')
+   AND NOT BOOL_OR(o.product_name = 'C');
+```
+
+*Source: LeetCode #1965 / community — Customers Who Bought Products A and B but Not C*
+
+---
+
+### 23. Investments in 2016
+
+#### Problem
+
+Given `insurance(pid, tiv_2015, tiv_2016, lat, lon)`, return the sum of `tiv_2016` for policies whose `tiv_2015` value is shared by at least one other policy **and** whose `(lat, lon)` is unique. Round to two decimals.
+
+**Schema:**
+
+```
+insurance
+  pid       integer  PRIMARY KEY
+  tiv_2015  float
+  tiv_2016  float
+  lat       float
+  lon       float
+```
+
+**Expected output (sample):**
+
+| tiv_2016 |
+|----------|
+| 45.00    |
+
+#### Pattern
+
+Window-function frequency counts.
+
+#### Explanation
+
+Two conditions become two `COUNT(*) OVER (PARTITION BY ...)` calls — frequency of `tiv_2015` and frequency of `(lat, lon)`. One pass, no self-joins.
+
+#### Solution
+
+```sql
+SELECT ROUND(SUM(tiv_2016)::numeric, 2) AS tiv_2016
+FROM (
+  SELECT tiv_2016,
+         COUNT(*) OVER (PARTITION BY tiv_2015)   AS tiv15_cnt,
+         COUNT(*) OVER (PARTITION BY lat, lon)   AS loc_cnt
+  FROM insurance
+) t
+WHERE tiv15_cnt > 1 AND loc_cnt = 1;
+```
+
+*Source: LeetCode #585 — Investments in 2016*
+
+---
+
+### 24. Triangle Judgment
+
+#### Problem
+
+Given `triangle(x, y, z)`, return for each row whether the three lengths can form a valid triangle (`'Yes'` / `'No'`).
+
+**Schema:**
+
+```
+triangle
+  x  integer
+  y  integer
+  z  integer
+```
+
+**Expected output (sample):**
+
+| x  | y | z  | triangle |
+|----|---|----|----------|
+| 13 | 15 | 30 | No       |
+| 10 | 20 | 15 | Yes      |
+
+#### Pattern
+
+`CASE` expression.
+
+#### Explanation
+
+Triangle inequality: each side must be strictly less than the sum of the other two. A `CASE` expression is the cleanest way.
+
+#### Solution
+
+```sql
+SELECT x, y, z,
+       CASE
+         WHEN x + y > z AND x + z > y AND y + z > x THEN 'Yes'
+         ELSE 'No'
+       END AS triangle
+FROM triangle;
+```
+
+*Source: LeetCode #610 — Triangle Judgment*
+
+---
+
+### 25. Biggest Single Number
+
+#### Problem
+
+From a `my_numbers(num)` table, return the largest number that appears exactly once. Return `NULL` if no such number exists.
+
+**Schema:**
+
+```
+my_numbers
+  num  integer
+```
+
+**Expected output (sample):**
+
+| num |
+|-----|
+| 6   |
+
+#### Pattern
+
+`GROUP BY` + `HAVING` + scalar subquery.
+
+#### Explanation
+
+Group, keep singletons, `MAX`. Wrap in a scalar subquery so an empty result returns `NULL` rather than zero rows — important when the grader expects exactly one row.
+
+#### Solution
+
+```sql
+SELECT (
+  SELECT MAX(num)
+  FROM my_numbers
+  GROUP BY num
+  HAVING COUNT(*) = 1
+  ORDER BY 1 DESC
+  LIMIT 1
+) AS num;
+```
+
+*Source: LeetCode #619 — Biggest Single Number*
+
+---
+
+### 26. Group Sold Products by the Date
+
+#### Problem
+
+From `activities(sell_date, product)`, for each `sell_date` return the number of distinct products sold and an alphabetically-sorted comma-separated list of those products.
+
+**Schema:**
+
+```
+activities
+  sell_date  date
+  product    varchar
+```
+
+**Expected output (sample):**
+
+| sell_date  | num_sold | products                     |
+|------------|----------|------------------------------|
+| 2020-05-30 | 3        | Basketball,Headphone,T-Shirt |
+| 2020-06-01 | 2        | Bible,Pencil                 |
+
+#### Pattern
+
+`COUNT(DISTINCT)` + `STRING_AGG`.
+
+#### Explanation
+
+Postgres has `STRING_AGG(expr, ',' ORDER BY expr)` which sorts within the aggregate — exactly what's needed. MySQL's equivalent is `GROUP_CONCAT(... ORDER BY ... SEPARATOR ',')`. Wrap the inner expression in `DISTINCT` to dedupe products that repeat in a day.
+
+#### Solution
+
+```sql
+SELECT sell_date,
+       COUNT(DISTINCT product)                         AS num_sold,
+       STRING_AGG(DISTINCT product, ',' ORDER BY product) AS products
+FROM activities
+GROUP BY sell_date
+ORDER BY sell_date;
+```
+
+*Source: LeetCode #1484 — Group Sold Products by the Date*
+
+---
+
+### 27. Customers Who Never Order
+
+#### Problem
+
+From `customers(id, name)` and `orders(id, customer_id)`, return the names of customers who have never placed an order.
+
+**Schema:**
+
+```
+customers
+  id    integer  PRIMARY KEY
+  name  varchar
+
+orders
+  id           integer  PRIMARY KEY
+  customer_id  integer  FK → customers(id)
+```
+
+**Expected output (sample):**
+
+| customers |
 |-----------|
-| 2012-09-18 09:00:00 |
-| 2012-09-18 17:30:00 |
-| 2012-09-18 13:30:00 |
-| 2012-09-18 20:00:00 |
-| 2012-09-19 09:30:00 |
-| ... |
+| Henry     |
+| Max       |
 
 #### Pattern
-INNER JOIN
+
+Anti-join via `NOT EXISTS`.
 
 #### Explanation
-Classic inner join via the foreign key. Alias both tables (`bks`, `mems`) so the column references stay short and unambiguous — essential once you're chaining three or more joins.
+
+`NOT EXISTS` is the safest formulation — NULL-safe and the planner runs it as an anti-join. `NOT IN` would explode if any `customer_id` were NULL.
 
 #### Solution
+
 ```sql
-select bks.starttime
-    from
-        cd.bookings bks
-        inner join cd.members mems
-            on mems.memid = bks.memid
-    where
-        mems.firstname='David'
-        and mems.surname='Farrell';
+SELECT name AS customers
+FROM customers c
+WHERE NOT EXISTS (
+  SELECT 1 FROM orders o WHERE o.customer_id = c.id
+);
 ```
+
+*Source: LeetCode #183 — Customers Who Never Order*
 
 ---
 
-### 14. Work out the start times of bookings for tennis courts
+## Window Functions
+
+### 28. Rank Scores
 
 #### Problem
-Produce a list of the start times for bookings for tennis courts on 2012-09-21. Return start time and facility name, ordered by time.
 
-**Tables:** `cd.facilities`, `cd.bookings`
+Given `scores(id, score)`, rank each score in descending order. Ties get the same rank, and the next rank is consecutive (no gaps).
+
+**Schema:**
+
+```
+scores
+  id     integer  PRIMARY KEY
+  score  numeric
+```
 
 **Expected output (sample):**
-| start | name |
+
+| score | rank |
 |-------|------|
-| 2012-09-21 08:00:00 | Tennis Court 1 |
-| 2012-09-21 08:00:00 | Tennis Court 2 |
-| 2012-09-21 09:30:00 | Tennis Court 1 |
-| 2012-09-21 10:00:00 | Tennis Court 2 |
-| 2012-09-21 11:30:00 | Tennis Court 2 |
-| ... | ... |
+| 4.00  | 1    |
+| 4.00  | 1    |
+| 3.85  | 2    |
+| 3.65  | 3    |
 
 #### Pattern
-INNER JOIN, WHERE filter
+
+`DENSE_RANK` window function.
 
 #### Explanation
-Join bookings to facilities, filter on facility name and a half-open day range. The `IN` on `facs.name` is fine here because there are only two tennis courts; if you cared about all courts you'd filter on a category column.
+
+Three window functions are easy to confuse: `RANK` leaves gaps after ties (1,1,3), `DENSE_RANK` doesn't (1,1,2), `ROW_NUMBER` breaks ties arbitrarily. The "no gaps" requirement is the giveaway.
 
 #### Solution
+
 ```sql
-select bks.starttime as start, facs.name as name
-    from
-        cd.facilities facs
-        inner join cd.bookings bks
-            on facs.facid = bks.facid
-    where
-        facs.name in ('Tennis Court 2','Tennis Court 1') and
-        bks.starttime >= '2012-09-21' and
-        bks.starttime < '2012-09-22'
-order by bks.starttime;
+SELECT score,
+       DENSE_RANK() OVER (ORDER BY score DESC) AS rank
+FROM scores;
 ```
+
+*Source: LeetCode #178 — Rank Scores*
 
 ---
 
-### 15. Produce a list of all members who have recommended another member
+### 29. Consecutive Numbers
 
 #### Problem
-Output a deduplicated, name-sorted list of all members who have recommended another member.
 
-**Tables:** `cd.members`
+Given `logs(id, num)`, return all numbers that appear at least three times consecutively (ordered by `id`).
+
+**Schema:**
+
+```
+logs
+  id   integer  PRIMARY KEY
+  num  varchar
+```
 
 **Expected output (sample):**
-| firstname | surname |
-|-----------|---------|
-| Florence | Bader |
-| Timothy | Baker |
-| Gerald | Butters |
-| Jemima | Farrell |
-| Matthew | Genting |
-| David | Jones |
-| ... | ... |
+
+| consecutive_nums |
+|------------------|
+| 1                |
 
 #### Pattern
-Self-join
+
+`LAG` × 2 (or self-join offset).
 
 #### Explanation
-`cd.members.recommendedby` references the same table — a classic adjacency-list self-join. Alias the table twice (`mems` for the recommendee, `recs` for the recommender) and join on the recommendation FK. `DISTINCT` collapses members who've recommended multiple people.
+
+For each row, compare to the two prior rows with `LAG(num, 1)` and `LAG(num, 2)`. If all three agree, the current row is the tail of a run of three. The classic alternative is a triple self-join on `id`, `id-1`, `id-2`, but that assumes contiguous ids.
 
 #### Solution
+
 ```sql
-select distinct recs.firstname as firstname, recs.surname as surname
-    from
-        cd.members mems
-        inner join cd.members recs
-            on recs.memid = mems.recommendedby
-order by surname, firstname;
+SELECT DISTINCT num AS consecutive_nums
+FROM (
+  SELECT num,
+         LAG(num, 1) OVER (ORDER BY id) AS p1,
+         LAG(num, 2) OVER (ORDER BY id) AS p2
+  FROM logs
+) t
+WHERE num = p1 AND num = p2;
 ```
+
+*Source: LeetCode #180 — Consecutive Numbers*
 
 ---
 
-### 16. Produce a list of all members, along with their recommender
+### 30. Department Highest Salary
 
 #### Problem
-List every member with the individual who recommended them (if any), ordered by surname then firstname.
 
-**Tables:** `cd.members`
+Given `employee(id, name, salary, departmentId)` and `department(id, name)`, return for each department the names of its highest-paid employees (handle ties — multiple winners possible).
+
+**Schema:**
+
+```
+employee
+  id            integer  PRIMARY KEY
+  name          varchar
+  salary        integer
+  department_id integer  FK → department
+
+department
+  id    integer  PRIMARY KEY
+  name  varchar
+```
 
 **Expected output (sample):**
-| memfname | memsname | recfname | recsname |
-|----------|----------|----------|----------|
-| Florence | Bader | Ponder | Stibbons |
-| Anne | Baker | Ponder | Stibbons |
-| Timothy | Baker | Jemima | Farrell |
-| Tim | Boothe | Tim | Rownam |
-| Gerald | Butters | Darren | Smith |
-| Joan | Coplin | Timothy | Baker |
-| ... | ... | ... | ... |
+
+| Department | Employee | Salary |
+|------------|----------|--------|
+| IT         | Max      | 90000  |
+| Sales      | Henry    | 80000  |
 
 #### Pattern
-LEFT JOIN, Self-join
+
+`RANK` partitioned by department.
 
 #### Explanation
-Inner join would drop members who weren't recommended by anyone. Left join keeps every row on the left side and fills `NULL` on the right where there's no match — the standard "include the unmatched" pattern.
+
+`RANK` is the right tool for "top with ties" — multiple winners share rank 1. `ROW_NUMBER` would pick exactly one. `MAX` per department joined back is the textbook alternative; the window form keeps it to one pass.
 
 #### Solution
+
 ```sql
-select mems.firstname as memfname, mems.surname as memsname,
-       recs.firstname as recfname, recs.surname as recsname
-    from
-        cd.members mems
-        left outer join cd.members recs
-            on recs.memid = mems.recommendedby
-order by memsname, memfname;
+SELECT d.name AS "Department",
+       e.name AS "Employee",
+       e.salary AS "Salary"
+FROM (
+  SELECT name, salary, department_id,
+         RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rk
+  FROM employee
+) e
+JOIN department d ON d.id = e.department_id
+WHERE e.rk = 1;
 ```
+
+*Source: LeetCode #184 — Department Highest Salary*
 
 ---
 
-### 17. Produce a list of all members who have used a tennis court
+### 31. Department Top Three Salaries
 
 #### Problem
-List members who have used a tennis court. Output the court name and the member's full name (single column), deduplicated and ordered.
 
-**Tables:** `cd.members`, `cd.bookings`, `cd.facilities`
+Given `employee(id, name, salary, departmentId)` and `department(id, name)`, return the top three distinct salaries per department (handle ties — many employees can share a rank).
+
+**Schema:**
+
+```
+employee
+  id            integer  PRIMARY KEY
+  name          varchar
+  salary        integer
+  department_id integer  FK → department
+
+department
+  id    integer  PRIMARY KEY
+  name  varchar
+```
 
 **Expected output (sample):**
-| member | facility |
-|--------|----------|
-| Anne Baker | Tennis Court 1 |
-| Anne Baker | Tennis Court 2 |
-| Burton Tracy | Tennis Court 1 |
-| Burton Tracy | Tennis Court 2 |
-| Charles Owen | Tennis Court 1 |
-| Charles Owen | Tennis Court 2 |
-| ... | ... |
+
+| Department | Employee | Salary |
+|------------|----------|--------|
+| IT         | Max      | 90000  |
+| IT         | Randy    | 85000  |
+| IT         | Joe      | 85000  |
+| IT         | Will     | 70000  |
+| Sales      | Henry    | 80000  |
 
 #### Pattern
-INNER JOIN
+
+`DENSE_RANK` partitioned by department.
 
 #### Explanation
-Three-table join: members → bookings → facilities. The `||` operator concatenates strings; in Postgres concatenating with a `NULL` yields `NULL`, so this only works because firstname/surname are NOT NULL.
+
+"Top three distinct salaries" → `DENSE_RANK` (no gaps after ties) with `rk <= 3`. The ranking is on distinct salary values, which is exactly what `DENSE_RANK` produces. Beats the legacy "correlated subquery counting higher salaries" approach by an order of magnitude in time complexity.
 
 #### Solution
+
 ```sql
-select distinct mems.firstname || ' ' || mems.surname as member, facs.name as facility
-    from
-        cd.members mems
-        inner join cd.bookings bks
-            on mems.memid = bks.memid
-        inner join cd.facilities facs
-            on bks.facid = facs.facid
-    where
-        facs.name in ('Tennis Court 2','Tennis Court 1')
-order by member, facility
+WITH ranked AS (
+  SELECT name, salary, department_id,
+         DENSE_RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rk
+  FROM employee
+)
+SELECT d.name AS "Department",
+       e.name AS "Employee",
+       e.salary AS "Salary"
+FROM ranked e
+JOIN department d ON d.id = e.department_id
+WHERE e.rk <= 3;
 ```
+
+*Source: LeetCode #185 — Department Top Three Salaries*
 
 ---
 
-### 18. Produce a list of costly bookings
+### 32. Restaurant Growth
 
 #### Problem
-List bookings on 2012-09-14 that cost the member or guest more than $30. Output facility, member name (single column), cost. Order by descending cost. No subqueries.
 
-**Tables:** `cd.members`, `cd.bookings`, `cd.facilities`
+Given `customer(customer_id, name, visited_on, amount)` — one row per visit per day per customer — return for each day starting from the seventh recorded day: the date, the 7-day rolling sum of amounts ending on that day, and the 7-day rolling average rounded to two decimals.
+
+**Schema:**
+
+```
+customer
+  customer_id  integer
+  name         varchar
+  visited_on   date
+  amount       integer
+```
 
 **Expected output (sample):**
-| member | facility | cost |
-|--------|----------|------|
-| GUEST GUEST | Massage Room 2 | 320 |
-| GUEST GUEST | Massage Room 1 | 160 |
-| GUEST GUEST | Massage Room 1 | 160 |
-| GUEST GUEST | Massage Room 1 | 160 |
-| GUEST GUEST | Tennis Court 2 | 150 |
-| Jemima Farrell | Massage Room 1 | 140 |
-| ... | ... | ... |
+
+| visited_on | amount | average_amount |
+|------------|--------|----------------|
+| 2019-01-07 | 860    | 122.86         |
+| 2019-01-08 | 840    | 120.00         |
 
 #### Pattern
-INNER JOIN, CASE WHEN (pivot)
+
+Daily roll-up + window with rows frame.
 
 #### Explanation
-Guests pay `guestcost`, members pay `membercost`. Computing the cost in a `CASE` is straightforward, but without a subquery you have to duplicate the cost calculation in the `WHERE` clause — ugly, but the constraint forces it. The next problem fixes this with a subquery.
+
+Two passes: aggregate per day, then 7-day rolling sum using `ROWS BETWEEN 6 PRECEDING AND CURRENT ROW`. The `OFFSET 6` (or `WHERE row_number >= 7`) drops the leading partial windows where the rolling sum would be incomplete.
 
 #### Solution
+
 ```sql
-select mems.firstname || ' ' || mems.surname as member,
-    facs.name as facility,
-    case
-        when mems.memid = 0 then
-            bks.slots*facs.guestcost
-        else
-            bks.slots*facs.membercost
-    end as cost
-from
-    cd.members mems
-    inner join cd.bookings bks
-        on mems.memid = bks.memid
-    inner join cd.facilities facs
-        on bks.facid = facs.facid
-where
-    bks.starttime >= '2012-09-14' and
-    bks.starttime < '2012-09-15' and (
-        (mems.memid = 0 and bks.slots*facs.guestcost > 30) or
-        (mems.memid != 0 and bks.slots*facs.membercost > 30)
-    )
-order by cost desc;
+WITH daily AS (
+  SELECT visited_on, SUM(amount) AS day_total
+  FROM customer
+  GROUP BY visited_on
+),
+rolled AS (
+  SELECT visited_on,
+         SUM(day_total) OVER w  AS amount,
+         AVG(day_total) OVER w  AS avg_amt,
+         ROW_NUMBER()  OVER (ORDER BY visited_on) AS rn
+  FROM daily
+  WINDOW w AS (ORDER BY visited_on ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
+)
+SELECT visited_on, amount, ROUND(avg_amt::numeric, 2) AS average_amount
+FROM rolled
+WHERE rn >= 7
+ORDER BY visited_on;
 ```
+
+*Source: LeetCode #1321 — Restaurant Growth*
 
 ---
 
-### 19. Produce a list of all members, along with their recommender, using no joins
+### 33. Game Play Analysis IV
 
 #### Problem
-Recreate the recommender-list query without any joins. Use a correlated subquery instead.
 
-**Tables:** `cd.members`
+Given `activity(player_id, device_id, event_date, games_played)`, return the fraction of players who logged in the day after their first login, rounded to two decimals.
+
+**Schema:**
+
+```
+activity
+  player_id    integer
+  device_id    integer
+  event_date   date
+  games_played integer
+  PRIMARY KEY (player_id, event_date)
+```
 
 **Expected output (sample):**
-| member | recommender |
-|--------|-------------|
-| Anna Mackenzie | Darren Smith |
-| Anne Baker | Ponder Stibbons |
-| Burton Tracy | Charles Owen |
-| Darren Smith | Darren Smith |
-| David Farrell | David Jones |
-| Janice Joplette | David Pinker |
-| ... | ... |
+
+| fraction |
+|----------|
+| 0.33     |
 
 #### Pattern
-Correlated subquery
+
+`MIN` window + date arithmetic.
 
 #### Explanation
-The inline subquery in the SELECT list runs once per outer row, parameterised by the current `mems.recommendedby`. Equivalent to a left join semantically but typically worse for performance — the planner usually can't transform it as cleanly. Useful to know, generally avoid.
+
+For each player, find the first login date, then check if `first_login + 1` appears anywhere in their history. `EXISTS` is fine, but a window-min + self-join is also common. Divide by total distinct players.
 
 #### Solution
+
 ```sql
-select distinct mems.firstname || ' ' ||  mems.surname as member,
-    (select recs.firstname || ' ' || recs.surname as recommender
-        from cd.members recs
-        where recs.memid = mems.recommendedby
-    )
-    from
-        cd.members mems
-order by member;
+WITH firsts AS (
+  SELECT player_id,
+         MIN(event_date) AS first_date
+  FROM activity
+  GROUP BY player_id
+)
+SELECT ROUND(
+         COUNT(*) FILTER (
+           WHERE EXISTS (
+             SELECT 1 FROM activity a
+             WHERE a.player_id  = f.player_id
+               AND a.event_date = f.first_date + INTERVAL '1 day'
+           )
+         )::numeric
+         / COUNT(*),
+         2
+       ) AS fraction
+FROM firsts f;
 ```
+
+*Source: LeetCode #550 — Game Play Analysis IV*
 
 ---
 
-### 20. Produce a list of costly bookings, using a subquery
+### 34. Last Person to Fit in the Bus
 
 #### Problem
-Same as problem 18 (bookings > $30 on 2012-09-14), but cleaner: compute the cost once in a subquery, filter on it in the outer query.
 
-**Tables:** `cd.members`, `cd.bookings`, `cd.facilities`
+Given `queue(person_id, person_name, weight, turn)` representing a boarding queue ordered by `turn`, return the name of the last person who can board without the running weight exceeding 1000.
+
+**Schema:**
+
+```
+queue
+  person_id    integer  PRIMARY KEY
+  person_name  varchar
+  weight       integer
+  turn         integer
+```
 
 **Expected output (sample):**
-| member | facility | cost |
-|--------|----------|------|
-| GUEST GUEST | Massage Room 2 | 320 |
-| GUEST GUEST | Massage Room 1 | 160 |
-| GUEST GUEST | Massage Room 1 | 160 |
-| GUEST GUEST | Massage Room 1 | 160 |
-| GUEST GUEST | Tennis Court 2 | 150 |
-| Jemima Farrell | Massage Room 1 | 140 |
-| ... | ... | ... |
+
+| person_name |
+|-------------|
+| John Cena   |
 
 #### Pattern
-Subquery
+
+Running sum + threshold + `LIMIT 1`.
 
 #### Explanation
-The inner query produces all bookings with their computed cost; the outer query just filters on `cost > 30`. No duplication of the conditional cost expression. This is the right shape any time you'd otherwise repeat a derived expression in both `SELECT` and `WHERE`.
+
+Cumulative `SUM(weight) OVER (ORDER BY turn)`, then keep rows whose total is ≤ 1000 and pick the last one. `ORDER BY turn DESC LIMIT 1` is the idiomatic finish.
 
 #### Solution
+
 ```sql
-select member, facility, cost from (
-    select
-        mems.firstname || ' ' || mems.surname as member,
-        facs.name as facility,
-        case
-            when mems.memid = 0 then
-                bks.slots*facs.guestcost
-            else
-                bks.slots*facs.membercost
-        end as cost
-        from
-            cd.members mems
-            inner join cd.bookings bks
-                on mems.memid = bks.memid
-            inner join cd.facilities facs
-                on bks.facid = facs.facid
-        where
-            bks.starttime >= '2012-09-14' and
-            bks.starttime < '2012-09-15'
-    ) as bookings
-    where cost > 30
-order by cost desc;
-```
-
----
-
-### 21. Insert some data into a table
-
-#### Problem
-Add a new facility (facid 9, 'Spa', membercost 20, guestcost 30, initialoutlay 100000, monthlymaintenance 800) to `cd.facilities`.
-
-**Tables:** `cd.facilities`
-
-**Expected output:** No result set; modifies 1 row.
-
-#### Pattern
-INSERT
-
-#### Explanation
-Always name your columns in `INSERT` — positional inserts break the moment someone adds, drops, or reorders a column. The values list must match the column list one-for-one.
-
-#### Solution
-```sql
-insert into cd.facilities
-    (facid, name, membercost, guestcost, initialoutlay, monthlymaintenance)
-    values (9, 'Spa', 20, 30, 100000, 800);
-```
-
----
-
-### 22. Insert multiple rows of data into a table
-
-#### Problem
-Add two facilities in a single statement: 'Spa' (facid 9) and 'Squash Court 2' (facid 10).
-
-**Tables:** `cd.facilities`
-
-**Expected output:** No result set; modifies 2 rows.
-
-#### Pattern
-INSERT
-
-#### Explanation
-Multi-row VALUES is one network round-trip and one transaction — much faster than N separate inserts. For bulk loads (thousands of rows), prefer `COPY` over even multi-row inserts.
-
-#### Solution
-```sql
-insert into cd.facilities
-    (facid, name, membercost, guestcost, initialoutlay, monthlymaintenance)
-    values
-        (9, 'Spa', 20, 30, 100000, 800),
-        (10, 'Squash Court 2', 3.5, 17.5, 5000, 80);
-```
-
----
-
-### 23. Insert calculated data into a table
-
-#### Problem
-Insert the spa using a facid one greater than the current maximum.
-
-**Tables:** `cd.facilities`
-
-**Expected output:** No result set; modifies 1 row.
-
-#### Pattern
-INSERT, Subquery
-
-#### Explanation
-`INSERT ... SELECT` lets you build rows from query output. Note: this pattern is racy under concurrency — two sessions could read the same max and collide. In production use a `SERIAL`/`IDENTITY` column or a sequence.
-
-#### Solution
-```sql
-insert into cd.facilities
-    (facid, name, membercost, guestcost, initialoutlay, monthlymaintenance)
-    select (select max(facid) from cd.facilities)+1, 'Spa', 20, 30, 100000, 800;
-```
-
----
-
-### 24. Update some existing data
-
-#### Problem
-Fix the initial outlay of the second tennis court (facid 1) from 8000 to 10000.
-
-**Tables:** `cd.facilities`
-
-**Expected output:** No result set; modifies 1 row.
-
-#### Pattern
-UPDATE
-
-#### Explanation
-Basic targeted update. Always include a `WHERE` clause — without one, `UPDATE` rewrites every row in the table. (Run it inside a transaction in production so you can `ROLLBACK` if the row count is surprising.)
-
-#### Solution
-```sql
-update cd.facilities
-    set initialoutlay = 10000
-    where facid = 1;
-```
-
----
-
-### 25. Update multiple rows and columns at the same time
-
-#### Problem
-Set both tennis courts (facids 0 and 1) to membercost 6 and guestcost 30 in one statement.
-
-**Tables:** `cd.facilities`
-
-**Expected output:** No result set; modifies 2 rows.
-
-#### Pattern
-UPDATE
-
-#### Explanation
-Comma-separated assignments in `SET` update multiple columns at once. `IN (0,1)` widens the match to multiple rows. One statement, one transaction.
-
-#### Solution
-```sql
-update cd.facilities
-    set
-        membercost = 6,
-        guestcost = 30
-    where facid in (0,1);
-```
-
----
-
-### 26. Update a row based on the contents of another row
-
-#### Problem
-Update tennis court 2 (facid 1) so its prices are 10% higher than tennis court 1 (facid 0). Don't hard-code prices.
-
-**Tables:** `cd.facilities`
-
-**Expected output:** No result set; modifies 1 row.
-
-#### Pattern
-UPDATE with JOIN, Subquery
-
-#### Explanation
-Scalar subqueries in `SET` pull values from another row. Works, but for multi-column updates Postgres has a cleaner form: `UPDATE ... SET (a,b) = (SELECT a*1.1, b*1.1 FROM ... WHERE facid=0)` — single subquery, single scan.
-
-#### Solution
-```sql
-update cd.facilities facs
-    set
-        membercost = (select membercost * 1.1 from cd.facilities where facid = 0),
-        guestcost = (select guestcost * 1.1 from cd.facilities where facid = 0)
-    where facs.facid = 1;
-```
-
----
-
-### 27. Delete all bookings
-
-#### Problem
-Delete every row from `cd.bookings`.
-
-**Tables:** `cd.bookings`
-
-**Expected output:** No result set; deletes every row in `cd.bookings`.
-
-#### Pattern
-DELETE
-
-#### Explanation
-`DELETE` without `WHERE` empties the table — but slowly, row by row, generating MVCC versions and WAL. For "blow it all away" prefer `TRUNCATE`: instant, no per-row work, resets the relfile. Trade-off: `TRUNCATE` can't be selectively rolled back at row level and takes a stronger lock.
-
-#### Solution
-```sql
-delete from cd.bookings;
-```
-
----
-
-### 28. Delete a member from the cd.members table
-
-#### Problem
-Remove member 37 (who has no bookings).
-
-**Tables:** `cd.members`
-
-**Expected output:** No result set; modifies 1 row.
-
-#### Pattern
-DELETE
-
-#### Explanation
-Standard targeted delete. If the row were referenced by a FK with no `ON DELETE` action, this would error — here it works because the member has no bookings to violate the constraint.
-
-#### Solution
-```sql
-delete from cd.members where memid = 37;
-```
-
----
-
-### 29. Delete based on a subquery
-
-#### Problem
-Delete every member who has never made a booking.
-
-**Tables:** `cd.members`, `cd.bookings`
-
-**Expected output:** No result set; deletes members not present in `cd.bookings`.
-
-#### Pattern
-DELETE, Anti-join, IN subquery
-
-#### Explanation
-`NOT IN (subquery)` is the anti-join in disguise. Watch out: if the subquery can return `NULL`, `NOT IN` returns no rows because `x NOT IN (NULL, ...)` is `UNKNOWN`. `NOT EXISTS` (or `LEFT JOIN ... WHERE right.key IS NULL`) is safer.
-
-#### Solution
-```sql
-delete from cd.members where memid not in (select memid from cd.bookings);
-```
-
----
-
-### 30. Count the number of facilities
-
-#### Problem
-Count the rows in `cd.facilities`.
-
-**Tables:** `cd.facilities`
-
-**Expected output (sample):**
-| count |
-|-------|
-| 9 |
-
-#### Pattern
-COUNT
-
-#### Explanation
-`COUNT(*)` counts rows; `COUNT(col)` counts non-NULL values of `col`; `COUNT(DISTINCT col)` counts distinct non-NULL values. They are not interchangeable — interviewers love this distinction.
-
-#### Solution
-```sql
-select count(*) from cd.facilities;
-```
-
----
-
-### 31. Count the number of expensive facilities
-
-#### Problem
-Count facilities with a guest cost of 10 or more.
-
-**Tables:** `cd.facilities`
-
-**Expected output (sample):**
-| count |
-|-------|
-| 6 |
-
-#### Pattern
-COUNT, WHERE filter
-
-#### Explanation
-Filter first with `WHERE`, then count. `WHERE` runs before aggregation so the count only sees matching rows.
-
-#### Solution
-```sql
-select count(*) from cd.facilities where guestcost >= 10;
-```
-
----
-
-### 32. Count the number of recommendations each member makes
-
-#### Problem
-Per recommender, count how many members they've recommended. Order by recommender ID.
-
-**Tables:** `cd.members`
-
-**Expected output (sample):**
-| recommendedby | count |
-|---------------|-------|
-| 1 | 5 |
-| 2 | 3 |
-| 3 | 1 |
-| 4 | 2 |
-| 5 | 1 |
-| 6 | 1 |
-| ... | ... |
-
-#### Pattern
-GROUP BY, COUNT
-
-#### Explanation
-`GROUP BY recommendedby` collapses rows that share a recommender, then `COUNT(*)` counts members in each group. `WHERE recommendedby IS NOT NULL` excludes members who weren't recommended by anyone — otherwise they'd form a phantom NULL group.
-
-#### Solution
-```sql
-select recommendedby, count(*)
-    from cd.members
-    where recommendedby is not null
-    group by recommendedby
-order by recommendedby;
-```
-
----
-
-### 33. List the total slots booked per facility
-
-#### Problem
-For each facility, sum the slots booked. Output facid and total, sorted by facid.
-
-**Tables:** `cd.bookings`
-
-**Expected output (sample):**
-| facid | Total Slots |
-|-------|-------------|
-| 0 | 1320 |
-| 1 | 1278 |
-| 2 | 1209 |
-| 3 | 830 |
-| 4 | 1404 |
-| ... | ... |
-
-#### Pattern
-GROUP BY, SUM
-
-#### Explanation
-Group by the dimension you want one row per, aggregate everything else. Every non-aggregated column in `SELECT` must appear in `GROUP BY` (or be functionally dependent on the group key, which Postgres allows when grouping by a primary key).
-
-#### Solution
-```sql
-select facid, sum(slots) as "Total Slots"
-    from cd.bookings
-    group by facid
-order by facid;
-```
-
----
-
-### 34. List the total slots booked per facility in a given month
-
-#### Problem
-For September 2012 only, sum slots per facility. Order by total slots.
-
-**Tables:** `cd.bookings`
-
-**Expected output (sample):**
-| facid | Total Slots |
-|-------|-------------|
-| 5 | 122 |
-| 3 | 422 |
-| 7 | 426 |
-| 8 | 471 |
-| 6 | 540 |
-| ... | ... |
-
-#### Pattern
-GROUP BY, SUM, WHERE filter
-
-#### Explanation
-`WHERE` filters rows before the grouping; the aggregate runs over the filtered set. `ORDER BY sum(slots)` is legal — Postgres re-evaluates the aggregate in the sort step (or, more typically, sorts by the pre-computed aggregate column).
-
-#### Solution
-```sql
-select facid, sum(slots) as "Total Slots"
-    from cd.bookings
-    where
-        starttime >= '2012-09-01'
-        and starttime < '2012-10-01'
-    group by facid
-order by sum(slots);
-```
-
----
-
-### 35. List the total slots booked per facility per month
-
-#### Problem
-For 2012, sum slots per facility per month. Output facid, month, slots, sorted by facid then month.
-
-**Tables:** `cd.bookings`
-
-**Expected output (sample):**
-| facid | month | Total Slots |
-|-------|-------|-------------|
-| 0 | 7 | 270 |
-| 0 | 8 | 459 |
-| 0 | 9 | 591 |
-| 1 | 7 | 207 |
-| 1 | 8 | 483 |
-| 1 | 9 | 588 |
-| ... | ... | ... |
-
-#### Pattern
-GROUP BY, EXTRACT
-
-#### Explanation
-Group by two dimensions: facility and the extracted month. `EXTRACT(month FROM ...)` returns 1..12. For more flexibility (e.g. year+month rollups across multiple years), `DATE_TRUNC('month', ts)` keeps the full date and is usually a better hammer.
-
-#### Solution
-```sql
-select facid, extract(month from starttime) as month, sum(slots) as "Total Slots"
-    from cd.bookings
-    where extract(year from starttime) = 2012
-    group by facid, month
-order by facid, month;
-```
-
----
-
-### 36. Find the count of members who have made at least one booking
-
-#### Problem
-Count distinct members (including guests) who have made any booking.
-
-**Tables:** `cd.bookings`
-
-**Expected output (sample):**
-| count |
-|-------|
-| 30 |
-
-#### Pattern
-COUNT, DISTINCT
-
-#### Explanation
-`COUNT(DISTINCT memid)` collapses duplicates first, then counts. Faster than `SELECT COUNT(*) FROM (SELECT DISTINCT memid ...)` and clearer.
-
-#### Solution
-```sql
-select count(distinct memid) from cd.bookings
-```
-
----
-
-### 37. List facilities with more than 1000 slots booked
-
-#### Problem
-Sum slots per facility, return only facilities with totals over 1000. Output facid and total, ordered by facid.
-
-**Tables:** `cd.bookings`
-
-**Expected output (sample):**
-| facid | Total Slots |
-|-------|-------------|
-| 0 | 1320 |
-| 1 | 1278 |
-| 2 | 1209 |
-| 4 | 1404 |
-| 6 | 1104 |
-
-#### Pattern
-GROUP BY, HAVING
-
-#### Explanation
-`WHERE` filters rows before aggregation; `HAVING` filters groups after. You can't put aggregates in `WHERE` — they don't exist yet at that stage of the query.
-
-#### Solution
-```sql
-select facid, sum(slots) as "Total Slots"
-        from cd.bookings
-        group by facid
-        having sum(slots) > 1000
-        order by facid
-```
-
----
-
-### 38. Find the total revenue of each facility
-
-#### Problem
-Compute total revenue per facility, accounting for the guest/member cost difference. Output facility name and revenue, ordered by revenue.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
-**Expected output (sample):**
-| name | revenue |
-|------|---------|
-| Table Tennis | 180 |
-| Snooker Table | 240 |
-| Pool Table | 270 |
-| Badminton Court | 1906.5 |
-| Squash Court | 13468.0 |
-| Tennis Court 1 | 13860 |
-| Tennis Court 2 | 14310 |
-| Massage Room 2 | 15810 |
-| Massage Room 1 | 72540 |
-
-#### Pattern
-INNER JOIN, GROUP BY, SUM, CASE WHEN (pivot)
-
-#### Explanation
-`SUM` over a `CASE` expression is the conditional-aggregate idiom — you can compute multiple metrics in one pass by using one `SUM(CASE WHEN ...)` per metric. Cleaner than two queries unioned together.
-
-#### Solution
-```sql
-select facs.name, sum(slots * case
-            when memid = 0 then facs.guestcost
-            else facs.membercost
-        end) as revenue
-    from cd.bookings bks
-    inner join cd.facilities facs
-        on bks.facid = facs.facid
-    group by facs.name
-order by revenue;
-```
-
----
-
-### 39. Find facilities with a total revenue less than 1000
-
-#### Problem
-Same revenue computation as problem 38, but return only facilities under 1000 in revenue.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
-**Expected output (sample):**
-| name | revenue |
-|------|---------|
-| Table Tennis | 180 |
-| Snooker Table | 240 |
-| Pool Table | 270 |
-
-#### Pattern
-Subquery, GROUP BY
-
-#### Explanation
-You could use `HAVING SUM(...) < 1000`, but the published solution wraps the aggregate in a subquery and filters in the outer query. Both work; the subquery form is sometimes clearer when the aggregate expression is gnarly and would otherwise be repeated.
-
-#### Solution
-```sql
-select name, revenue from (
-    select facs.name, sum(case
-                when memid = 0 then slots * facs.guestcost
-                else slots * membercost
-            end) as revenue
-        from cd.bookings bks
-        inner join cd.facilities facs
-            on bks.facid = facs.facid
-        group by facs.name
-    ) as agg where revenue < 1000
-order by revenue;
-```
-
----
-
-### 40. Output the facility id that has the highest number of slots booked
-
-#### Problem
-Return the single facility with the most slots booked.
-
-**Tables:** `cd.bookings`
-
-**Expected output (sample):**
-| facid | Total Slots |
-|-------|-------------|
-| 4 | 1404 |
-
-#### Pattern
-GROUP BY, ORDER BY, LIMIT
-
-#### Explanation
-Sort descending, take one. Simple but doesn't handle ties — if two facilities are tied for first you arbitrarily get one. See problem 47 for the tie-safe version using window functions.
-
-#### Solution
-```sql
-select facid, sum(slots) as "Total Slots"
-    from cd.bookings
-    group by facid
-order by sum(slots) desc
+SELECT person_name
+FROM (
+  SELECT person_name, turn,
+         SUM(weight) OVER (ORDER BY turn) AS running
+  FROM queue
+) t
+WHERE running <= 1000
+ORDER BY turn DESC
 LIMIT 1;
 ```
 
+*Source: LeetCode #1204 — Last Person to Fit in the Bus*
+
 ---
 
-### 41. List the total slots booked per facility per month, part 2
+### 35. Movie Rating
 
 #### Problem
-For 2012, return slots per facility per month, plus per-facility totals (NULL month), plus a grand total (NULL facid and month). Sort by facid then month.
 
-**Tables:** `cd.bookings`
+Given `users`, `movies`, and `movie_rating(movie_id, user_id, rating, created_at)`, return two scalar rows: (1) the user who has rated the most movies (ties broken by name ascending), and (2) the movie with the highest average rating in February 2020 (ties broken by title ascending).
 
-**Expected output (sample):**
-| facid | month | slots |
-|-------|-------|-------|
-| 0 | 7 | 270 |
-| 0 | 8 | 459 |
-| 0 | 9 | 591 |
-| 0 | null | 1320 |
-| 1 | 7 | 207 |
-| 1 | 8 | 483 |
-| 1 | 9 | 588 |
-| 1 | null | 1278 |
-| ... | ... | ... |
+**Schema:**
 
-#### Pattern
-GROUP BY, ROLLUP
+```
+users
+  user_id  integer  PRIMARY KEY
+  name     varchar
 
-#### Explanation
-`GROUP BY ROLLUP(a, b)` produces grouping for `(a,b)`, `(a)`, and `()` — useful for hierarchical subtotals in one pass. `CUBE` is the cross-product variant. Both are SQL:2003 standard and supported in Postgres since 9.5.
+movies
+  movie_id  integer  PRIMARY KEY
+  title     varchar
 
-#### Solution
-```sql
-select facid, extract(month from starttime) as month, sum(slots) as slots
-    from cd.bookings
-    where
-        starttime >= '2012-01-01'
-        and starttime < '2013-01-01'
-    group by rollup(facid, month)
-order by facid, month;
+movie_rating
+  movie_id    integer  FK → movies
+  user_id     integer  FK → users
+  rating      integer
+  created_at  date
+  PRIMARY KEY (movie_id, user_id)
 ```
 
----
-
-### 42. List the total hours booked per named facility
-
-#### Problem
-Per facility, sum slots and convert to hours (slot = 30 min). Output facid, name, hours formatted to two decimal places, ordered by facid.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
 **Expected output (sample):**
-| facid | name | Total Hours |
-|-------|------|-------------|
-| 0 | Tennis Court 1 | 660.00 |
-| 1 | Tennis Court 2 | 639.00 |
-| 2 | Badminton Court | 604.50 |
-| 3 | Table Tennis | 415.00 |
-| 4 | Massage Room 1 | 702.00 |
-| ... | ... | ... |
+
+| results       |
+|---------------|
+| Daniel        |
+| Frozen 2      |
 
 #### Pattern
-GROUP BY, SUM
+
+Two ordered top-1 queries glued with `UNION ALL`.
 
 #### Explanation
-`to_char` does numeric formatting with a picture string. The `D` is the locale-aware decimal separator; `9999...9` are optional digit placeholders. `TRIM` strips the leading space `to_char` leaves where a `-` would otherwise go for negatives.
+
+Two independent rankings combined with `UNION ALL` (no de-dup needed). Each side is its own `ORDER BY ... LIMIT 1`. Order matters in the final output — wrap with an outer `ORDER BY` carrying a sort key per branch if necessary.
 
 #### Solution
+
 ```sql
-select facs.facid, facs.name,
-    trim(to_char(sum(bks.slots)/2.0, '9999999999999999D99')) as "Total Hours"
-    from cd.bookings bks
-    inner join cd.facilities facs
-        on facs.facid = bks.facid
-    group by facs.facid, facs.name
-order by facs.facid;
+(SELECT u.name AS results
+ FROM movie_rating mr
+ JOIN users u USING (user_id)
+ GROUP BY u.name
+ ORDER BY COUNT(*) DESC, u.name
+ LIMIT 1)
+UNION ALL
+(SELECT m.title
+ FROM movie_rating mr
+ JOIN movies m USING (movie_id)
+ WHERE mr.created_at >= DATE '2020-02-01'
+   AND mr.created_at <  DATE '2020-03-01'
+ GROUP BY m.title
+ ORDER BY AVG(mr.rating) DESC, m.title
+ LIMIT 1);
 ```
+
+*Source: LeetCode #1341 — Movie Rating*
 
 ---
 
-### 43. List each member's first booking after September 1st 2012
+### 36. Nth Highest Salary
 
 #### Problem
-Per member, return surname, firstname, memid, and earliest booking after 2012-09-01. Order by member ID.
 
-**Tables:** `cd.bookings`, `cd.members`
+Given `employee(id, salary)`, return the *n*-th highest distinct salary. Return `NULL` if there are fewer than *n* distinct salaries.
+
+**Schema:**
+
+```
+employee
+  id      integer  PRIMARY KEY
+  salary  integer
+```
 
 **Expected output (sample):**
-| surname | firstname | memid | starttime |
-|---------|-----------|-------|-----------|
-| GUEST | GUEST | 0 | 2012-09-01 08:00:00 |
-| Smith | Darren | 1 | 2012-09-01 09:00:00 |
-| Smith | Tracy | 2 | 2012-09-01 11:30:00 |
-| Rownam | Tim | 3 | 2012-09-01 16:00:00 |
-| Joplette | Janice | 4 | 2012-09-01 15:00:00 |
-| ... | ... | ... | ... |
+
+| getNthHighestSalary(2) |
+|------------------------|
+| 200                    |
 
 #### Pattern
-INNER JOIN, GROUP BY, MIN
+
+`DENSE_RANK` + scalar subquery, or `OFFSET ... LIMIT 1`.
 
 #### Explanation
-`MIN(starttime)` per member after grouping. Filter with `WHERE` before grouping — you only want bookings from September onward to be considered when computing the minimum.
+
+Two clean ways: `OFFSET n-1 LIMIT 1` on `SELECT DISTINCT salary ORDER BY salary DESC`, or `DENSE_RANK` and filter. The `OFFSET` form is simpler and emits NULL naturally when the offset is past the end (Postgres returns zero rows; wrap in a `SELECT (...)` scalar subquery to coerce to NULL).
 
 #### Solution
+
 ```sql
-select mems.surname, mems.firstname, mems.memid, min(bks.starttime) as starttime
-    from cd.bookings bks
-    inner join cd.members mems on
-        mems.memid = bks.memid
-    where starttime >= '2012-09-01'
-    group by mems.surname, mems.firstname, mems.memid
-order by mems.memid;
+-- Postgres function form; for a plain query, swap the params for literals.
+CREATE OR REPLACE FUNCTION nth_highest_salary(n integer)
+RETURNS integer LANGUAGE sql AS $$
+  SELECT (
+    SELECT DISTINCT salary
+    FROM employee
+    ORDER BY salary DESC
+    OFFSET GREATEST(n - 1, 0)
+    LIMIT 1
+  );
+$$;
 ```
+
+*Source: LeetCode #177 — Nth Highest Salary*
 
 ---
 
-### 44. Produce a list of member names, with each row containing the total member count
+### 37. Second Highest Salary
 
 #### Problem
-List every member with a column showing the total member count on each row. Order by join date.
 
-**Tables:** `cd.members`
+Given `employee(id, salary)`, return the second-highest distinct salary. Return `NULL` if it doesn't exist.
+
+**Schema:**
+
+```
+employee
+  id      integer  PRIMARY KEY
+  salary  integer
+```
 
 **Expected output (sample):**
-| count | firstname | surname |
-|-------|-----------|---------|
-| 31 | GUEST | GUEST |
-| 31 | Darren | Smith |
-| 31 | Tracy | Smith |
-| 31 | Tim | Rownam |
-| 31 | Janice | Joplette |
-| ... | ... | ... |
+
+| SecondHighestSalary |
+|---------------------|
+| 200                 |
 
 #### Pattern
-Window function
+
+`OFFSET 1 LIMIT 1` wrapped in a scalar subquery.
 
 #### Explanation
-`COUNT(*) OVER ()` with an empty window applies the aggregate over the whole result set without collapsing rows — every row gets the same count. Window functions are the way to attach aggregates alongside detail rows.
+
+The scalar subquery wrap is the trick that returns `NULL` instead of zero rows when the offset overshoots — the empty inner query becomes a single NULL value at the outer level.
 
 #### Solution
+
 ```sql
-select count(*) over(), firstname, surname
-    from cd.members
-order by joindate
+SELECT (
+  SELECT DISTINCT salary
+  FROM employee
+  ORDER BY salary DESC
+  OFFSET 1 LIMIT 1
+) AS "SecondHighestSalary";
 ```
+
+*Source: LeetCode #176 — Second Highest Salary*
 
 ---
 
-### 45. Produce a numbered list of members
+## Self-Joins & Hierarchies
+
+### 38. Rising Temperature
 
 #### Problem
-Number members 1..N ordered by join date. Member IDs aren't necessarily sequential.
 
-**Tables:** `cd.members`
+Given `weather(id, recordDate, temperature)`, return the ids of days whose temperature was higher than the previous calendar day (gaps in the date series are allowed — only adjacent calendar days count).
 
-**Expected output (sample):**
-| row_number | firstname | surname |
-|------------|-----------|---------|
-| 1 | GUEST | GUEST |
-| 2 | Darren | Smith |
-| 3 | Tracy | Smith |
-| 4 | Tim | Rownam |
-| 5 | Janice | Joplette |
-| ... | ... | ... |
+**Schema:**
 
-#### Pattern
-ROW_NUMBER
-
-#### Explanation
-`ROW_NUMBER() OVER (ORDER BY ...)` assigns a unique 1-based rank to each row. Unlike `RANK`/`DENSE_RANK`, it gives unique numbers even when the ordering key has ties — useful for pagination and stable per-row IDs in an output.
-
-#### Solution
-```sql
-select row_number() over(order by joindate), firstname, surname
-    from cd.members
-order by joindate
+```
+weather
+  id           integer  PRIMARY KEY
+  record_date  date     UNIQUE
+  temperature  integer
 ```
 
----
-
-### 46. Output the facility id that has the highest number of slots booked, again
-
-#### Problem
-Return the facility with the most slots booked, but include all ties.
-
-**Tables:** `cd.bookings`
-
 **Expected output (sample):**
-| facid | total |
-|-------|-------|
-| 4 | 1404 |
 
-#### Pattern
-RANK, Window function
-
-#### Explanation
-`RANK() OVER (ORDER BY ... DESC)` assigns rank 1 to the top, with ties sharing the same rank. Filtering on `rank = 1` in an outer query returns all winners. `LIMIT 1` from problem 40 silently drops ties — `RANK` is the correct tool when ties matter.
-
-#### Solution
-```sql
-select facid, total from (
-    select facid, sum(slots) total, rank() over (order by sum(slots) desc) rank
-            from cd.bookings
-        group by facid
-    ) as ranked
-    where rank = 1
-```
-
----
-
-### 47. Rank members by (rounded) hours used
-
-#### Problem
-Per member, sum hours used (rounded to nearest ten), rank by rounded hours. Output firstname, surname, hours, rank. Sort by rank then surname then firstname.
-
-**Tables:** `cd.bookings`, `cd.members`
-
-**Expected output (sample):**
-| firstname | surname | hours | rank |
-|-----------|---------|-------|------|
-| GUEST | GUEST | 1200 | 1 |
-| Darren | Smith | 340 | 2 |
-| Tim | Rownam | 330 | 3 |
-| Tim | Boothe | 220 | 4 |
-| Tracy | Smith | 220 | 4 |
-| Gerald | Butters | 210 | 6 |
-| Burton | Tracy | 180 | 7 |
-| Charles | Owen | 170 | 8 |
-| ... | ... | ... | ... |
-
-#### Pattern
-GROUP BY, RANK, Window function
-
-#### Explanation
-The `((sum+10)/20)*10` trick rounds to the nearest 10 using integer division — `+10` shifts so values land in the right bucket, `/20*10` truncates and scales. Cleaner alternative: `round(sum(slots)/2.0/10)*10`. The window aggregate runs over the grouped rows.
-
-#### Solution
-```sql
-select firstname, surname,
-    ((sum(bks.slots)+10)/20)*10 as hours,
-    rank() over (order by ((sum(bks.slots)+10)/20)*10 desc) as rank
-from cd.bookings bks
-inner join cd.members mems
-    on bks.memid = mems.memid
-group by mems.memid
-order by rank, surname, firstname;
-```
-
----
-
-### 48. Find the top three revenue generating facilities
-
-#### Problem
-Top three facilities by revenue, including ties. Output name and rank, sorted by rank then name.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
-**Expected output (sample):**
-| name | rank |
-|------|------|
-| Massage Room 1 | 1 |
-| Massage Room 2 | 2 |
-| Tennis Court 2 | 3 |
-
-#### Pattern
-RANK, Window function, Subquery
-
-#### Explanation
-Same shape as problem 46 but with a `<= 3` filter instead of `= 1`. Using `RANK` instead of `LIMIT 3` correctly handles ties at the boundary — if facilities 3, 4, and 5 are tied for third you get all three. `DENSE_RANK` would also work; choice depends on whether you want gaps after ties.
-
-#### Solution
-```sql
-select name, rank from (
-    select facs.name as name, rank() over (order by sum(case
-                when memid = 0 then slots * facs.guestcost
-                else slots * membercost
-            end) desc) as rank
-        from cd.bookings bks
-        inner join cd.facilities facs
-            on bks.facid = facs.facid
-        group by facs.name
-    ) as subq
-    where rank <= 3
-order by rank;
-```
-
----
-
-### 49. Classify facilities by value
-
-#### Problem
-Split facilities into thirds by revenue, labelled 'high', 'average', 'low'. Order by classification then name.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
-**Expected output (sample):**
-| name | revenue |
-|------|---------|
-| Massage Room 1 | high |
-| Massage Room 2 | high |
-| Tennis Court 2 | high |
-| Badminton Court | average |
-| Squash Court | average |
-| Tennis Court 1 | average |
-| Pool Table | low |
-| Snooker Table | low |
-| Table Tennis | low |
-
-#### Pattern
-Window function, CASE WHEN (pivot)
-
-#### Explanation
-`NTILE(3)` divides rows into three roughly-equal buckets based on the `ORDER BY`. The outer `CASE` maps the bucket integer to a label. This is the standard quantile-bucketing pattern; `NTILE(4)` for quartiles, `NTILE(100)` for percentiles.
-
-#### Solution
-```sql
-select name, case when class=1 then 'high'
-        when class=2 then 'average'
-        else 'low'
-        end revenue
-    from (
-        select facs.name as name, ntile(3) over (order by sum(case
-                when memid = 0 then slots * facs.guestcost
-                else slots * membercost
-            end) desc) as class
-        from cd.bookings bks
-        inner join cd.facilities facs
-            on bks.facid = facs.facid
-        group by facs.name
-    ) as subq
-order by class, name;
-```
-
----
-
-### 50. Calculate the payback time for each facility
-
-#### Problem
-Given 3 complete months of data, compute months-to-payback per facility (initial outlay divided by monthly profit after maintenance). Output name and months, sorted by name.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
-**Expected output (sample):**
-| name | months |
-|------|--------|
-| Badminton Court | 6.8317677198975235 |
-| Massage Room 1 | 0.18885741265344664778 |
-| Massage Room 2 | 1.7621145374449339 |
-| Pool Table | 5.3333333333333333 |
-| Snooker Table | 6.9230769230769231 |
-| Squash Court | 1.1339582703356516 |
-| Table Tennis | 6.4000000000000000 |
-| Tennis Court 1 | 2.2624434389140271 |
-| Tennis Court 2 | 1.7505470459518600 |
-
-#### Pattern
-GROUP BY, INNER JOIN
-
-#### Explanation
-Monthly revenue = total revenue / 3. Monthly profit = monthly revenue − monthlymaintenance. Payback = initial outlay / monthly profit. Watch out for facilities with profit ≤ 0 (division by zero or negative payback) — production code would guard with a CASE.
-
-#### Solution
-```sql
-select  facs.name as name,
-    facs.initialoutlay/((sum(case
-            when memid = 0 then slots * facs.guestcost
-            else slots * membercost
-        end)/3) - facs.monthlymaintenance) as months
-    from cd.bookings bks
-    inner join cd.facilities facs
-        on bks.facid = facs.facid
-    group by facs.facid
-order by name;
-```
-
----
-
-### 51. Calculate a rolling average of total revenue
-
-#### Problem
-For each day in August 2012, the 15-day trailing average of total revenue. Output date and revenue, sorted by date. Account for zero-revenue days.
-
-**Tables:** `cd.bookings`, `cd.facilities`
-
-**Expected output (sample):**
-| date | revenue |
-|------|---------|
-| 2012-08-01 | 1126.8333333333333333 |
-| 2012-08-02 | 1153.0000000000000000 |
-| 2012-08-03 | 1162.9000000000000000 |
-| 2012-08-04 | 1177.3666666666666667 |
-| 2012-08-05 | 1160.9333333333333333 |
-| 2012-08-06 | 1185.4000000000000000 |
-| 2012-08-07 | 1182.8666666666666667 |
-| 2012-08-08 | 1172.6000000000000000 |
-| ... | ... |
-
-#### Pattern
-Running total, Correlated subquery, INTERVAL
-
-#### Explanation
-A `generate_series` produces every date so days with no revenue still appear. A correlated subquery sums revenue in the trailing 15-day window. A window function with `RANGE BETWEEN INTERVAL '14 days' PRECEDING AND CURRENT ROW` would be the modern, more performant approach — the published solution predates wider `RANGE` window support.
-
-#### Solution
-```sql
-select  dategen.date,
-    (
-        select sum(case
-            when memid = 0 then slots * facs.guestcost
-            else slots * membercost
-        end) as rev
-
-        from cd.bookings bks
-        inner join cd.facilities facs
-            on bks.facid = facs.facid
-        where bks.starttime > dategen.date - interval '14 days'
-            and bks.starttime < dategen.date + interval '1 day'
-    )/15 as revenue
-    from
-    (
-        select  cast(generate_series(timestamp '2012-08-01',
-            '2012-08-31','1 day') as date) as date
-    )  as dategen
-order by dategen.date;
-```
-
----
-
-### 52. Produce a timestamp for 1 a.m. on the 31st of August 2012
-
-#### Problem
-Return the timestamp `2012-08-31 01:00:00`.
-
-**Tables:** None (scalar expression).
-
-**Expected output (sample):**
-| timestamp |
-|-----------|
-| 2012-08-31 01:00:00 |
-
-#### Pattern
-Date arithmetic
-
-#### Explanation
-`timestamp 'literal'` is the explicit cast form. Postgres parses ISO-8601 strings straight into timestamps; the explicit keyword removes any doubt about the type.
-
-#### Solution
-```sql
-select timestamp '2012-08-31 01:00:00';
-```
-
----
-
-### 53. Subtract timestamps from each other
-
-#### Problem
-Subtract `2012-07-30 01:00:00` from `2012-08-31 01:00:00`.
-
-**Tables:** None (scalar expression).
-
-**Expected output (sample):**
-| interval |
-|----------|
-| 32 days |
-
-#### Pattern
-INTERVAL, Date arithmetic
-
-#### Explanation
-Subtracting two timestamps returns an `interval`. Be aware: intervals are not calendar-aware in all directions — `interval '1 month'` added to Jan 31 lands on Feb 28/29, but subtracting timestamps gives an interval in days/hours, not months.
-
-#### Solution
-```sql
-select timestamp '2012-08-31 01:00:00' - timestamp '2012-07-30 01:00:00' as interval;
-```
-
----
-
-### 54. Generate a list of all the dates in October 2012
-
-#### Problem
-Output every date in October 2012.
-
-**Tables:** None (uses `generate_series`).
-
-**Expected output (sample):**
-| ts |
+| id |
 |----|
-| 2012-10-01 00:00:00 |
-| 2012-10-02 00:00:00 |
-| 2012-10-03 00:00:00 |
-| 2012-10-04 00:00:00 |
-| 2012-10-05 00:00:00 |
-| 2012-10-06 00:00:00 |
-| ... |
+| 2  |
+| 4  |
 
 #### Pattern
-Date arithmetic
+
+Self-join on `record_date = prev_date + 1`.
 
 #### Explanation
-`generate_series(start, stop, step)` is a set-returning function. With timestamps it yields a row per step — invaluable for filling calendar tables, building dimension tables, or padding sparse time series with zero rows.
+
+The literal "previous **calendar** day" requirement rules out a `LAG` ordered by row position — you must compare on date arithmetic. Self-join is clearer than a `LAG` with a guard clause.
 
 #### Solution
+
 ```sql
-select generate_series(timestamp '2012-10-01', timestamp '2012-10-31', interval '1 day') as ts;
+SELECT today.id
+FROM weather today
+JOIN weather yest
+  ON yest.record_date = today.record_date - INTERVAL '1 day'
+WHERE today.temperature > yest.temperature;
 ```
+
+*Source: LeetCode #197 — Rising Temperature*
 
 ---
 
-### 55. Get the day of the month from a timestamp
+### 39. Employees Earning More Than Their Managers
 
 #### Problem
-Extract the day-of-month integer from `2012-08-31`.
 
-**Tables:** None (scalar expression).
+From `employee(id, name, salary, managerId)`, return the names of employees who earn more than their direct manager.
+
+**Schema:**
+
+```
+employee
+  id          integer  PRIMARY KEY
+  name        varchar
+  salary      integer
+  manager_id  integer
+```
 
 **Expected output (sample):**
-| date_part |
-|-----------|
-| 31 |
+
+| Employee |
+|----------|
+| Joe      |
 
 #### Pattern
-EXTRACT
+
+Self-join `employee.manager_id = manager.id`.
 
 #### Explanation
-`EXTRACT(field FROM source)` pulls integer fields out of dates/timestamps/intervals. Common fields: `year`, `month`, `day`, `hour`, `dow` (day of week), `doy` (day of year), `epoch` (seconds since 1970).
+
+The bread-and-butter recursive-feeling self-join. Use distinct table aliases (`e`, `m`) and the join condition handles NULL managers cleanly (inner join drops the CEO).
 
 #### Solution
+
 ```sql
-select extract(day from timestamp '2012-08-31');
+SELECT e.name AS "Employee"
+FROM employee e
+JOIN employee m ON m.id = e.manager_id
+WHERE e.salary > m.salary;
 ```
+
+*Source: LeetCode #181 — Employees Earning More Than Their Managers*
 
 ---
 
-### 56. Work out the number of seconds between timestamps
+### 40. Exchange Seats
 
 #### Problem
-Seconds between `2012-08-31 01:00:00` and `2012-09-02 00:00:00`.
 
-**Tables:** None (scalar expression).
+Given `seat(id, student)` with consecutive ids 1..N, swap each adjacent pair (1↔2, 3↔4, …). If N is odd, the last student stays in place. Output sorted by id.
+
+**Schema:**
+
+```
+seat
+  id       integer  PRIMARY KEY
+  student  varchar
+```
 
 **Expected output (sample):**
-| date_part |
-|-----------|
-| 169200 |
+
+| id | student |
+|----|---------|
+| 1  | Doris   |
+| 2  | Abbot   |
+| 3  | Green   |
+| 4  | Emerson |
+| 5  | Jeames  |
 
 #### Pattern
-EXTRACT, INTERVAL
+
+`CASE` on parity + scalar `MAX(id)` for the odd tail.
 
 #### Explanation
-Subtract to get an interval, then `EXTRACT(EPOCH FROM interval)` to get seconds as a double. `EPOCH` on a timestamp gives seconds-since-1970; on an interval it gives total seconds in the interval.
+
+The neat one-pass trick: even rows pair down (id → id − 1), odd rows pair up (id → id + 1), and the last row stays. Compute the max id once and reuse.
 
 #### Solution
+
 ```sql
-select extract(epoch from (timestamp '2012-09-02 00:00:00' - '2012-08-31 01:00:00'));
+SELECT
+  CASE
+    WHEN id % 2 = 0           THEN id - 1
+    WHEN id = (SELECT MAX(id) FROM seat) THEN id
+    ELSE id + 1
+  END AS id,
+  student
+FROM seat
+ORDER BY id;
 ```
+
+*Source: LeetCode #626 — Exchange Seats*
 
 ---
 
-### 57. Work out the number of days in each month of 2012
+### 41. Primary Department for Each Employee
 
 #### Problem
-For each month in 2012, output month number and an interval column with the month's length.
 
-**Tables:** None (uses `generate_series`).
+Given `employee(employee_id, department_id, primary_flag)` where `primary_flag` is `'Y'` or `'N'`, return each employee's primary department. If an employee has exactly one department row, that one is primary by default.
+
+**Schema:**
+
+```
+employee
+  employee_id    integer
+  department_id  integer
+  primary_flag   char(1) CHECK (primary_flag IN ('Y','N'))
+  PRIMARY KEY (employee_id, department_id)
+```
 
 **Expected output (sample):**
-| month | length |
-|-------|--------|
-| 1 | 31 days |
-| 2 | 29 days |
-| 3 | 31 days |
-| 4 | 30 days |
-| 5 | 31 days |
-| 6 | 30 days |
-| ... | ... |
+
+| employee_id | department_id |
+|-------------|---------------|
+| 1           | 1             |
+| 2           | 1             |
+| 3           | 3             |
 
 #### Pattern
-INTERVAL, EXTRACT, Date arithmetic
+
+`UNION ALL` of two disjoint cases.
 
 #### Explanation
-Generate one row per month, compute `(next month) - (this month)` to get an interval covering the whole month. This automatically handles leap years and the varying month lengths — no hard-coded 28/30/31 logic.
+
+Two disjoint sets: employees with one row (default primary) and employees with multiple rows (explicit `'Y'`). `UNION ALL` is safe because the cases can't overlap.
 
 #### Solution
+
 ```sql
-select extract(month from cal.month) as month,
-    (cal.month + interval '1 month') - cal.month as length
-from
-    (
-        select generate_series(timestamp '2012-01-01', timestamp '2012-12-01', interval '1 month') as month
-    ) cal
-order by month;
+SELECT employee_id, department_id
+FROM employee
+WHERE primary_flag = 'Y'
+
+UNION ALL
+
+SELECT employee_id, MIN(department_id)
+FROM employee
+GROUP BY employee_id
+HAVING COUNT(*) = 1;
 ```
+
+*Source: LeetCode #1789 — Primary Department for Each Employee*
 
 ---
 
-### 58. Work out the number of days remaining in the month
+### 42. Tree Node
 
 #### Problem
-For `2012-02-11 01:00:00`, return the days remaining in the month (today counts as a whole day). Output a single interval.
 
-**Tables:** None (scalar expression).
+Given `tree(id, p_id)` representing a tree, label each node as `'Root'` (no parent), `'Inner'` (has parent and at least one child), or `'Leaf'` (has parent, no children).
+
+**Schema:**
+
+```
+tree
+  id    integer  PRIMARY KEY
+  p_id  integer  -- NULL for the root
+```
 
 **Expected output (sample):**
-| remaining |
-|-----------|
-| 19 days |
+
+| id | type  |
+|----|-------|
+| 1  | Root  |
+| 2  | Inner |
+| 3  | Leaf  |
+| 4  | Leaf  |
 
 #### Pattern
-DATE_TRUNC, INTERVAL
+
+`CASE` on `p_id IS NULL` + `EXISTS` for children.
 
 #### Explanation
-`DATE_TRUNC('month', ts)` rounds down to month start; adding `interval '1 month'` gives the first of next month. Subtracting `DATE_TRUNC('day', ts)` (today at midnight) gives the remaining interval, with today counting as whole.
+
+Two independent boolean tests: "has parent?" (column check) and "has child?" (EXISTS). The labels follow from the truth table. Two passes is overkill — let the planner inline the EXISTS.
 
 #### Solution
+
 ```sql
-select (date_trunc('month',ts.testts) + interval '1 month')
-        - date_trunc('day', ts.testts) as remaining
-    from (select timestamp '2012-02-11 01:00:00' as testts) ts
+SELECT id,
+  CASE
+    WHEN p_id IS NULL THEN 'Root'
+    WHEN EXISTS (SELECT 1 FROM tree c WHERE c.p_id = t.id) THEN 'Inner'
+    ELSE 'Leaf'
+  END AS type
+FROM tree t;
 ```
+
+*Source: LeetCode #608 — Tree Node*
 
 ---
 
-### 59. Work out the end time of bookings
+### 43. Swap Salary
 
 #### Problem
-Last 10 bookings by end time then start time. Return start and end time.
 
-**Tables:** `cd.bookings`
+Given `salary(id, name, sex, salary)` with `sex` in `('m','f')`, atomically swap all `m`s to `f`s and vice versa in a single `UPDATE`.
+
+**Schema:**
+
+```
+salary
+  id      integer  PRIMARY KEY
+  name    varchar
+  sex     char(1)
+  salary  integer
+```
 
 **Expected output (sample):**
-| starttime | endtime |
-|-----------|---------|
-| 2013-01-01 15:30:00 | 2013-01-01 16:00:00 |
-| 2012-09-30 19:30:00 | 2012-09-30 20:30:00 |
-| 2012-09-30 19:00:00 | 2012-09-30 20:30:00 |
-| 2012-09-30 19:30:00 | 2012-09-30 20:00:00 |
-| 2012-09-30 19:00:00 | 2012-09-30 20:00:00 |
-| 2012-09-30 19:00:00 | 2012-09-30 20:00:00 |
-| 2012-09-30 18:30:00 | 2012-09-30 20:00:00 |
-| 2012-09-30 18:30:00 | 2012-09-30 20:00:00 |
-| 2012-09-30 19:00:00 | 2012-09-30 19:30:00 |
-| 2012-09-30 18:30:00 | 2012-09-30 19:30:00 |
+
+(table contents post-update; one row per id, with sex flipped)
 
 #### Pattern
-INTERVAL, Date arithmetic, ORDER BY, LIMIT
+
+`UPDATE` with `CASE`.
 
 #### Explanation
-`slots * interval '30 minutes'` multiplies an interval — yes, that works, Postgres scales the interval by the integer. End time is just `starttime + duration`. Order by computed column is fine; Postgres re-evaluates the expression for the sort.
+
+A single statement avoids the classic two-statement bug where the second update reverts the first. `CASE` (or in Postgres specifically: `CASE WHEN ... ELSE ... END`) inside `SET` does both directions in one pass.
 
 #### Solution
+
 ```sql
-select starttime, starttime + slots*(interval '30 minutes') endtime
-    from cd.bookings
-    order by endtime desc, starttime desc
-    limit 10
+UPDATE salary
+SET sex = CASE sex WHEN 'm' THEN 'f' ELSE 'm' END;
 ```
+
+*Source: LeetCode #627 — Swap Salary*
 
 ---
 
-### 60. Return a count of bookings for each month
+### 44. Delete Duplicate Emails
 
 #### Problem
-Bookings per month, sorted by month.
 
-**Tables:** `cd.bookings`
+Given `person(id, email)`, delete duplicates so that only the row with the smallest `id` per email survives.
+
+**Schema:**
+
+```
+person
+  id     integer  PRIMARY KEY
+  email  varchar
+```
 
 **Expected output (sample):**
-| month | count |
-|-------|-------|
-| 2012-07-01 00:00:00 | 658 |
-| 2012-08-01 00:00:00 | 1472 |
-| 2012-09-01 00:00:00 | 1913 |
-| 2013-01-01 00:00:00 | 1 |
+
+(table contents post-delete; one row per distinct email, keeping the smallest id)
 
 #### Pattern
-DATE_TRUNC, GROUP BY, COUNT
+
+`DELETE ... USING` self-reference.
 
 #### Explanation
-`DATE_TRUNC('month', ts)` is the canonical way to bucket by month — it returns a timestamp at month start, preserving the year, so years aren't conflated. `EXTRACT(MONTH ...)` would collapse Jan 2012 and Jan 2013 into the same bucket.
+
+Postgres-idiomatic: `DELETE ... USING` lets you self-join in a delete. The condition keeps `p1.id > p2.id` so the lower id always wins. MySQL would need a different syntax with a derived table to avoid "can't delete from a table you're selecting from".
 
 #### Solution
+
 ```sql
-select date_trunc('month', starttime) as month, count(*)
-    from cd.bookings
-    group by month
-    order by month
+DELETE FROM person p1
+USING person p2
+WHERE p1.email = p2.email
+  AND p1.id    > p2.id;
 ```
+
+*Source: LeetCode #196 — Delete Duplicate Emails*
 
 ---
 
-### 61. Work out the utilisation percentage for each facility by month
+### 45. Duplicate Emails
 
 #### Problem
-Utilisation = (slots used / slots available) * 100, per facility per month, rounded to 1 dp. Sort by name then month. Opening hours: 8am to 8:30pm (25 half-hour slots/day).
 
-**Tables:** `cd.bookings`, `cd.facilities`
+Given `person(id, email)`, return the emails that appear more than once.
+
+**Schema:**
+
+```
+person
+  id     integer  PRIMARY KEY
+  email  varchar
+```
 
 **Expected output (sample):**
-| name | month | utilisation |
-|------|-------|-------------|
-| Badminton Court | 2012-07-01 00:00:00 | 23.2 |
-| Badminton Court | 2012-08-01 00:00:00 | 59.2 |
-| Badminton Court | 2012-09-01 00:00:00 | 76.0 |
-| Massage Room 1 | 2012-07-01 00:00:00 | 34.1 |
-| Massage Room 1 | 2012-08-01 00:00:00 | 63.5 |
-| Massage Room 1 | 2012-09-01 00:00:00 | 86.4 |
-| ... | ... | ... |
+
+| Email             |
+|-------------------|
+| a@b.com           |
 
 #### Pattern
-DATE_TRUNC, GROUP BY, Date arithmetic
+
+`GROUP BY` + `HAVING COUNT(*) > 1`.
 
 #### Explanation
-Available slots per day = 25 (8am to 8:30pm in 30-min slots). Multiply by days-in-month — computed as `(month+1month) - month` cast to date difference. Cast to numeric for `round(..., 1)` to work (`round` on integer ignores the precision argument).
+
+The textbook duplicate-finder. Trivial.
 
 #### Solution
+
 ```sql
-select name, month,
-    round((100*slots)/
-        cast(
-            25*(cast((month + interval '1 month') as date)
-            - cast (month as date)) as numeric),1) as utilisation
-    from  (
-        select facs.name as name, date_trunc('month', starttime) as month, sum(slots) as slots
-            from cd.bookings bks
-            inner join cd.facilities facs
-                on bks.facid = facs.facid
-            group by facs.facid, month
-    ) as inn
-order by name, month
+SELECT email AS "Email"
+FROM person
+GROUP BY email
+HAVING COUNT(*) > 1;
 ```
+
+*Source: LeetCode #182 — Duplicate Emails*
 
 ---
 
-### 62. Format the names of members
+## Date / Time
+
+### 46. Sales Analysis III
 
 #### Problem
-Output every member's name formatted 'Surname, Firstname'.
 
-**Tables:** `cd.members`
+Given `product(product_id, product_name, unit_price)` and `sales(seller_id, product_id, buyer_id, sale_date, quantity, price)`, return the products that were sold **only** in Q1 2019 (between 2019-01-01 and 2019-03-31 inclusive).
+
+**Schema:**
+
+```
+product
+  product_id    integer  PRIMARY KEY
+  product_name  varchar
+  unit_price    integer
+
+sales
+  seller_id    integer
+  product_id   integer  FK → product
+  buyer_id     integer
+  sale_date    date
+  quantity     integer
+  price        integer
+```
 
 **Expected output (sample):**
-| name |
-|------|
-| GUEST, GUEST |
-| Smith, Darren |
-| Smith, Tracy |
-| Rownam, Tim |
-| Joplette, Janice |
-| Butters, Gerald |
-| ... |
+
+| product_id | product_name |
+|------------|--------------|
+| 1          | S8           |
 
 #### Pattern
-String manipulation (substring, position, concat)
+
+`GROUP BY` + `HAVING` with `MIN`/`MAX` range check.
 
 #### Explanation
-`||` is SQL-standard string concatenation. Postgres also supports `CONCAT(a, b, ...)` which differs in one important way: `CONCAT` treats `NULL` as empty string, while `||` returns `NULL` if any operand is `NULL`. Pick consciously.
+
+A product qualifies iff *every* sale falls in the window. Express this with `MIN(sale_date) >= start AND MAX(sale_date) <= end`. Avoid the "any sale outside the window" anti-join — bounds are tighter and read better.
 
 #### Solution
+
 ```sql
-select surname || ', ' || firstname as name from cd.members
+SELECT p.product_id, p.product_name
+FROM sales s
+JOIN product p USING (product_id)
+GROUP BY p.product_id, p.product_name
+HAVING MIN(s.sale_date) >= DATE '2019-01-01'
+   AND MAX(s.sale_date) <= DATE '2019-03-31';
 ```
+
+*Source: LeetCode #1084 — Sales Analysis III*
 
 ---
 
-### 63. Find facilities by a name prefix
+### 47. User Activity for the Past 30 Days I
 
 #### Problem
-Facilities whose name starts with 'Tennis'.
 
-**Tables:** `cd.facilities`
+Given `activity(user_id, session_id, activity_date, activity_type)`, for each day in the 30-day window ending 2019-07-27 inclusive, return the number of distinct active users that day. Skip days with zero activity.
+
+**Schema:**
+
+```
+activity
+  user_id        integer
+  session_id     integer
+  activity_date  date
+  activity_type  varchar
+```
 
 **Expected output (sample):**
-| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
-|-------|------|------------|-----------|---------------|--------------------|
-| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
-| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+
+| day        | active_users |
+|------------|--------------|
+| 2019-07-20 | 2            |
+| 2019-07-23 | 1            |
+| 2019-07-27 | 3            |
 
 #### Pattern
-WHERE filter, String manipulation (substring, position, concat)
+
+Date-window `WHERE` + `COUNT(DISTINCT)`.
 
 #### Explanation
-`LIKE 'prefix%'` with a trailing-only wildcard *can* use a btree index on the column — Postgres recognises the prefix and uses index range scan, unlike `'%suffix'` which forces a full scan or a trigram index.
+
+`activity_date > end - INTERVAL '30 days'` (exclusive lower bound) gives the 30-day window ending on `end`. `COUNT(DISTINCT user_id)` because the same user may have multiple sessions in a day.
 
 #### Solution
+
 ```sql
-select * from cd.facilities where name like 'Tennis%';
+SELECT activity_date AS day,
+       COUNT(DISTINCT user_id) AS active_users
+FROM activity
+WHERE activity_date >  DATE '2019-07-27' - INTERVAL '30 days'
+  AND activity_date <= DATE '2019-07-27'
+GROUP BY activity_date;
 ```
+
+*Source: LeetCode #1141 — User Activity for the Past 30 Days I*
 
 ---
 
-### 64. Perform a case-insensitive search
+### 48. Sales by Day of the Week
 
 #### Problem
-Facilities whose name starts with 'tennis', case-insensitively.
 
-**Tables:** `cd.facilities`
+Given `orders(order_id, customer_id, order_date, item_id, quantity)` and `items(item_id, item_name)`, return for each item the total quantity sold per day of the week. Columns: `Category` (item_name), then `Monday`…`Sunday`. Every item appears in the output even if some days have zero.
+
+**Schema:**
+
+```
+orders
+  order_id     integer  PRIMARY KEY
+  customer_id  integer
+  order_date   date
+  item_id      integer  FK → items
+  quantity     integer
+
+items
+  item_id    integer  PRIMARY KEY
+  item_name  varchar
+```
 
 **Expected output (sample):**
-| facid | name | membercost | guestcost | initialoutlay | monthlymaintenance |
-|-------|------|------------|-----------|---------------|--------------------|
-| 0 | Tennis Court 1 | 5 | 25 | 10000 | 200 |
-| 1 | Tennis Court 2 | 5 | 25 | 8000 | 200 |
+
+| Category | Monday | Tuesday | Wednesday | Thursday | Friday | Saturday | Sunday |
+|----------|--------|---------|-----------|----------|--------|----------|--------|
+| Bread    | 2      | 1       | 0         | 0        | 0      | 0        | 0      |
+| Cheese   | 0      | 1       | 0         | 0        | 0      | 0        | 0      |
 
 #### Pattern
-WHERE filter, String manipulation (substring, position, concat)
+
+Pivot via conditional sum + left join to anchor on items.
 
 #### Explanation
-`UPPER(col) LIKE 'TENNIS%'` works but kills index usage on `name`. Alternatives: `ILIKE 'tennis%'` (Postgres extension), `name ~* '^tennis'` (case-insensitive regex), or an expression index on `UPPER(name)` if this query is hot.
+
+Postgres has no native `PIVOT`, but `SUM(CASE WHEN dow=... THEN quantity ELSE 0 END)` is the universal pivot. `EXTRACT(ISODOW FROM date)` returns Monday=1, …, Sunday=7. `LEFT JOIN` to keep items with zero sales.
 
 #### Solution
+
 ```sql
-select * from cd.facilities where upper(name) like 'TENNIS%';
+SELECT i.item_name AS "Category",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 1 THEN o.quantity END), 0) AS "Monday",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 2 THEN o.quantity END), 0) AS "Tuesday",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 3 THEN o.quantity END), 0) AS "Wednesday",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 4 THEN o.quantity END), 0) AS "Thursday",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 5 THEN o.quantity END), 0) AS "Friday",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 6 THEN o.quantity END), 0) AS "Saturday",
+       COALESCE(SUM(CASE WHEN EXTRACT(ISODOW FROM o.order_date) = 7 THEN o.quantity END), 0) AS "Sunday"
+FROM items i
+LEFT JOIN orders o USING (item_id)
+GROUP BY i.item_name
+ORDER BY i.item_name;
 ```
+
+*Source: LeetCode #1741 — Sales by Day of the Week*
 
 ---
 
-### 65. Find telephone numbers with parentheses
+## String Manipulation
+
+### 49. Invalid Tweets
 
 #### Problem
-Members whose telephone contains parentheses. Return memid and telephone, sorted by memid.
 
-**Tables:** `cd.members`
+From `tweets(tweet_id, content)`, return the ids of tweets whose `content` length exceeds 15 characters.
+
+**Schema:**
+
+```
+tweets
+  tweet_id  integer  PRIMARY KEY
+  content   varchar
+```
 
 **Expected output (sample):**
-| memid | telephone |
-|-------|-----------|
-| 0 | (000) 000-0000 |
-| 3 | (844) 693-0723 |
-| 4 | (833) 942-4710 |
-| 5 | (844) 078-4130 |
-| 6 | (822) 354-9973 |
-| ... | ... |
+
+| tweet_id |
+|----------|
+| 1        |
 
 #### Pattern
-WHERE filter, String manipulation (substring, position, concat)
+
+`CHAR_LENGTH`.
 
 #### Explanation
-`~` is Postgres' POSIX regex match operator. The character class `[()]` matches either paren. Regex is overkill here — `telephone LIKE '%(%'` would also work — but the regex syntax generalises to more complex patterns.
+
+`CHAR_LENGTH` (= `LENGTH` in Postgres for `text`) counts characters. In MySQL, `LENGTH` returns bytes — use `CHAR_LENGTH` there for portability.
 
 #### Solution
+
 ```sql
-select memid, telephone from cd.members where telephone ~ '\[()\]';
+SELECT tweet_id
+FROM tweets
+WHERE CHAR_LENGTH(content) > 15;
 ```
+
+*Source: LeetCode #1683 — Invalid Tweets*
 
 ---
 
-### 66. Pad zip codes with leading zeroes
+### 50. Find Users With Valid Emails
 
 #### Problem
-Zip codes padded to 5 chars with leading zeroes, ordered by the padded string.
 
-**Tables:** `cd.members`
+Given `users(user_id, name, mail)`, return rows whose `mail` is a valid email — starts with a letter, followed by letters/digits/`_`/`.`/`-`, ending in literal `@leetcode.com`.
+
+**Schema:**
+
+```
+users
+  user_id  integer  PRIMARY KEY
+  name     varchar
+  mail     varchar
+```
 
 **Expected output (sample):**
-| zip |
-|-----|
-| 00000 |
-| 00234 |
-| 00234 |
-| 04321 |
-| 04321 |
-| 10383 |
-| ... |
+
+| user_id | name      | mail                  |
+|---------|-----------|-----------------------|
+| 1       | Winston   | winston@leetcode.com  |
+| 3       | Annabelle | bella-@leetcode.com   |
 
 #### Pattern
-String manipulation (substring, position, concat)
+
+POSIX regex with `~`.
 
 #### Explanation
-`LPAD(str, len, padchar)` left-pads a string to the target length. The cast to `char(5)` first ensures the integer is treated as a string. `to_char(zipcode, 'FM00000')` is the more idiomatic Postgres-native way to zero-pad numbers.
+
+Postgres `~` is case-sensitive POSIX regex (Postgres-native, no extension needed). Anchor with `^` and `$`. The character class `[A-Za-z0-9_.-]` covers the allowed inner characters; the leading character must be a letter.
 
 #### Solution
+
 ```sql
-select lpad(cast(zipcode as char(5)),5,'0') zip from cd.members order by zip
+SELECT user_id, name, mail
+FROM users
+WHERE mail ~ '^[A-Za-z][A-Za-z0-9_.\-]*@leetcode\.com$';
 ```
+
+*Source: LeetCode #1517 — Find Users With Valid Emails*
 
 ---
 
-### 67. Count the number of members whose surname starts with each letter of the alphabet
+### 51. Fix Names in a Table
 
 #### Problem
-Per first-letter of surname, count members. Sort by letter. Skip zero-count letters.
 
-**Tables:** `cd.members`
+Given `users(user_id, name)` where the name's casing is inconsistent, return rows with the name capitalised: first letter upper, rest lower. Order by `user_id`.
+
+**Schema:**
+
+```
+users
+  user_id  integer  PRIMARY KEY
+  name     varchar
+```
 
 **Expected output (sample):**
-| letter | count |
-|--------|-------|
-| B | 5 |
-| C | 2 |
-| D | 1 |
-| F | 2 |
-| G | 2 |
-| H | 1 |
-| ... | ... |
+
+| user_id | name  |
+|---------|-------|
+| 1       | Alice |
+| 2       | Bob   |
 
 #### Pattern
-GROUP BY, String manipulation (substring, position, concat)
+
+`INITCAP` or manual `UPPER`/`LOWER` slice.
 
 #### Explanation
-`SUBSTR(str, start, length)` extracts a substring (1-indexed). Group by the derived column — Postgres allows referring to the alias in `GROUP BY` (some other DBs require repeating the expression).
+
+Postgres has `INITCAP` but it also lowercases letters after every non-alphanumeric — fine for single-word names, surprising for "mary-jane". Safer for a single-word constraint: explicit slice with `UPPER(LEFT(...,1)) || LOWER(SUBSTRING(...,2))`.
 
 #### Solution
+
 ```sql
-select substr(mems.surname,1,1) as letter, count(*) as count
-    from cd.members mems
-    group by letter
-    order by letter
+SELECT user_id,
+       UPPER(LEFT(name, 1)) || LOWER(SUBSTRING(name FROM 2)) AS name
+FROM users
+ORDER BY user_id;
 ```
+
+*Source: LeetCode #1667 — Fix Names in a Table*
 
 ---
 
-### 68. Clean up telephone numbers
+### 52. Patients With a Condition
 
 #### Problem
-Strip `-`, `(`, `)`, and space from telephone numbers. Output memid and cleaned number, sorted by memid.
 
-**Tables:** `cd.members`
+Given `patients(patient_id, patient_name, conditions)` where `conditions` is a space-separated string of codes, return patients with at least one condition starting with `'DIAB1'`.
+
+**Schema:**
+
+```
+patients
+  patient_id     integer  PRIMARY KEY
+  patient_name   varchar
+  conditions     varchar
+```
 
 **Expected output (sample):**
-| memid | telephone |
-|-------|-----------|
-| 0 | 0000000000 |
-| 1 | 5555555555 |
-| 2 | 5555555555 |
-| 3 | 8446930723 |
-| 4 | 8339424710 |
-| 5 | 8440784130 |
-| ... | ... |
+
+| patient_id | patient_name | conditions       |
+|------------|--------------|------------------|
+| 2          | Alice        | DIAB100 MYOP     |
+| 4          | Bob          | ACNE DIAB100     |
 
 #### Pattern
-String manipulation (substring, position, concat)
+
+Two `LIKE` checks (start and word-boundary).
 
 #### Explanation
-`TRANSLATE(str, from, to)` does character-by-character substitution. When `to` is shorter than `from`, the extra `from` characters are simply removed — perfect for stripping a fixed character set. Faster than chained `REPLACE` calls.
+
+The naive `LIKE '%DIAB1%'` would match `'XDIAB1'` — a false positive. The fix is two patterns ORed: `LIKE 'DIAB1%'` (start of string) and `LIKE '% DIAB1%'` (after a space).
 
 #### Solution
+
 ```sql
-select memid, translate(telephone, '-() ', '') as telephone
-    from cd.members
-    order by memid;
+SELECT patient_id, patient_name, conditions
+FROM patients
+WHERE conditions LIKE 'DIAB1%'
+   OR conditions LIKE '% DIAB1%';
 ```
+
+*Source: LeetCode #1527 — Patients With a Condition*
 
 ---
 
-### 69. Find the upward recommendation chain for member ID 27
+### 53. Not Boring Movies
 
 #### Problem
-For member 27, return their recommender, that person's recommender, and so on up the chain. Output memid, firstname, surname, ordered by descending memid.
 
-**Tables:** `cd.members`
+From `cinema(id, movie, description, rating)`, return rows where the id is odd and the description is not `'boring'`, sorted by `rating` descending.
+
+**Schema:**
+
+```
+cinema
+  id           integer  PRIMARY KEY
+  movie        varchar
+  description  varchar
+  rating       numeric
+```
 
 **Expected output (sample):**
-| recommender | firstname | surname |
-|-------------|-----------|---------|
-| 20 | Matthew | Genting |
-| 5 | Gerald | Butters |
-| 1 | Darren | Smith |
+
+| id | movie     | description | rating |
+|----|-----------|-------------|--------|
+| 5  | House     | great       | 8.90   |
+| 1  | War       | great 3D    | 8.90   |
 
 #### Pattern
-Recursive CTE
+
+Modulo filter + ordering.
 
 #### Explanation
-A recursive CTE has two parts: the anchor (the seed row) and the recursive term (joins back to the CTE itself). `UNION ALL` is required (not `UNION` — Postgres needs the all-form for recursion). Termination happens when the recursive term returns zero rows.
+
+Trivial. `id % 2 = 1` for odd. Stable behaviour requires the explicit `ORDER BY`; without it the engine can return rows in any order.
 
 #### Solution
+
 ```sql
-with recursive recommenders(recommender) as (
-    select recommendedby from cd.members where memid = 27
-    union all
-    select mems.recommendedby
-        from recommenders recs
-        inner join cd.members mems
-            on mems.memid = recs.recommender
+SELECT id, movie, description, rating
+FROM cinema
+WHERE id % 2 = 1
+  AND description <> 'boring'
+ORDER BY rating DESC;
+```
+
+*Source: LeetCode #620 — Not Boring Movies*
+
+---
+
+## Recursive CTEs
+
+### 54. All People Report to the Given Manager
+
+#### Problem
+
+Given `employees(employee_id, employee_name, manager_id)`, return the ids of every employee in the reporting subtree of manager 1 — direct reports, indirect reports, and so on. Exclude manager 1.
+
+**Schema:**
+
+```
+employees
+  employee_id    integer  PRIMARY KEY
+  employee_name  varchar
+  manager_id     integer
+```
+
+**Expected output (sample):**
+
+| employee_id |
+|-------------|
+| 2           |
+| 77          |
+| 4           |
+
+#### Pattern
+
+Recursive CTE.
+
+#### Explanation
+
+The textbook hierarchy traversal: anchor at manager 1's direct reports, recursively join children. The depth-3 cap mentioned in the original problem is handled by either bounded recursion or by simply continuing until no new rows are added (postgres terminates naturally).
+
+#### Solution
+
+```sql
+WITH RECURSIVE subordinates AS (
+  SELECT employee_id
+  FROM employees
+  WHERE manager_id = 1 AND employee_id <> 1
+
+  UNION
+
+  SELECT e.employee_id
+  FROM employees e
+  JOIN subordinates s ON e.manager_id = s.employee_id
 )
-select recs.recommender, mems.firstname, mems.surname
-    from recommenders recs
-    inner join cd.members mems
-        on recs.recommender = mems.memid
-order by memid desc
+SELECT employee_id FROM subordinates;
 ```
+
+*Source: LeetCode #1303 — Find the Team Size / 1972 / community: All People Report to the Given Manager*
 
 ---
 
-### 70. Find the downward recommendation chain for member ID 1
+### 55. Find the Start and End Number of Continuous Ranges
 
 #### Problem
-For member 1, return everyone they recommended, then those people's recommendations, all the way down. Output memid and name, sorted by ascending memid.
 
-**Tables:** `cd.members`
+Given `logs(log_id)` containing a set of integers, return all maximal continuous ranges as (`start_id`, `end_id`) pairs.
+
+**Schema:**
+
+```
+logs
+  log_id  integer  PRIMARY KEY
+```
 
 **Expected output (sample):**
-| memid | firstname | surname |
-|-------|-----------|---------|
-| 4 | Janice | Joplette |
-| 5 | Gerald | Butters |
-| 7 | Nancy | Dare |
-| 10 | Charles | Owen |
-| 11 | David | Jones |
-| 14 | Jack | Smith |
-| ... | ... | ... |
+
+| start_id | end_id |
+|----------|--------|
+| 1        | 3      |
+| 7        | 8      |
+| 10       | 10     |
 
 #### Pattern
-Recursive CTE
+
+Gaps-and-islands via `log_id - ROW_NUMBER`.
 
 #### Explanation
-Mirror image of the previous problem: walk down the tree instead of up. Anchor selects direct recommendees; recursive term joins each recommendee's recommendees. Watch out for cycles in real-world recommendation graphs — guard with a visited-set column or a depth cap.
+
+The canonical trick: for any contiguous run of integers, `log_id - ROW_NUMBER() OVER (ORDER BY log_id)` is constant within the run. Group by that derived constant and take min/max.
 
 #### Solution
+
 ```sql
-with recursive recommendeds(memid) as (
-    select memid from cd.members where recommendedby = 1
-    union all
-    select mems.memid
-        from recommendeds recs
-        inner join cd.members mems
-            on mems.recommendedby = recs.memid
-)
-select recs.memid, mems.firstname, mems.surname
-    from recommendeds recs
-    inner join cd.members mems
-        on recs.memid = mems.memid
-order by memid
+SELECT MIN(log_id) AS start_id,
+       MAX(log_id) AS end_id
+FROM (
+  SELECT log_id,
+         log_id - ROW_NUMBER() OVER (ORDER BY log_id) AS grp
+  FROM logs
+) t
+GROUP BY grp
+ORDER BY start_id;
 ```
+
+*Source: LeetCode #1285 — Find the Start and End Number of Continuous Ranges*
 
 ---
 
-### 71. Produce a CTE that can return the upward recommendation chain for any member
+### 56. Friend Requests Acceptance Rate
 
 #### Problem
-Build a recursive CTE that yields `(member, recommender)` pairs for every member's full upward chain, then demonstrate by selecting chains for members 12 and 22.
 
-**Tables:** `cd.members`
+Given `friend_request(sender_id, send_to_id, request_date)` and `request_accepted(requester_id, accepter_id, accept_date)`, return the overall acceptance rate (accepted / sent), rounded to two decimals. Each request is unique by `(sender, recipient)`; each acceptance is unique by `(requester, accepter)`. If there are no requests, return 0.00.
+
+**Schema:**
+
+```
+friend_request
+  sender_id     integer
+  send_to_id    integer
+  request_date  date
+
+request_accepted
+  requester_id  integer
+  accepter_id   integer
+  accept_date   date
+```
 
 **Expected output (sample):**
-| member | recommender | firstname | surname |
-|--------|-------------|-----------|---------|
-| 12 | 9 | Ponder | Stibbons |
-| 12 | 6 | Burton | Tracy |
-| 22 | 16 | Timothy | Baker |
-| 22 | 13 | Jemima | Farrell |
+
+| accept_rate |
+|-------------|
+| 0.80        |
 
 #### Pattern
-Recursive CTE
+
+Two `COUNT(DISTINCT)` scalars + division.
 
 #### Explanation
-Generalise problem 69: the anchor seeds with every `(recommendedby, memid)` pair, the recursive term walks up while preserving the originating `member` column. This is the right shape when you want a reusable hierarchy lookup — compute the full closure once, then filter by member in the outer query.
+
+Two scalar subqueries — distinct pairs sent vs. distinct pairs accepted. Guard against zero divisor with a `CASE`. Don't try to join the tables: the relationship is set-cardinality, not row-by-row.
 
 #### Solution
+
 ```sql
-with recursive recommenders(recommender, member) as (
-    select recommendedby, memid
-        from cd.members
-    union all
-    select mems.recommendedby, recs.member
-        from recommenders recs
-        inner join cd.members mems
-            on mems.memid = recs.recommender
-)
-select recs.member member, recs.recommender, mems.firstname, mems.surname
-    from recommenders recs
-    inner join cd.members mems
-        on recs.recommender = mems.memid
-    where recs.member = 22 or recs.member = 12
-order by recs.member asc, recs.recommender desc
+SELECT ROUND(
+  CASE
+    WHEN (SELECT COUNT(DISTINCT (sender_id, send_to_id)) FROM friend_request) = 0
+      THEN 0
+    ELSE (SELECT COUNT(DISTINCT (requester_id, accepter_id)) FROM request_accepted)::numeric
+       / (SELECT COUNT(DISTINCT (sender_id, send_to_id)) FROM friend_request)
+  END, 2
+) AS accept_rate;
 ```
+
+*Source: LeetCode #597 — Friend Requests I: Overall Acceptance Rate*
+
+---
+
+### 57. Friend Suggestions
+
+#### Problem
+
+Given `friendship(user1_id, user2_id)` (undirected — each pair stored once), suggest for each user the friends-of-friends who are not themselves and not already direct friends. Return `(user_id, suggested_id)` pairs.
+
+**Schema:**
+
+```
+friendship
+  user1_id  integer
+  user2_id  integer
+  PRIMARY KEY (user1_id, user2_id)
+```
+
+**Expected output (sample):**
+
+| user_id | suggested_id |
+|---------|--------------|
+| 1       | 4            |
+| 2       | 5            |
+
+#### Pattern
+
+Undirected adjacency unfold + 2-hop traversal.
+
+#### Explanation
+
+The undirected pairs are stored once but need to expand both ways — `UNION ALL` the (a→b) and (b→a) versions, then join twice for friends-of-friends, excluding self and direct friends.
+
+#### Solution
+
+```sql
+WITH edges AS (
+  SELECT user1_id AS a, user2_id AS b FROM friendship
+  UNION ALL
+  SELECT user2_id, user1_id FROM friendship
+),
+direct AS (SELECT * FROM edges)
+SELECT DISTINCT e1.a AS user_id, e2.b AS suggested_id
+FROM edges e1
+JOIN edges e2 ON e1.b = e2.a
+WHERE e2.b <> e1.a
+  AND NOT EXISTS (
+    SELECT 1 FROM direct d
+    WHERE d.a = e1.a AND d.b = e2.b
+  );
+```
+
+*Source: LeetCode community — Friend Suggestions*
+
+---
+
+## Hard / Advanced Patterns
+
+### 58. Trips and Users
+
+#### Problem
+
+Given `trips(id, client_id, driver_id, city_id, status, request_at)` and `users(users_id, banned, role)`, where `status` is one of `'completed'`, `'cancelled_by_driver'`, `'cancelled_by_client'`, return the daily cancellation rate (cancelled / total) for unbanned clients and unbanned drivers, between 2013-10-01 and 2013-10-03 inclusive. Round to two decimals. Days with no qualifying trips are omitted.
+
+**Schema:**
+
+```
+trips
+  id           integer  PRIMARY KEY
+  client_id    integer  FK → users(users_id)
+  driver_id    integer  FK → users(users_id)
+  city_id      integer
+  status       varchar
+  request_at   date
+
+users
+  users_id  integer  PRIMARY KEY
+  banned    varchar  CHECK (banned IN ('Yes','No'))
+  role      varchar
+```
+
+**Expected output (sample):**
+
+| Day        | Cancellation Rate |
+|------------|-------------------|
+| 2013-10-01 | 0.33              |
+| 2013-10-02 | 0.00              |
+| 2013-10-03 | 0.50              |
+
+#### Pattern
+
+Multi-condition filtering + conditional aggregation.
+
+#### Explanation
+
+Three-way filter (client unbanned, driver unbanned, date in range) plus a ratio computed in one pass with `AVG((status<>'completed')::int)`. Two `NOT IN` lookups (banned clients, banned drivers) are clean and the planner handles them efficiently with indexes on `users.users_id`.
+
+#### Solution
+
+```sql
+SELECT request_at AS "Day",
+       ROUND(AVG((status <> 'completed')::int)::numeric, 2) AS "Cancellation Rate"
+FROM trips
+WHERE request_at BETWEEN DATE '2013-10-01' AND DATE '2013-10-03'
+  AND client_id NOT IN (SELECT users_id FROM users WHERE banned = 'Yes')
+  AND driver_id NOT IN (SELECT users_id FROM users WHERE banned = 'Yes')
+GROUP BY request_at
+ORDER BY request_at;
+```
+
+*Source: LeetCode #262 — Trips and Users*
+
+---
+
+### 59. Human Traffic of Stadium
+
+#### Problem
+
+Given `stadium(id, visit_date, people)`, return all rows from runs of three or more consecutive days where `people >= 100`. Order by `visit_date`.
+
+**Schema:**
+
+```
+stadium
+  id          integer  PRIMARY KEY
+  visit_date  date     UNIQUE
+  people      integer
+```
+
+**Expected output (sample):**
+
+| id | visit_date | people |
+|----|------------|--------|
+| 5  | 2017-01-05 | 145    |
+| 6  | 2017-01-06 | 1455   |
+| 7  | 2017-01-07 | 199    |
+| 8  | 2017-01-09 | 188    |
+
+#### Pattern
+
+Gaps-and-islands on filtered rows.
+
+#### Explanation
+
+Filter to `people >= 100`, then assign each row a group key by `id - ROW_NUMBER()` over the remaining rows. Group by that key, keep groups of size ≥ 3, and join the qualifying rows back.
+
+#### Solution
+
+```sql
+WITH busy AS (
+  SELECT id, visit_date, people,
+         id - ROW_NUMBER() OVER (ORDER BY id) AS grp
+  FROM stadium
+  WHERE people >= 100
+),
+qualifying AS (
+  SELECT grp FROM busy GROUP BY grp HAVING COUNT(*) >= 3
+)
+SELECT b.id, b.visit_date, b.people
+FROM busy b
+JOIN qualifying q USING (grp)
+ORDER BY b.visit_date;
+```
+
+*Source: LeetCode #601 — Human Traffic of Stadium*
+
+---
+
+### 60. Median Employee Salary
+
+#### Problem
+
+Given `employee(id, company, salary)`, return the median salary row(s) per company. If the row count is even, return the two middle rows; if odd, the single middle row.
+
+**Schema:**
+
+```
+employee
+  id       integer  PRIMARY KEY
+  company  varchar
+  salary   integer
+```
+
+**Expected output (sample):**
+
+| id | company | salary |
+|----|---------|--------|
+| 5  | A       | 7500   |
+| 8  | B       | 6000   |
+| 11 | B       | 5000   |
+
+#### Pattern
+
+Window-based median: row-number + total count.
+
+#### Explanation
+
+For each row, compute its rank within company by salary and the company's row count. The median rows satisfy `2 * rn ∈ {count, count+1, count+2}` — three positions that cover both odd and even cases.
+
+#### Solution
+
+```sql
+SELECT id, company, salary
+FROM (
+  SELECT id, company, salary,
+         ROW_NUMBER() OVER (PARTITION BY company ORDER BY salary, id) AS rn,
+         COUNT(*)     OVER (PARTITION BY company)                     AS cnt
+  FROM employee
+) t
+WHERE 2 * rn IN (cnt, cnt + 1, cnt + 2);
+```
+
+*Source: LeetCode #569 — Median Employee Salary*
+
+---
+
+### 61. Find Median Given Frequency of Numbers
+
+#### Problem
+
+Given `numbers(num, frequency)` representing a multiset, return the median value. The dataset can be very large (frequencies in the thousands).
+
+**Schema:**
+
+```
+numbers
+  num        integer  PRIMARY KEY
+  frequency  integer
+```
+
+**Expected output (sample):**
+
+| median |
+|--------|
+| 2.5000 |
+
+#### Pattern
+
+Cumulative frequency + median position.
+
+#### Explanation
+
+Sort by `num`, compute the running sum of frequencies, and find rows where the cumulative range straddles the median position. Works in one pass even for billions of logical elements — that's the whole point of the frequency encoding.
+
+#### Solution
+
+```sql
+WITH cum AS (
+  SELECT num, frequency,
+         SUM(frequency) OVER (ORDER BY num)                  AS running,
+         SUM(frequency) OVER ()                              AS total
+  FROM numbers
+)
+SELECT AVG(num)::numeric(10, 4) AS median
+FROM cum
+WHERE running       >= total / 2.0
+  AND running - frequency <= total / 2.0;
+```
+
+*Source: LeetCode #571 — Find Median Given Frequency of Numbers*
+
+---
+
+### 62. Tournament Winners
+
+#### Problem
+
+Given `players(player_id, group_id)` and `matches(match_id, first_player, second_player, first_score, second_score)`, return the winner per group — the player with the highest total score. Ties go to the smallest `player_id`.
+
+**Schema:**
+
+```
+players
+  player_id  integer  PRIMARY KEY
+  group_id   integer
+
+matches
+  match_id       integer  PRIMARY KEY
+  first_player   integer  FK → players
+  second_player  integer  FK → players
+  first_score    integer
+  second_score   integer
+```
+
+**Expected output (sample):**
+
+| group_id | player_id |
+|----------|-----------|
+| 1        | 15        |
+| 2        | 35        |
+| 3        | 40        |
+
+#### Pattern
+
+Union-unfold scores + top-1 per group with tie-break.
+
+#### Explanation
+
+Unfold each match into two score rows via `UNION ALL`, sum per player, join group, then top-1 per group with `ROW_NUMBER` ordered by `(total DESC, player_id ASC)`. Cleaner than a `MAX`-then-rejoin which can't break ties by id.
+
+#### Solution
+
+```sql
+WITH scores AS (
+  SELECT first_player  AS player_id, first_score  AS score FROM matches
+  UNION ALL
+  SELECT second_player,                second_score        FROM matches
+),
+totals AS (
+  SELECT p.group_id, p.player_id, COALESCE(SUM(s.score), 0) AS total
+  FROM players p
+  LEFT JOIN scores s USING (player_id)
+  GROUP BY p.group_id, p.player_id
+)
+SELECT group_id, player_id
+FROM (
+  SELECT group_id, player_id,
+         ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY total DESC, player_id) AS rn
+  FROM totals
+) t
+WHERE rn = 1
+ORDER BY group_id;
+```
+
+*Source: LeetCode #1194 — Tournament Winners*
+
+---
+
+### 63. Report Contiguous Dates
+
+#### Problem
+
+Given `failed(fail_date)` and `succeeded(success_date)` with no overlap between the two sets and all dates within 2019, return each maximal contiguous run as (`period_state`, `start_date`, `end_date`) where `period_state` is `'failed'` or `'succeeded'`.
+
+**Schema:**
+
+```
+failed
+  fail_date  date  PRIMARY KEY
+
+succeeded
+  success_date  date  PRIMARY KEY
+```
+
+**Expected output (sample):**
+
+| period_state | start_date | end_date   |
+|--------------|------------|------------|
+| succeeded    | 2019-01-01 | 2019-01-03 |
+| failed       | 2019-01-04 | 2019-01-05 |
+| succeeded    | 2019-01-06 | 2019-01-06 |
+
+#### Pattern
+
+Union + gaps-and-islands keyed by `(state, date - row_number)`.
+
+#### Explanation
+
+Unify into one stream with a state label. Within each state, contiguous date runs are isolated by `date - ROW_NUMBER()` partitioned on state. Group by `(state, key)`.
+
+#### Solution
+
+```sql
+WITH days AS (
+  SELECT 'failed'    AS period_state, fail_date AS d
+  FROM failed WHERE fail_date BETWEEN DATE '2019-01-01' AND DATE '2019-12-31'
+  UNION ALL
+  SELECT 'succeeded', success_date
+  FROM succeeded WHERE success_date BETWEEN DATE '2019-01-01' AND DATE '2019-12-31'
+),
+keyed AS (
+  SELECT period_state, d,
+         d - (ROW_NUMBER() OVER (PARTITION BY period_state ORDER BY d) || ' days')::interval AS grp
+  FROM days
+)
+SELECT period_state, MIN(d) AS start_date, MAX(d) AS end_date
+FROM keyed
+GROUP BY period_state, grp
+ORDER BY start_date;
+```
+
+*Source: LeetCode #1225 — Report Contiguous Dates*
+
+---
+
+### 64. Capital Gain/Loss
+
+#### Problem
+
+Given `stocks(stock_name, operation, operation_day, price)` where each `'Buy'` is paired with a future `'Sell'` for the same stock, return the net capital gain/loss per stock (sum of sell prices minus sum of buy prices).
+
+**Schema:**
+
+```
+stocks
+  stock_name     varchar
+  operation      varchar  CHECK (operation IN ('Buy','Sell'))
+  operation_day  integer
+  price          integer
+  PRIMARY KEY (stock_name, operation_day)
+```
+
+**Expected output (sample):**
+
+| stock_name | capital_gain_loss |
+|------------|-------------------|
+| Corona     | -45               |
+| Leetcode   | 850               |
+
+#### Pattern
+
+Signed aggregation.
+
+#### Explanation
+
+A buy is a negative cashflow, a sell a positive one. Express this with a single `SUM(CASE WHEN operation='Sell' THEN price ELSE -price END)`. No join, no window — one pass.
+
+#### Solution
+
+```sql
+SELECT stock_name,
+       SUM(CASE WHEN operation = 'Sell' THEN price ELSE -price END) AS capital_gain_loss
+FROM stocks
+GROUP BY stock_name;
+```
+
+*Source: LeetCode #1393 — Capital Gain/Loss*
+
+---
+
+### 65. Find Cumulative Salary of an Employee
+
+#### Problem
+
+Given `employee(id, month, salary)`, for each employee at each month, return the sum of salaries for the latest three months **excluding the most recent month** (the most recent month is hidden — could be in-progress payroll). Skip employees with only one record. Order by `id` ascending, `month` descending.
+
+**Schema:**
+
+```
+employee
+  id      integer
+  month   integer
+  salary  integer
+  PRIMARY KEY (id, month)
+```
+
+**Expected output (sample):**
+
+| id | month | Salary |
+|----|-------|--------|
+| 1  | 3     | 90     |
+| 1  | 2     | 50     |
+| 1  | 1     | 20     |
+
+#### Pattern
+
+Window rolling sum + filter on rank.
+
+#### Explanation
+
+For each employee, rank months descending; drop the top-1 (most recent); over the remaining rows, compute `SUM(salary) OVER (... ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)` ordered by month ascending so the "latest three months including current" becomes a backward window.
+
+#### Solution
+
+```sql
+WITH ranked AS (
+  SELECT id, month, salary,
+         ROW_NUMBER() OVER (PARTITION BY id ORDER BY month DESC) AS rn_desc
+  FROM employee
+),
+kept AS (
+  SELECT id, month, salary
+  FROM ranked
+  WHERE rn_desc > 1   -- drop latest
+)
+SELECT id, month,
+       SUM(salary) OVER (
+         PARTITION BY id ORDER BY month
+         ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+       ) AS "Salary"
+FROM kept
+ORDER BY id, month DESC;
+```
+
+*Source: LeetCode #579 — Find Cumulative Salary of an Employee*
+
+---
+
+### 66. Strong Friendship
+
+#### Problem
+
+Given `friendship(user1_id, user2_id)` (undirected, stored once with `user1_id < user2_id`), return pairs of users who share at least three common friends, with their common-friends count.
+
+**Schema:**
+
+```
+friendship
+  user1_id  integer
+  user2_id  integer
+  PRIMARY KEY (user1_id, user2_id)
+```
+
+**Expected output (sample):**
+
+| user1_id | user2_id | common_friend |
+|----------|----------|---------------|
+| 1        | 2        | 3             |
+| 1        | 3        | 3             |
+
+#### Pattern
+
+Adjacency unfold + intersection count.
+
+#### Explanation
+
+Build a directed-view of friendships, then for each direct-friendship pair count common neighbours via an inner join on a shared third user. Threshold at 3. The undirected storage means you need the `UNION ALL` unfold.
+
+#### Solution
+
+```sql
+WITH edges AS (
+  SELECT user1_id AS a, user2_id AS b FROM friendship
+  UNION ALL
+  SELECT user2_id, user1_id FROM friendship
+)
+SELECT f.user1_id, f.user2_id, COUNT(*) AS common_friend
+FROM friendship f
+JOIN edges e1 ON e1.a = f.user1_id
+JOIN edges e2 ON e2.a = f.user2_id AND e2.b = e1.b
+GROUP BY f.user1_id, f.user2_id
+HAVING COUNT(*) >= 3
+ORDER BY f.user1_id, f.user2_id;
+```
+
+*Source: LeetCode #1949 — Strong Friendship*
+
+---
+
+### 67. Market Analysis I
+
+#### Problem
+
+Given `users(user_id, join_date, favorite_brand)`, `orders(order_id, order_date, item_id, buyer_id, seller_id)`, and `items(item_id, item_brand)`, return for every user their `user_id`, `join_date`, and the number of orders placed in 2019.
+
+**Schema:**
+
+```
+users
+  user_id          integer  PRIMARY KEY
+  join_date        date
+  favorite_brand   varchar
+
+orders
+  order_id    integer  PRIMARY KEY
+  order_date  date
+  item_id     integer
+  buyer_id    integer  FK → users
+  seller_id   integer  FK → users
+
+items
+  item_id     integer  PRIMARY KEY
+  item_brand  varchar
+```
+
+**Expected output (sample):**
+
+| buyer_id | join_date  | orders_in_2019 |
+|----------|------------|----------------|
+| 1        | 2018-01-01 | 1              |
+| 2        | 2018-02-09 | 2              |
+
+#### Pattern
+
+`LEFT JOIN` with year-scoped predicate inside the join condition.
+
+#### Explanation
+
+Subtle: the year predicate must be on the **join** clause, not the `WHERE`. If you put it in `WHERE`, NULL `order_date`s from non-buyers get filtered out and you lose the zero-order users.
+
+#### Solution
+
+```sql
+SELECT u.user_id AS buyer_id,
+       u.join_date,
+       COUNT(o.order_id) AS orders_in_2019
+FROM users u
+LEFT JOIN orders o
+       ON o.buyer_id = u.user_id
+      AND o.order_date >= DATE '2019-01-01'
+      AND o.order_date <  DATE '2020-01-01'
+GROUP BY u.user_id, u.join_date;
+```
+
+*Source: LeetCode #1158 — Market Analysis I*
+
+---
+
+### 68. Market Analysis II
+
+#### Problem
+
+Using the same schema as Market Analysis I, return for each user whether their **second-ever** sold item's brand matches their `favorite_brand` (`'yes'` / `'no'`). Users with fewer than two sales return `'no'`.
+
+**Schema:** *(see #67)*
+
+**Expected output (sample):**
+
+| seller_id | 2nd_item_fav_brand |
+|-----------|--------------------|
+| 1         | no                 |
+| 2         | yes                |
+
+#### Pattern
+
+`ROW_NUMBER` over seller history + `LEFT JOIN`.
+
+#### Explanation
+
+Rank each seller's sales chronologically; pick row 2; compare its brand to `favorite_brand`. `LEFT JOIN` so sellers with < 2 sales get a NULL that collapses to `'no'`.
+
+#### Solution
+
+```sql
+WITH ranked AS (
+  SELECT seller_id, item_id,
+         ROW_NUMBER() OVER (PARTITION BY seller_id ORDER BY order_date, order_id) AS rn
+  FROM orders
+)
+SELECT u.user_id AS seller_id,
+       CASE
+         WHEN i.item_brand = u.favorite_brand THEN 'yes'
+         ELSE 'no'
+       END AS "2nd_item_fav_brand"
+FROM users u
+LEFT JOIN ranked r ON r.seller_id = u.user_id AND r.rn = 2
+LEFT JOIN items  i ON i.item_id   = r.item_id;
+```
+
+*Source: LeetCode #1159 — Market Analysis II*
+
+---
+
+### 69. Page Recommendations II
+
+#### Problem
+
+Given `friendship(user1_id, user2_id)` (undirected, one row per pair) and `likes(user_id, page_id)`, for each user return the pages liked by at least one friend that the user hasn't liked themselves, along with the count of friends who liked each page. Sort by `user_id` ascending, then `friends_likes` descending.
+
+**Schema:**
+
+```
+friendship
+  user1_id  integer
+  user2_id  integer
+  PRIMARY KEY (user1_id, user2_id)
+
+likes
+  user_id  integer
+  page_id  integer
+  PRIMARY KEY (user_id, page_id)
+```
+
+**Expected output (sample):**
+
+| user_id | page_id | friends_likes |
+|---------|---------|---------------|
+| 1       | 88      | 2             |
+| 1       | 23      | 1             |
+
+#### Pattern
+
+Adjacency unfold + anti-join.
+
+#### Explanation
+
+Unfold friendship both directions, join to friends' likes, then anti-join against the user's own likes. Group and count. Two `LEFT JOIN ... IS NULL` is fine; `NOT EXISTS` is fine. Either way, deduplicate within the friends' likes per page first.
+
+#### Solution
+
+```sql
+WITH edges AS (
+  SELECT user1_id AS u, user2_id AS f FROM friendship
+  UNION ALL
+  SELECT user2_id, user1_id FROM friendship
+),
+friend_likes AS (
+  SELECT DISTINCT e.u AS user_id, l.page_id, l.user_id AS friend_id
+  FROM edges e
+  JOIN likes l ON l.user_id = e.f
+)
+SELECT fl.user_id, fl.page_id, COUNT(DISTINCT fl.friend_id) AS friends_likes
+FROM friend_likes fl
+WHERE NOT EXISTS (
+  SELECT 1 FROM likes l2
+  WHERE l2.user_id = fl.user_id AND l2.page_id = fl.page_id
+)
+GROUP BY fl.user_id, fl.page_id
+ORDER BY fl.user_id, friends_likes DESC;
+```
+
+*Source: LeetCode #1729 / community — Page Recommendations II*
+
+---
+
+### 70. Number of Transactions per Visit
+
+#### Problem
+
+Given `visits(user_id, visit_date)` and `transactions(user_id, transaction_date, amount)` (a single visit can have many transactions on the same date), return a frequency distribution: for each `transactions_count` from 0 up to the maximum observed, how many visits had exactly that many transactions.
+
+**Schema:**
+
+```
+visits
+  user_id     integer
+  visit_date  date
+
+transactions
+  user_id           integer
+  transaction_date  date
+  amount            integer
+```
+
+**Expected output (sample):**
+
+| transactions_count | visits_count |
+|--------------------|--------------|
+| 0                  | 4            |
+| 1                  | 5            |
+| 2                  | 1            |
+| 3                  | 0            |
+
+#### Pattern
+
+Visit-level counts joined with a `generate_series` range.
+
+#### Explanation
+
+Two-step problem: first count transactions per visit (with `LEFT JOIN`, including zero-transaction visits), then bin by count. The missing piece — empty bins like `3` — needs a dense range from `generate_series(0, max_count)` joined with the histogram.
+
+#### Solution
+
+```sql
+WITH per_visit AS (
+  SELECT v.user_id, v.visit_date,
+         COUNT(t.user_id) AS tx_cnt
+  FROM visits v
+  LEFT JOIN transactions t
+         ON t.user_id          = v.user_id
+        AND t.transaction_date = v.visit_date
+  GROUP BY v.user_id, v.visit_date
+),
+hist AS (
+  SELECT tx_cnt, COUNT(*) AS visits_count
+  FROM per_visit
+  GROUP BY tx_cnt
+),
+bounds AS (
+  SELECT COALESCE(MAX(tx_cnt), 0) AS hi FROM per_visit
+)
+SELECT g.n            AS transactions_count,
+       COALESCE(h.visits_count, 0) AS visits_count
+FROM bounds b,
+     generate_series(0, b.hi) AS g(n)
+LEFT JOIN hist h ON h.tx_cnt = g.n
+ORDER BY transactions_count;
+```
+
+*Source: LeetCode #1336 — Number of Transactions per Visit*
+
+---
+
+### 71. Find the Quiet Students in All Exams
+
+#### Problem
+
+Given `student(student_id, student_name)` and `exam(exam_id, student_id, score)`, return the "quiet" students — those who took at least one exam and in every exam they took, their score is strictly between (not equal to) the minimum and maximum of that exam.
+
+**Schema:**
+
+```
+student
+  student_id    integer  PRIMARY KEY
+  student_name  varchar
+
+exam
+  exam_id     integer
+  student_id  integer  FK → student
+  score       integer
+  PRIMARY KEY (exam_id, student_id)
+```
+
+**Expected output (sample):**
+
+| student_id | student_name |
+|------------|--------------|
+| 2          | Quiet Stu    |
+
+#### Pattern
+
+Window MIN/MAX per exam + universal-quantifier filter.
+
+#### Explanation
+
+Per-exam `MIN`/`MAX` via window. A student qualifies iff *every* one of their exams has score strictly between extremes — express as "no exam where they're at an extreme" via `NOT EXISTS`.
+
+#### Solution
+
+```sql
+WITH scored AS (
+  SELECT exam_id, student_id, score,
+         MIN(score) OVER (PARTITION BY exam_id) AS lo,
+         MAX(score) OVER (PARTITION BY exam_id) AS hi
+  FROM exam
+)
+SELECT s.student_id, s.student_name
+FROM student s
+WHERE EXISTS (SELECT 1 FROM scored WHERE student_id = s.student_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM scored sc
+    WHERE sc.student_id = s.student_id
+      AND (sc.score = sc.lo OR sc.score = sc.hi)
+  )
+ORDER BY s.student_id;
+```
+
+*Source: LeetCode #1412 — Find the Quiet Students in All Exams*
+
+---
+
+### 72. Game Play Analysis V
+
+#### Problem
+
+Given `activity(player_id, device_id, event_date, games_played)`, define each player's "install date" as the date of their first activity. For each install date, return the install count (distinct players who installed that day) and the Day-1 retention rate — the fraction of those players who also played on `install_date + 1`, rounded to two decimals.
+
+**Schema:**
+
+```
+activity
+  player_id     integer
+  device_id     integer
+  event_date    date
+  games_played integer
+  PRIMARY KEY (player_id, event_date)
+```
+
+**Expected output (sample):**
+
+| install_dt | installs | Day1_retention |
+|------------|----------|----------------|
+| 2016-03-01 | 1        | 1.00           |
+| 2017-06-25 | 1        | 0.00           |
+
+#### Pattern
+
+First-event window + Day-1 lookup.
+
+#### Explanation
+
+Get each player's install date, group those by date for install counts, then `LEFT JOIN` back to `activity` on `event_date = install_date + 1` for retention.
+
+#### Solution
+
+```sql
+WITH installs AS (
+  SELECT player_id, MIN(event_date) AS install_dt
+  FROM activity
+  GROUP BY player_id
+)
+SELECT i.install_dt,
+       COUNT(*)                                              AS installs,
+       ROUND(
+         AVG((a.event_date IS NOT NULL)::int)::numeric, 2
+       )                                                     AS "Day1_retention"
+FROM installs i
+LEFT JOIN activity a
+       ON a.player_id  = i.player_id
+      AND a.event_date = i.install_dt + INTERVAL '1 day'
+GROUP BY i.install_dt
+ORDER BY i.install_dt;
+```
+
+*Source: LeetCode community — Game Play Analysis V*
+
+---
