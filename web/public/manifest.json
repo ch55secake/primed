@@ -67,7 +67,7 @@
       "itemsPlural": "interview problems",
       "storagePrefix": "sdf:neetcode",
       "defaultRevealedSections": ["Problem"],
-      "sectionOrder": ["Problem", "Pattern", "Explanation", "Solution"]
+      "sectionOrder": ["Problem", "Pattern", "Explanation", "Python", "Rust", "Go", "C++"]
     },
     {
       "id": "java",
