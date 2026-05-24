@@ -7,6 +7,7 @@ import {
   Pressable,
   Switch,
   StyleSheet,
+  Linking,
   useWindowDimensions,
 } from "react-native";
 import { router } from "expo-router";
@@ -107,6 +108,24 @@ export default function SettingsScreen() {
             thumbColor={palette.surface}
           />
         </View>
+      </Section>
+
+      <Section title="Android app" palette={palette}>
+        <Pressable
+          onPress={() => Linking.openURL("/drilly.apk")}
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+          ]}
+          accessibilityLabel="Download the Android APK"
+        >
+          <Text style={styles.buttonText}>Download APK</Text>
+        </Pressable>
+        <Text style={styles.hint}>
+          Installs the offline reader. Enable “install from unknown
+          apps” for your browser, open the downloaded file, then open
+          the app online once and hit refresh to cache everything.
+        </Text>
       </Section>
       </ScrollView>
     </View>
@@ -261,6 +280,19 @@ function makeStyles(p: Palette) {
       fontSize: 12,
       marginTop: 8,
       lineHeight: 16,
+    },
+    button: {
+      alignSelf: "flex-start",
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 8,
+      backgroundColor: p.accent,
+    },
+    buttonPressed: { opacity: 0.75 },
+    buttonText: {
+      color: p.scheme === "light" ? "#ffffff" : "#0b0d12",
+      fontSize: 14,
+      fontWeight: "600",
     },
   });
 }
