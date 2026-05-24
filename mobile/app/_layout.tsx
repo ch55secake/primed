@@ -12,6 +12,23 @@ import { NativeWebViewShell } from "../components/NativeWebViewShell";
 /** Width threshold for switching from mobile stack to desktop sidebar layout. */
 const DESKTOP_BREAKPOINT_PX = 900;
 
+// Register the offline service worker on web (this is also the code the
+// Android WebView runs, so the in-app site gets durable offline caching).
+// No-op on native and on browsers without SW support.
+if (
+  Platform.OS === "web" &&
+  typeof navigator !== "undefined" &&
+  "serviceWorker" in navigator
+) {
+  const register = () =>
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  if (typeof document !== "undefined" && document.readyState === "complete") {
+    register();
+  } else if (typeof window !== "undefined") {
+    window.addEventListener("load", register);
+  }
+}
+
 export default function RootLayout() {
   // Native (Android / iOS) is a thin WebView wrapper around the production
   // site. The web build of this same codebase IS the site — keeping a
