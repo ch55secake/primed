@@ -81,7 +81,7 @@ export function buildHtml({
     #wrap svg { max-width: none !important; height: auto; }
     .err {
       color: ${scheme === "dark" ? "#f8b3b3" : "#b00020"};
-      font-family: Courier, monospace;
+      font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
       font-size: 12px;
       white-space: pre-wrap;
       padding: 12px;
