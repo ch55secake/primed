@@ -20,11 +20,19 @@
  * CACHE_VERSION — the old cache is deleted on activate.
  */
 
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const CACHE = `drilly-${CACHE_VERSION}`;
 
 const MERMAID_CDN =
   "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+
+// Self-hosted JetBrains Mono (code font). Precached so code blocks render
+// in the right font offline, not just after a runtime fetch.
+const FONT_URLS = [
+  "/fonts/jetbrains-mono-400-normal.woff2",
+  "/fonts/jetbrains-mono-700-normal.woff2",
+  "/fonts/jetbrains-mono-400-italic.woff2",
+];
 
 // Same-origin content to seed at install time. Best-effort: a single 404
 // (e.g. a renamed primer) must not abort the whole install.
@@ -51,6 +59,7 @@ self.addEventListener("install", (event) => {
         ...CONTENT_URLS.map((u) =>
           cache.add(new Request(u, { cache: "reload" })),
         ),
+        ...FONT_URLS.map((u) => cache.add(new Request(u, { cache: "reload" }))),
         cache.add(new Request(MERMAID_CDN, { mode: "no-cors" })),
       ]);
       await self.skipWaiting();

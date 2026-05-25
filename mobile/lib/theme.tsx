@@ -7,6 +7,17 @@ import {
 import { useColorScheme } from "react-native";
 import { useSettings } from "./settings";
 
+/**
+ * Monospace stack for all code rendering. JetBrains Mono (IntelliJ's font)
+ * is self-hosted at /fonts/*.woff2 and declared via @font-face in
+ * app/+html.tsx; the rest are platform fallbacks if the woff2 hasn't
+ * loaded yet (or on a true-native render, which doesn't currently happen
+ * since native is a WebView shell). Comma-separated families are valid on
+ * react-native-web (passed straight through to CSS font-family).
+ */
+export const MONO_FONT =
+  '"JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+
 export interface Palette {
   /** Primary surface — page background. */
   bg: string;

@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { useTheme, type Palette } from "../lib/theme";
+import { useTheme, MONO_FONT, type Palette } from "../lib/theme";
 import { useSettings } from "../lib/settings";
 import { highlight } from "../lib/syntaxHighlight";
 import MermaidView from "./MermaidView";
@@ -58,11 +58,19 @@ const LANG_LABEL: Record<string, string> = {
 
 export function CodeBlock({ language, code }: Props) {
   const palette = useTheme();
-  const { fontScale } = useSettings();
+  const { fontScale, eReaderMode } = useSettings();
   const styles = useMemo(
-    () => makeStyles(palette, fontScale),
-    [palette, fontScale],
+    () => makeStyles(palette, fontScale, eReaderMode),
+    [palette, fontScale, eReaderMode],
   );
+  // E-ink: render code at maximum contrast — near-black on white —
+  // ignoring the theme's softer codeFg/codeBg, and let the highlighter
+  // convey syntax by weight rather than colour.
+  const codeColor = eReaderMode
+    ? palette.scheme === "dark"
+      ? "#f5f5f5"
+      : "#000000"
+    : palette.codeFg;
 
   const normalised = (language || "").toLowerCase().trim();
   const canonical = LANG_ALIAS[normalised] ?? normalised;
@@ -84,12 +92,18 @@ export function CodeBlock({ language, code }: Props) {
         />
       ) : (
         <View style={styles.body}>
-          {highlight(code, canonical, palette.scheme, {
-            color: palette.codeFg,
-            fontFamily: "Courier",
-            fontSize: 12 * fontScale,
-            lineHeight: 18 * fontScale,
-          })}
+          {highlight(
+            code,
+            canonical,
+            palette.scheme,
+            {
+              color: codeColor,
+              fontFamily: MONO_FONT,
+              fontSize: 13 * fontScale,
+              lineHeight: 20 * fontScale,
+            },
+            eReaderMode,
+          )}
         </View>
       )}
     </View>
@@ -120,31 +134,38 @@ export const markdownRules = {
   ),
 };
 
-function makeStyles(p: Palette, scale: number) {
+function makeStyles(p: Palette, scale: number, eink: boolean) {
+  const codeBg = eink
+    ? p.scheme === "dark"
+      ? "#000000"
+      : "#ffffff"
+    : p.codeBg;
   return StyleSheet.create({
     wrapper: {
       marginVertical: 8,
-      borderRadius: 6,
+      borderRadius: eink ? 0 : 6,
       overflow: "hidden",
       borderWidth: 1,
-      borderColor: p.border,
+      // Stronger border in e-ink so the block edge is unambiguous on a
+      // greyscale panel with no surface tint to separate it.
+      borderColor: eink ? p.text : p.border,
     },
     tag: {
       paddingHorizontal: 10,
       paddingVertical: 4,
-      backgroundColor: p.surfacePressed,
+      backgroundColor: eink ? codeBg : p.surfacePressed,
       borderBottomWidth: 1,
-      borderBottomColor: p.border,
+      borderBottomColor: eink ? p.text : p.border,
     },
     tagText: {
-      color: p.textMuted,
+      color: eink ? p.textStrong : p.textMuted,
       fontSize: 10 * scale,
-      fontWeight: "600",
+      fontWeight: eink ? "700" : "600",
       letterSpacing: 1,
       textTransform: "uppercase",
     },
     body: {
-      backgroundColor: p.codeBg,
+      backgroundColor: codeBg,
       paddingHorizontal: 10,
       paddingVertical: 8,
     },

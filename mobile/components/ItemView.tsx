@@ -15,7 +15,7 @@ import {
   setRevealedSections,
 } from "../lib/storage";
 import { useSettings } from "../lib/settings";
-import { useTheme, type Palette } from "../lib/theme";
+import { useTheme, MONO_FONT, type Palette } from "../lib/theme";
 import { markdownRules } from "./CodeBlock";
 import { CopyButton } from "./CopyButton";
 
@@ -453,7 +453,7 @@ function makeMarkdownStyles(p: Palette, scale: number) {
     code_inline: {
       backgroundColor: p.codeBg,
       color: p.accent,
-      fontFamily: "Courier",
+      fontFamily: MONO_FONT,
       fontSize: fs(13),
       paddingHorizontal: 4,
       paddingVertical: 1,

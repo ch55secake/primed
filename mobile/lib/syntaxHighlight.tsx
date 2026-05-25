@@ -88,47 +88,81 @@ const TOKEN_COLOURS: {
     "hljs-addition": "#98c379",
     "hljs-deletion": "#e06c75",
   },
+  // Light scheme deepened from stock Atom One for higher contrast against
+  // the light code background (Atom One's mid-tones wash out, especially
+  // on lower-quality panels). Comments stay grey but darker; everything
+  // else pushed toward darker, more saturated hues.
   light: {
-    "hljs-keyword": "#a626a4",
-    "hljs-built_in": "#0184bc",
-    "hljs-type": "#c18401",
-    "hljs-literal": "#986801",
-    "hljs-number": "#986801",
-    "hljs-regexp": "#50a14f",
-    "hljs-string": "#50a14f",
-    "hljs-subst": "#383a42",
-    "hljs-symbol": "#986801",
-    "hljs-class": "#c18401",
-    "hljs-function": "#4078f2",
-    "hljs-title": "#4078f2",
-    "hljs-params": "#383a42",
-    "hljs-comment": "#a0a1a7",
-    "hljs-doctag": "#a0a1a7",
-    "hljs-meta": "#a0a1a7",
-    "hljs-section": "#e45649",
-    "hljs-tag": "#e45649",
-    "hljs-name": "#e45649",
-    "hljs-attr": "#986801",
-    "hljs-attribute": "#986801",
-    "hljs-variable": "#e45649",
-    "hljs-bullet": "#4078f2",
-    "hljs-code": "#383a42",
-    "hljs-emphasis": "#383a42",
-    "hljs-strong": "#383a42",
-    "hljs-formula": "#383a42",
-    "hljs-link": "#4078f2",
-    "hljs-quote": "#a0a1a7",
-    "hljs-selector-tag": "#e45649",
-    "hljs-selector-id": "#4078f2",
-    "hljs-selector-class": "#986801",
-    "hljs-selector-attr": "#986801",
-    "hljs-selector-pseudo": "#0184bc",
-    "hljs-template-tag": "#a626a4",
-    "hljs-template-variable": "#986801",
-    "hljs-addition": "#50a14f",
-    "hljs-deletion": "#e45649",
+    "hljs-keyword": "#8a1f8a",
+    "hljs-built_in": "#016497",
+    "hljs-type": "#8a5d00",
+    "hljs-literal": "#7a5200",
+    "hljs-number": "#7a5200",
+    "hljs-regexp": "#3a7d39",
+    "hljs-string": "#3a7d39",
+    "hljs-subst": "#1d2330",
+    "hljs-symbol": "#7a5200",
+    "hljs-class": "#8a5d00",
+    "hljs-function": "#1a5fd0",
+    "hljs-title": "#1a5fd0",
+    "hljs-params": "#1d2330",
+    "hljs-comment": "#7a7d85",
+    "hljs-doctag": "#7a7d85",
+    "hljs-meta": "#7a7d85",
+    "hljs-section": "#c8362b",
+    "hljs-tag": "#c8362b",
+    "hljs-name": "#c8362b",
+    "hljs-attr": "#7a5200",
+    "hljs-attribute": "#7a5200",
+    "hljs-variable": "#c8362b",
+    "hljs-bullet": "#1a5fd0",
+    "hljs-code": "#1d2330",
+    "hljs-emphasis": "#1d2330",
+    "hljs-strong": "#1d2330",
+    "hljs-formula": "#1d2330",
+    "hljs-link": "#1a5fd0",
+    "hljs-quote": "#7a7d85",
+    "hljs-selector-tag": "#c8362b",
+    "hljs-selector-id": "#1a5fd0",
+    "hljs-selector-class": "#7a5200",
+    "hljs-selector-attr": "#7a5200",
+    "hljs-selector-pseudo": "#016497",
+    "hljs-template-tag": "#8a1f8a",
+    "hljs-template-variable": "#7a5200",
+    "hljs-addition": "#3a7d39",
+    "hljs-deletion": "#c8362b",
   },
 };
+
+/**
+ * E-ink mode: colour carries no signal on a greyscale panel, so syntax is
+ * conveyed by *weight* and *style* instead. Body text stays at the
+ * high-contrast base colour; keywords/types/functions go bold, comments
+ * go muted-italic. Anything not listed renders at the base colour, normal
+ * weight.
+ */
+const EINK_BOLD = new Set([
+  "hljs-keyword",
+  "hljs-built_in",
+  "hljs-type",
+  "hljs-class",
+  "hljs-title",
+  "hljs-function",
+  "hljs-section",
+  "hljs-tag",
+  "hljs-name",
+  "hljs-literal",
+  "hljs-selector-tag",
+  "hljs-template-tag",
+]);
+const EINK_MUTED_ITALIC = new Set([
+  "hljs-comment",
+  "hljs-quote",
+  "hljs-doctag",
+  "hljs-meta",
+]);
+/** Muted grey for comments — dark enough to read on e-ink, light enough to recede. */
+const EINK_COMMENT_COLOR = "#6b7280";
 
 /**
  * One node in the parsed hljs token tree. Pure text leaves have
@@ -215,16 +249,32 @@ function colourFor(
   return TOKEN_COLOURS[scheme][first];
 }
 
+/** First `hljs-*` class on a span, or null. */
+function hljsClass(className: string | null): string | null {
+  if (!className) return null;
+  return className.split(/\s+/).find((c) => c.startsWith("hljs-")) ?? null;
+}
+
+/** E-ink token style: weight/italic instead of colour. */
+function einkStyleFor(className: string | null, baseColor: string): TextStyle {
+  const cls = hljsClass(className);
+  if (cls && EINK_BOLD.has(cls)) return { color: baseColor, fontWeight: "700" };
+  if (cls && EINK_MUTED_ITALIC.has(cls))
+    return { color: EINK_COMMENT_COLOR, fontStyle: "italic" };
+  return { color: baseColor };
+}
+
 function renderTokens(
   tokens: Token[],
   scheme: "dark" | "light",
   baseColor: string,
   keyPrefix: string,
+  eink: boolean,
 ): ReactNode[] {
   return tokens.map((t, i) => {
     const key = `${keyPrefix}-${i}`;
     if (t.children.length === 0) {
-      // Leaf — text node, optionally coloured by the parent's class via
+      // Leaf — text node, optionally styled by the parent's class via
       // baseColor; bare text without a class uses baseColor as-is.
       return (
         <Text key={key} style={{ color: baseColor }}>
@@ -232,10 +282,18 @@ function renderTokens(
         </Text>
       );
     }
+    if (eink) {
+      const style = einkStyleFor(t.className, baseColor);
+      return (
+        <Text key={key} style={style}>
+          {renderTokens(t.children, scheme, baseColor, key, eink)}
+        </Text>
+      );
+    }
     const color = colourFor(t.className, scheme) ?? baseColor;
     return (
       <Text key={key} style={{ color }}>
-        {renderTokens(t.children, scheme, color, key)}
+        {renderTokens(t.children, scheme, color, key, eink)}
       </Text>
     );
   });
@@ -254,6 +312,7 @@ export function highlight(
   language: string,
   scheme: "dark" | "light",
   baseStyle: TextStyle,
+  eink = false,
 ): ReactNode {
   const baseColor = (baseStyle.color as string) ?? "#000";
   const supported = !!hljs.getLanguage(language);
@@ -280,7 +339,7 @@ export function highlight(
   const tokens = parseHljsHtml(html);
   return (
     <Text selectable style={baseStyle}>
-      <Fragment>{renderTokens(tokens, scheme, baseColor, "tok")}</Fragment>
+      <Fragment>{renderTokens(tokens, scheme, baseColor, "tok", eink)}</Fragment>
     </Text>
   );
 }
