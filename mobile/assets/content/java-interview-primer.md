@@ -3604,6 +3604,107 @@ asprof -d 30 --all-user -f profile.html <pid>
 
 ---
 
+## Low-Latency Java
+
+### Summary
+
+**What this topic covers**
+
+Writing Java that runs in the **single-digit microsecond** (or tighter) latency budget — the domain of high-frequency trading, exchanges, market-data handlers, and real-time risk. This is a distinct discipline from "fast" Java: the enemy isn't average throughput, it's the **tail** (p99.9, p99.99, max). Three concern areas: (1) the **JVM tax** — GC pauses, JIT warmup, safepoints, biased locking — and how to eliminate or hide each; (2) **mechanical sympathy** — writing code that works *with* the CPU (cache lines, branch prediction, memory ordering) rather than against it; and (3) the **toolkit** — the Real Logic stack (Aeron, SBE, Agrona), the LMAX Disruptor, off-heap buffers, thread affinity, and proper latency measurement. If you're interviewing at a trading shop, this section is the whole interview.
+
+**Mental model**
+
+Coined by Martin Thompson: **mechanical sympathy** — you don't have to be a hardware engineer, but you must understand enough about the machine to not fight it. The latency hierarchy drives everything: L1 ~1ns, L2 ~4ns, L3 ~12ns, main memory ~70-100ns, a GC pause ~milliseconds (a million times worse). So the entire game is: **(1) never allocate on the hot path** (no allocation → no GC → no pause), **(2) keep your working set in cache** (compact data, sequential access, no pointer-chasing), **(3) never block or context-switch** (busy-spin a pinned thread instead), and **(4) never coordinate** (single-writer principle, lock-free). A low-latency Java app is steady-state **zero-garbage**, runs hot threads pinned to isolated cores, talks over shared memory or kernel-bypass UDP, and is measured in nanoseconds with a histogram that captures the tail honestly.
+
+**Key terms**
+
+- **Mechanical sympathy** — writing software aware of how the CPU/cache/memory actually behave.
+- **Zero-allocation / zero-GC** — no object allocation in steady state; reuse, pool, or go off-heap so the collector never runs.
+- **Off-heap** — `DirectByteBuffer` / `Unsafe` / `MemorySegment` (Panama) memory outside the GC's reach.
+- **False sharing** — two hot variables on the same 64-byte cache line, causing cores to ping-pong ownership. Fixed with padding / `@Contended` / `jdk.internal.vm.annotation.Contended`.
+- **Single-writer principle** — only one thread mutates a given piece of state; removes the need for locks (Thompson).
+- **Ring buffer / Disruptor** — pre-allocated circular array for inter-thread handoff with no per-message allocation.
+- **Aeron** — Real Logic's ultra-low-latency, high-throughput messaging transport (UDP unicast/multicast + shared-memory IPC, same API).
+- **SBE (Simple Binary Encoding)** — zero-copy binary codec generator; the wire format that rides on Aeron in trading systems.
+- **Agrona** — the foundational data-structure + buffer library Aeron and SBE are built on.
+- **IdleStrategy** — how a polling thread waits when there's no work: busy-spin, yield, backoff, sleep.
+- **Coordinated omission** — the measurement bug (Tene) where a stalled system stops *sending* requests, so the stall is under-counted; HdrHistogram + a fixed schedule fixes it.
+- **Thread affinity** — pinning a thread to a specific isolated core (`isolcpus`, `taskset`, OpenHFT Affinity) so the OS scheduler never migrates or preempts it.
+
+**Why interviewers ask this**
+
+Almost exclusively for HFT / market-making / exchange / low-latency-infra roles, where it's the *entire* technical bar. They probe whether you genuinely understand the JVM at the metal — "what causes a 200µs spike in an otherwise 5µs path?" separates people who've actually run these systems (answer: a safepoint, a GC, a page fault, a cache miss storm, a TLB miss, a CPU frequency scaling event, an IRQ on your pinned core) from people who've read about them. A weak answer talks about `-Xmx`; a strong answer talks about Epsilon GC for a bounded run, `-XX:+AlwaysPreTouch`, huge pages, `isolcpus` + `nohz_full`, and measuring with HdrHistogram against coordinated omission.
+
+**Common confusions**
+
+- "Low latency = high throughput" — no. They often trade off; busy-spinning a core burns throughput-per-watt to win tail latency. You optimise for the percentile that matters, not the mean.
+- "A faster GC (ZGC/Shenandoah) makes Java low-latency" — it bounds *pause* time (sub-millisecond), which is huge, but the lowest-latency systems still aim for **zero garbage** so the collector never runs at all (Epsilon GC = no-op collector for bounded workloads).
+- "Aeron is a message broker like Kafka" — no. Aeron is a *transport* — no broker, no persistence by default (that's Aeron Archive), no consumer groups. It's the wire, not the post office.
+- "`volatile` is free" — it's a memory barrier; in a tight inner loop a `VarHandle` with weaker (acquire/release/opaque) ordering can be materially cheaper.
+- "JIT-compiled Java is always fast" — the *first* thousand calls run interpreted/Tier-0; cold-path code never warms up. Hence warmup harnesses, `-XX:+TieredCompilation` tuning, and increasingly AOT (CRaC, Leyden).
+
+**What follows from this topic**
+
+This builds directly on **Concurrency** (memory model, lock-free, Disruptor, `VarHandle`, false sharing) and **JVM, Memory & Performance** (GC, JIT, safepoints) — read those first; this topic composes them under a hard latency budget. It connects outward to **System Design** (a matching engine, an order gateway) and to **Networking** (kernel bypass, UDP, multicast). If you can explain why a hot path allocates zero objects, runs on a pinned isolated core, hands off via a ring buffer, talks SBE-over-Aeron, and is measured with HdrHistogram — you can hold a low-latency interview.
+
+### Q317. What does "low-latency Java" actually mean, and what's the governing principle?
+
+It means engineering for the **tail of the latency distribution** — p99.9 / p99.99 / max — in the microsecond-or-tighter range, not for average throughput. The governing principle is Martin Thompson's **mechanical sympathy**: write code that cooperates with the CPU, cache hierarchy, and memory subsystem instead of fighting them. Concretely, four rules dominate: **don't allocate** (no garbage → no GC pause), **stay in cache** (compact, sequential, no pointer-chasing), **don't block or context-switch** (busy-spin a pinned thread), and **don't coordinate** (single-writer, lock-free). Everything else is detail under those four.
+
+### Q318. Why is the garbage collector the enemy, and how do you eliminate it from the hot path?
+
+A GC pause is measured in milliseconds — three to six orders of magnitude worse than your microsecond budget — and it strikes unpredictably, so it shows up as the *max* and p99.99 spikes. The fix is **zero allocation in steady state**: pre-allocate and reuse objects (object pools, flyweights), keep mutable data **off-heap** in `DirectByteBuffer` / `Unsafe` / Panama `MemorySegment` so it's invisible to the collector, and use primitive-specialised collections (Agrona's `Int2ObjectHashMap`, Eclipse Collections, fastutil) to avoid autoboxing garbage. For a bounded run you can deploy **Epsilon GC** (a no-op collector — it never reclaims, so it never pauses; the JVM exits when the heap is exhausted, which by design never happens if you're truly zero-garbage). Where some allocation is unavoidable, **ZGC / Shenandoah** bound pauses to sub-millisecond, but the lowest-latency systems still target zero garbage so even that bound never bites.
+
+### Q319. What is false sharing and how do you fix it?
+
+CPUs move memory in 64-byte **cache lines**. If two threads write two *different* variables that happen to sit on the *same* cache line, every write invalidates the other core's copy — the line ping-pongs between cores over the coherence bus, and you pay ~100ns per "sharing" event even though the threads never logically touch the same data. The fix is **padding** so each hot variable owns its own line: historically manual `long p1..p7` padding fields, now the `@Contended` annotation (`jdk.internal.vm.annotation.Contended`, needs `-XX:-RestrictContended`) which the JVM honours by inserting padding. The Disruptor's sequence counters and Aeron's position counters are all `@Contended`/padded. Diagnose with `perf c2c` on Linux.
+
+### Q320. Busy-spin vs blocking, and why pin threads to cores?
+
+A blocking wait (`park`/`wait`/blocking queue) hands the core back to the OS — which means when work arrives you pay the **context-switch + scheduler wakeup** cost (single-digit microseconds, plus cache pollution from whatever ran in the meantime). A low-latency consumer instead **busy-spins** (or yields/backs off via an `IdleStrategy`), keeping the thread hot and the working set in cache so it reacts in nanoseconds. That only works if the OS doesn't preempt or migrate the thread, so you **pin** it: `isolcpus` + `nohz_full` + `rcu_nocbs` to evict the kernel from those cores, `taskset`/affinity to bind the thread, disable C-states and frequency scaling so the core stays at full clock. OpenHFT's Java Thread Affinity library is the usual binding tool. The cost: a spinning core is 100% busy doing nothing while idle — you trade power and a core for tail latency.
+
+### Q321. Explain the single-writer principle and why lock-free matters here.
+
+**Single-writer principle** (Thompson): if only one thread ever mutates a given piece of state, you need *no locks* for that state — no contention, no cache-line bouncing on a lock word, no kernel arbitration. You architect the system as a pipeline of single-writer stages handing off via ring buffers, rather than many threads contending on shared structures. Where you genuinely need concurrent access, go **lock-free** (CAS-based, e.g. `VarHandle.compareAndSet`) or **wait-free** so a stalled thread can't block others — a lock holder that gets descheduled (or hits a page fault) would otherwise stall every waiter, which is exactly the unbounded tail you're trying to kill. Locks also risk priority inversion and convoying. The senior framing: design the threading model so the *fast path never coordinates*; push any necessary coordination to setup/config, not the per-message path.
+
+### Q322. What's the LMAX Disruptor and where does it fit?
+
+A pre-allocated **ring buffer** for inter-thread message passing with zero per-message allocation, designed by LMAX (Thompson, Barker) for their trading exchange. Producers claim a slot by incrementing a sequence (CAS or single-writer), write into the *pre-existing* event object in place, and publish; consumers track their own sequence and batch-process whatever's available. It beats `ArrayBlockingQueue` because: no locks (sequence CAS / single-writer), no allocation (slots are reused), mechanical-sympathy layout (`@Contended` sequences, power-of-two size for masking instead of modulo), and natural batching that amortises cache misses. Use it for the handoff between stages inside one process — e.g. network-receive thread → business-logic thread → journalling thread. For *inter-process* or *inter-host* handoff, that's where Aeron comes in.
+
+### Q323. What is Aeron and when would you reach for it?
+
+**Aeron** (Real Logic — Martin Thompson, Todd Montgomery) is an ultra-low-latency, high-throughput **messaging transport**. One API spans three media: **UDP unicast**, **UDP multicast**, and **IPC** (shared-memory between processes on the same host) — you change the channel URI, not your code. It delivers reliable, ordered, flow-controlled message streams over unreliable UDP, with publish latencies in the low single-digit microseconds and the ability to saturate a 10/40GbE link. Reach for it when you've outgrown a single process (the Disruptor's domain) and need to move messages **between processes or hosts** under a hard latency budget — market-data fan-out (multicast), order gateways, inter-service buses in a trading stack. It is **not** a broker: no persistence (that's Aeron Archive), no consumer groups, no topic management — it's the wire, not Kafka. The mental model is "the Disruptor, but the ring buffer is a memory-mapped log the media driver replicates across the network."
+
+### Q324. How does Aeron work under the hood — media driver, log buffers, publications?
+
+A separate **Media Driver** process (or an embedded one) owns the transport and the **log buffers** — memory-mapped files (typically in `/dev/shm`) divided into **terms** (triple-buffered: one active, one being cleaned, one clean-ahead, so there's never a stall rotating terms). Application processes are thin **clients** that map the same buffers and communicate with the driver via a **command-and-control (CnC)** file. A **Publication** (identified by a channel URI + stream ID) appends messages into the active term; a **Subscription** reads from it. Because publisher and subscriber share the mapped log, IPC is genuinely **zero-copy** — `Publication.tryClaim()` hands you a slice of the log buffer to write your message directly into, no intermediate copy. Over UDP, the driver handles fragmentation, reassembly, and retransmission. Positions are tracked as monotonic 64-bit counters (the same mechanical-sympathy, `@Contended` counter design as the Disruptor's sequences).
+
+### Q325. How does Aeron handle flow control, back pressure, and loss over UDP?
+
+**Loss recovery**: UDP can drop/reorder, so Aeron detects gaps in the term (a missing range of positions) and the subscriber sends a **NAK**; the publisher retransmits from its still-mapped log. There's no head-of-line-blocking ACK storm — it's negative acknowledgement only. **Flow control**: the *receiver* paces the sender — the publisher can't advance past what receivers have consumed (a sliding window over the term). For multicast, you choose **min** flow control (pace to the slowest receiver — reliable but one slow consumer throttles all) or **max/tagged** flow control (pace to the fastest / a tagged subset — fast consumers stay fast, slow ones may drop and recover). **Back pressure**: `Publication.offer()` is non-blocking — it returns a negative status code (`BACK_PRESSURED`, `NOT_CONNECTED`, `ADMIN_ACTION`, `CLOSED`) and the caller decides what to do (retry via an `IdleStrategy`, drop, or escalate). You never block a hot thread on a full buffer; you handle the signal explicitly.
+
+### Q326. What are SBE and Agrona, and how do they relate to Aeron?
+
+They're the rest of the Real Logic stack. **SBE (Simple Binary Encoding)** is a code generator for **zero-copy binary message codecs** — you write a message schema (XML), it generates flyweight encoders/decoders that read/write fields *directly* on a buffer with no intermediate objects and no parsing step (fixed-layout, native-endian). It's an FIX-community standard and the usual **wire format** carried over Aeron in trading systems (SBE-encoded messages → Aeron transport). **Agrona** is the foundation both are built on: off-heap buffer abstractions (`UnsafeBuffer`, `DirectBuffer`, `MutableDirectBuffer`), primitive-specialised collections (`Int2ObjectHashMap`, `Object2ObjectHashMap`), concurrent structures (`ManyToOneRingBuffer`, `OneToOneRingBuffer`, broadcast buffers), `IdleStrategy` implementations, and `UnsafeAccess`. The trio composes: **Agrona** gives you the zero-garbage primitives, **SBE** gives you the zero-copy wire format, **Aeron** moves it between processes/hosts at microsecond latency.
+
+### Q327. What do Aeron Archive and Aeron Cluster add?
+
+**Aeron Archive** is durable **recording + replay** of streams — it persists publications to disk and lets a subscriber replay from any position, turning the ephemeral transport into something you can journal and recover from (event sourcing, audit, crash recovery). **Aeron Cluster** is **fault-tolerant state-machine replication** built on Archive + a **Raft**-style consensus protocol: you write your business logic as a *deterministic* state machine, Cluster replicates the input log across an odd number of nodes (typically 3 or 5), and on failover a follower replays the log to reach identical state. This is how you build a **fault-tolerant low-latency service** — e.g. an exchange matching engine — that survives node loss without losing or reordering messages and without a database in the hot path. The determinism requirement is the catch: no wall-clock reads, no random, no map-iteration-order dependence, no allocation-address dependence — the state machine must produce identical output from identical input on every replica.
+
+### Q328. How do you measure low-latency correctly, and what is coordinated omission?
+
+Never use a mean — it hides the tail that matters. Use **HdrHistogram** (Gil Tene): it records the full distribution in fixed memory at constant cost and reports any percentile (p99, p99.9, p99.99, max) accurately across a huge dynamic range. The trap it guards against is **coordinated omission**: if your load generator sends a request, waits for the response, *then* sends the next — and the system stalls for 100ms — you record *one* slow sample instead of the ~hundreds of requests that *would* have been sent and *would* have been slow during the stall. The stall is massively under-counted and your p99.9 looks great while production is on fire. Fixes: drive load on a **fixed schedule** (intended send time, not actual), measure **service time vs response time** separately, and use HdrHistogram's coordinated-omission correction. Also: measure on warmed-up code (discard the JIT-warmup phase), pin the measurement thread, and account for the JVM safepoint and GC events explicitly rather than averaging them away.
+
+### Q329. What causes a sudden latency spike in an otherwise flat microsecond path?
+
+The interview's favourite question — it tests whether you've actually operated these systems. Suspects, roughly in order: (1) a **GC pause** (even a young GC), or for zero-garbage systems, (2) a **safepoint** — the JVM stopping all threads for a biased-lock revoke, a deopt, a `Thread.getStackTrace`, or even a poorly-placed counted-loop safepoint poll; (3) a **page fault** — first-touch of memory not pre-touched (`-XX:+AlwaysPreTouch`, huge pages, `mlockall` to avoid swapping); (4) a **cache/TLB miss storm** from a working set that spilled L3; (5) **JIT recompilation / deoptimisation** on the hot path; (6) an **OS interrupt (IRQ)** landing on your pinned core (move IRQs off isolated cores), or the scheduler migrating the thread (didn't pin / `nohz_full` not set); (7) **CPU frequency scaling / C-state** wakeup latency (pin to performance governor, disable deep C-states); (8) **NUMA** — memory allocated on a remote node. A strong answer names the diagnostic for each (`jHiccup` / `-Xlog:safepoint` / `perf` / `async-profiler` wall-clock mode) rather than just listing causes.
+
+### Q330. Senior interview angle: sketch the architecture of a low-latency order matching engine in Java.
+
+Single deterministic **matching-engine thread**, pinned to an isolated core, busy-spinning on its input — **zero allocation** in the matching loop (pre-allocated order objects in an object pool, primitive-keyed `Long2ObjectHashMap` order books from Agrona, off-heap price levels). Inbound orders arrive **SBE-encoded over Aeron** (UDP from gateways, or IPC if co-located); the gateway thread (a separate pinned core) decodes onto a **Disruptor ring buffer** that hands off to the matcher with no lock and no copy. The matcher is wrapped in **Aeron Cluster** for fault tolerance — its input log is Raft-replicated across 3+ nodes, and because the engine is a deterministic state machine, any replica replays to identical state on failover (no DB in the hot path). Outbound fills go back out over Aeron to the gateways; everything durable is journalled via **Aeron Archive**, not a database. Latency is measured end-to-end with **HdrHistogram** against coordinated omission, the JVM runs zero-garbage (Epsilon or a tightly-tuned ZGC as a safety net), with `-XX:+AlwaysPreTouch`, huge pages, `isolcpus`/`nohz_full`, and IRQs steered off the trading cores. The headline: *the hot path allocates nothing, coordinates nothing, blocks on nothing, and is replicated for free by determinism.*
+
+---
+
 ## Spring
 
 ### Summary
