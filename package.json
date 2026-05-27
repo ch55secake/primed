@@ -4,15 +4,12 @@
   "version": "0.1.0",
   "workspaces": [
     "web",
-    "mobile",
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "bun run --cwd mobile expo start --web",
-    "build:web": "bash scripts/build-web.sh",
-    "dev:web-legacy": "bun run --cwd web dev",
-    "build:web-legacy": "bun run --cwd web build",
-    "dev:mobile": "bun run --cwd mobile start",
+    "dev": "bun run --cwd web dev",
+    "build": "bun run --cwd web build",
+    "preview": "bun run --cwd web preview",
     "sync-content": "bash scripts/sync-content.sh"
   }
 }

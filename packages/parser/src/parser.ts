@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "postgres" | "sql-practice";
 
 export interface SourceConfig {
   id: SourceId;
@@ -41,6 +41,7 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     id: "patterns",
     file: "/patterns.md",
     title: "System Design",
+    category: "System Design",
     itemLabel: "Pattern",
     itemsPlural: "interview patterns",
     storagePrefix: "sdf:patterns",
@@ -69,6 +70,7 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     id: "neetcode",
     file: "/neetcode-150.md",
     title: "NeetCode 150",
+    category: "DSA",
     itemLabel: "Problem",
     itemsPlural: "interview problems",
     storagePrefix: "sdf:neetcode",
@@ -79,6 +81,7 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     id: "java",
     file: "/java-interview-primer.md",
     title: "Java",
+    category: "Languages",
     itemLabel: "Topic",
     itemsPlural: "Java topics",
     storagePrefix: "ip:java",
@@ -92,6 +95,7 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     id: "kotlin",
     file: "/kotlin-interview-primer.md",
     title: "Kotlin",
+    category: "Languages",
     itemLabel: "Topic",
     itemsPlural: "Kotlin topics",
     storagePrefix: "ip:kotlin",
@@ -100,6 +104,45 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     sectionHeadingLevel: 3,
     autoNumberItems: true,
     sectionOrder: [],
+  },
+  csharp: {
+    id: "csharp",
+    file: "/csharp-interview-primer.md",
+    title: "C#",
+    category: "Languages",
+    itemLabel: "Topic",
+    itemsPlural: "C# topics",
+    storagePrefix: "ip:csharp",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  postgres: {
+    id: "postgres",
+    file: "/postgres-interview-primer.md",
+    title: "Postgres",
+    category: "Databases",
+    itemLabel: "Topic",
+    itemsPlural: "Postgres topics",
+    storagePrefix: "ip:postgres",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  "sql-practice": {
+    id: "sql-practice",
+    file: "/sql-practice.md",
+    title: "SQL Practice",
+    category: "Databases",
+    itemLabel: "Problem",
+    itemsPlural: "SQL problems",
+    storagePrefix: "sdf:sql-practice",
+    defaultRevealedSections: ["Problem"],
+    sectionOrder: ["Problem", "Pattern", "Explanation", "Solution"],
   },
 };
 
