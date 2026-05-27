@@ -62,6 +62,8 @@ const VALID_SOURCES: SourceId[] = [
   "java",
   "kotlin",
   "csharp",
+  "go",
+  "python",
   "postgres",
   "sql-practice",
 ];

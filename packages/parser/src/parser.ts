@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "postgres" | "sql-practice";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice";
 
 export interface SourceConfig {
   id: SourceId;
@@ -113,6 +113,34 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     itemLabel: "Topic",
     itemsPlural: "C# topics",
     storagePrefix: "ip:csharp",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  go: {
+    id: "go",
+    file: "/go-interview-primer.md",
+    title: "Go",
+    category: "Languages",
+    itemLabel: "Topic",
+    itemsPlural: "Go topics",
+    storagePrefix: "ip:go",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  python: {
+    id: "python",
+    file: "/python-interview-primer.md",
+    title: "Python",
+    category: "Languages",
+    itemLabel: "Topic",
+    itemsPlural: "Python topics",
+    storagePrefix: "ip:python",
     defaultRevealedSections: [],
     itemHeadingLevel: 2,
     sectionHeadingLevel: 3,
