@@ -135,6 +135,34 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "go",
+      "file": "/go-interview-primer.md",
+      "title": "Go",
+      "category": "Languages",
+      "itemLabel": "Topic",
+      "itemsPlural": "Go topics",
+      "storagePrefix": "ip:go",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
+    },
+    {
+      "id": "python",
+      "file": "/python-interview-primer.md",
+      "title": "Python",
+      "category": "Languages",
+      "itemLabel": "Topic",
+      "itemsPlural": "Python topics",
+      "storagePrefix": "ip:python",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }
