@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { parseContent, sortSections, SOURCES } from "@drilly/parser";
 import type { Pattern, SourceId } from "@drilly/parser";
-import { Sidebar } from "./components/Sidebar";
+import { NavSidebar } from "./components/NavSidebar";
 import { PatternView } from "./components/PatternView";
-import { SourceTabs } from "./components/SourceTabs";
+import { SettingsPage } from "./components/SettingsPage";
 
 type RevealedMap = Record<number, string[]>;
 
@@ -54,11 +54,25 @@ function loadSelected(source: SourceId): number {
   return Number.isFinite(n) ? n : 1;
 }
 
-const VALID_SOURCES: SourceId[] = ["patterns", "neetcode", "java", "kotlin"];
+const ALL_SOURCE_IDS = Object.keys(SOURCES) as SourceId[];
 
-function readSourceFromHash(): SourceId {
+const VALID_SOURCES: SourceId[] = [
+  "patterns",
+  "neetcode",
+  "java",
+  "kotlin",
+  "csharp",
+  "postgres",
+  "sql-practice",
+];
+
+function readHashView(): { view: "settings" | "source"; source: SourceId } {
   const h = window.location.hash.replace(/^#\/?/, "").toLowerCase();
-  return (VALID_SOURCES as string[]).includes(h) ? (h as SourceId) : "patterns";
+  if (h === "settings") return { view: "settings", source: "patterns" };
+  const source = (VALID_SOURCES as string[]).includes(h)
+    ? (h as SourceId)
+    : "patterns";
+  return { view: "source", source };
 }
 
 function writeSourceToHash(source: SourceId) {
@@ -68,45 +82,55 @@ function writeSourceToHash(source: SourceId) {
   }
 }
 
+const emptySourceState: SourceState = { patterns: [], loading: true, error: null };
+
+function initSources(): Record<SourceId, SourceState> {
+  return Object.fromEntries(
+    ALL_SOURCE_IDS.map((id) => [id, { ...emptySourceState }]),
+  ) as Record<SourceId, SourceState>;
+}
+
+function initRecord<T>(fn: (id: SourceId) => T): Record<SourceId, T> {
+  return Object.fromEntries(ALL_SOURCE_IDS.map((id) => [id, fn(id)])) as Record<
+    SourceId,
+    T
+  >;
+}
+
 export default function App() {
-  const [activeSource, setActiveSource] = useState<SourceId>(() => {
+  const [view, setView] = useState<"settings" | "source">(() => {
     migrateLegacyKeys();
-    return readSourceFromHash();
+    return readHashView().view;
   });
+  const [activeSource, setActiveSource] = useState<SourceId>(
+    () => readHashView().source,
+  );
 
-  // Mobile drawer state — open on mobile when user taps menu, closed by default
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
-  const [sources, setSources] = useState<Record<SourceId, SourceState>>({
-    patterns: { patterns: [], loading: true, error: null },
-    neetcode: { patterns: [], loading: true, error: null },
-    java: { patterns: [], loading: true, error: null },
-    kotlin: { patterns: [], loading: true, error: null },
-  });
+  const [sources, setSources] = useState<Record<SourceId, SourceState>>(initSources);
 
-  const [selectedIds, setSelectedIds] = useState<Record<SourceId, number>>({
-    patterns: loadSelected("patterns"),
-    neetcode: loadSelected("neetcode"),
-    java: loadSelected("java"),
-    kotlin: loadSelected("kotlin"),
-  });
+  const [selectedIds, setSelectedIds] = useState<Record<SourceId, number>>(() =>
+    initRecord(loadSelected),
+  );
 
-  const [revealedMaps, setRevealedMaps] = useState<Record<SourceId, RevealedMap>>({
-    patterns: loadRevealed("patterns"),
-    neetcode: loadRevealed("neetcode"),
-    java: loadRevealed("java"),
-    kotlin: loadRevealed("kotlin"),
-  });
+  const [revealedMaps, setRevealedMaps] = useState<Record<SourceId, RevealedMap>>(() =>
+    initRecord(loadRevealed),
+  );
 
   useEffect(() => {
-    const onHash = () => setActiveSource(readSourceFromHash());
+    const onHash = () => {
+      const parsed = readHashView();
+      setView(parsed.view);
+      if (parsed.view === "source") setActiveSource(parsed.source);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    (Object.keys(SOURCES) as SourceId[]).forEach((id) => {
+    ALL_SOURCE_IDS.forEach((id) => {
       fetch(SOURCES[id].file)
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -141,14 +165,29 @@ export default function App() {
   const onSelectSource = useCallback((id: SourceId) => {
     writeSourceToHash(id);
     setActiveSource(id);
+    setView("source");
   }, []);
+
+  const onOpenSettings = useCallback(() => {
+    window.location.hash = "#/settings";
+    setView("settings");
+  }, []);
+
+  const onSelectItem = useCallback(
+    (sourceId: SourceId, itemId: number) => {
+      writeSourceToHash(sourceId);
+      setActiveSource(sourceId);
+      setSelectedIds((prev) => ({ ...prev, [sourceId]: itemId }));
+      localStorage.setItem(selectedKey(sourceId), String(itemId));
+    },
+    [],
+  );
 
   const setSelectedId = useCallback(
     (id: number) => {
       setSelectedIds((prev) => ({ ...prev, [activeSource]: id }));
       localStorage.setItem(selectedKey(activeSource), String(id));
-      // On mobile, close the drawer after selection so the user sees their pick
-      setSidebarOpen(false);
+      setNavOpen(false);
     },
     [activeSource],
   );
@@ -239,83 +278,79 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [patterns, selectedId, setSelectedId]);
 
-  const progress = useMemo(() => {
-    const out: Record<number, { revealed: number; total: number }> = {};
-    for (const p of patterns) {
-      const r = revealedMap[p.id] ?? sourceConfig.defaultRevealedSections;
-      out[p.id] = { revealed: r.length, total: p.sections.length };
-    }
-    return out;
-  }, [patterns, revealedMap, sourceConfig]);
+  // Build items-by-source map for the nav sidebar
+  const itemsBySource = useMemo(
+    () =>
+      Object.fromEntries(
+        ALL_SOURCE_IDS.map((id) => [
+          id,
+          sources[id].patterns.map((p) => ({ id: p.id, title: p.title })),
+        ]),
+      ) as Record<SourceId, { id: number; title: string }[]>,
+    [sources],
+  );
 
   return (
-    <div className="h-full flex flex-col">
-      <SourceTabs active={activeSource} onSelect={onSelectSource} />
+    <div className="h-full flex">
+      <NavSidebar
+        activeSource={activeSource}
+        activeItemId={selected?.id ?? null}
+        onSelectSource={onSelectSource}
+        onSelectItem={onSelectItem}
+        itemsBySource={itemsBySource}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        onOpenSettings={onOpenSettings}
+        settingsActive={view === "settings"}
+      />
 
-      {/* Mobile-only top bar: hamburger + current item title */}
-      <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel)]">
-        <button
-          type="button"
-          onClick={() => setSidebarOpen(true)}
-          className="btn !px-3 !py-2 text-base leading-none flex-shrink-0"
-          aria-label="Open menu"
-        >
-          ☰
-        </button>
-        <div className="text-sm text-[var(--color-text-strong)] truncate flex-1 min-w-0">
-          {selected ? (
-            <>
-              <span className="text-[var(--color-text-dim)] mr-1">#{selected.id}</span>
-              {selected.title}
-            </>
-          ) : (
-            sourceConfig.title
-          )}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Mobile top bar */}
+        <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel)]">
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            className="btn !px-3 !py-2 text-base leading-none flex-shrink-0"
+            aria-label="Open menu"
+          >
+            ☰
+          </button>
+          <div className="text-sm text-[var(--color-text-strong)] truncate flex-1 min-w-0">
+            {view === "settings" ? (
+              "Settings"
+            ) : selected ? (
+              <>
+                <span className="text-[var(--color-text-dim)] mr-1">#{selected.id}</span>
+                {selected.title}
+              </>
+            ) : (
+              sourceConfig.title
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className="flex-1 min-h-0 relative">
-        {sourceState.loading ? (
-          <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
-            Loading {sourceConfig.title}…
-          </div>
-        ) : sourceState.error ? (
-          <div className="h-full flex items-center justify-center text-[var(--color-warn)] p-8">
-            Failed to load {sourceConfig.file}: {sourceState.error}
-          </div>
-        ) : !selected ? (
-          <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
-            No content parsed.
-          </div>
-        ) : (
-          <div className="h-full flex relative">
-            {/* Backdrop for mobile drawer */}
-            <div
-              className={`md:hidden fixed inset-0 bg-black/50 z-40 transition-opacity duration-200 ${
-                sidebarOpen
-                  ? "opacity-100 pointer-events-auto"
-                  : "opacity-0 pointer-events-none"
-              }`}
-              onClick={() => setSidebarOpen(false)}
-              aria-hidden="true"
-            />
-
-            {/* Sidebar — fixed drawer below md, normal flex column at md+ */}
-            <div
-              className={`fixed md:static inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-out ${
-                sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-              }`}
-            >
-              <Sidebar
-                source={sourceConfig}
-                patterns={patterns}
-                selectedId={selected.id}
-                progress={progress}
-                onSelect={setSelectedId}
-                onClose={() => setSidebarOpen(false)}
-              />
+        {/* Content */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {view === "settings" ? (
+            <SettingsPage onBack={() => { writeSourceToHash(activeSource); setView("source"); }} />
+          ) : sourceState.loading ? (
+            <div className="h-full flex items-center justify-center text-[var(--color-text-dim)]">
+              Loading {sourceConfig.title}…
             </div>
-
+          ) : sourceState.error ? (
+            <div className="h-full flex items-center justify-center text-[var(--color-warn)] p-8">
+              Failed to load {sourceConfig.file}: {sourceState.error}
+            </div>
+          ) : !selected ? (
+            <div className="h-full flex flex-col items-center justify-center gap-3 p-12">
+              <div className="text-[var(--color-text-strong)] text-5xl font-extrabold tracking-[4px]">
+                DRILLY
+              </div>
+              <div className="text-[var(--color-text-dim)] text-base">
+                Pick a source from the sidebar to start drilling.
+              </div>
+            </div>
+          ) : (
             <PatternView
               key={`${activeSource}-${selected.id}`}
               source={sourceConfig}
@@ -326,8 +361,8 @@ export default function App() {
               onHideAll={onHideAll}
               onRevealNext={onRevealNext}
             />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,16 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "bun install",
-  "buildCommand": "bun run build:web",
-  "outputDirectory": "mobile/dist",
+  "buildCommand": "bun run build",
+  "outputDirectory": "web/dist",
   "rewrites": [
-    { "source": "/((?!_expo|assets|.*\\..*).*)", "destination": "/index.html" }
-  ],
-  "redirects": [
-    {
-      "source": "/drilly.apk",
-      "destination": "https://github.com/rjh-mopjones/drilly/releases/latest/download/drilly.apk",
-      "permanent": false
-    }
+    { "source": "/((?!assets|.*\\..*).*)", "destination": "/index.html" }
   ]
 }
