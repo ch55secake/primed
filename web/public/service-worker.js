@@ -1,4 +1,4 @@
-/* Drilly offline service worker.
+/* Primed offline service worker.
  *
  * Hand-rolled (no Workbox) so it survives Expo Web's hashed-bundle
  * export without a build step. Strategy:
@@ -21,7 +21,7 @@
  */
 
 const CACHE_VERSION = "v2";
-const CACHE = `drilly-${CACHE_VERSION}`;
+const CACHE = `primed-${CACHE_VERSION}`;
 
 const MERMAID_CDN =
   "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";

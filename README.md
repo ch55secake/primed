@@ -1,4 +1,4 @@
-# DRILLY
+# PRIMED
 
 Personal interview-prep system. Web app for desk study. Sources backed by markdown files under `web/public/`.
 
@@ -10,7 +10,7 @@ Personal interview-prep system. Web app for desk study. Sources backed by markdo
 ## Repo layout
 
 ```
-drilly/
+primed/
 ├── web/                ← Vite + React web app
 │   ├── public/         ← markdown primers + manifest.json
 │   └── src/

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
-import { SOURCES } from "@drilly/parser";
-import type { SourceId, SourceConfig } from "@drilly/parser";
+import { SOURCES } from "@primed/parser";
+import type { SourceId, SourceConfig } from "@primed/parser";
 
 interface Props {
   activeSource: SourceId;
@@ -73,7 +73,7 @@ export function NavSidebar({
         <div className="flex items-center gap-2 min-w-0">
           <div>
             <div className="text-[var(--color-text-strong)] font-extrabold text-lg tracking-widest leading-tight">
-              DRILLY
+              PRIMED
             </div>
             <div className="text-[var(--color-text-dim)] text-[11px] mt-0.5">
               Interview prep

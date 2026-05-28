@@ -1,5 +1,5 @@
-import type { SourceConfig, SourceId } from "@drilly/parser";
-import { SOURCES } from "@drilly/parser";
+import type { SourceConfig, SourceId } from "@primed/parser";
+import { SOURCES } from "@primed/parser";
 
 interface Props {
   active: SourceId;
@@ -14,7 +14,7 @@ export function SourceTabs({ active, onSelect }: Props) {
       role="tablist"
       className="flex items-center gap-1 px-2 md:px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel)] overflow-x-auto"
     >
-      <img src="/favicon.svg" alt="Drilly" className="w-7 h-7 flex-shrink-0 mr-2" />
+      <img src="/favicon.svg" alt="Primed" className="w-7 h-7 flex-shrink-0 mr-2" />
       <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
       {ORDER.map((id) => {
         const cfg: SourceConfig = SOURCES[id];

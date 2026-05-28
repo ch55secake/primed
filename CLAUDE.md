@@ -1,4 +1,4 @@
-# Claude session notes — DRILLY
+# Claude session notes — PRIMED
 
 Project-specific guidance for Claude Code. The README is the human-facing doc; this file captures conventions and gotchas Claude would otherwise re-discover the hard way.
 

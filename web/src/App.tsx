@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { parseContent, sortSections, SOURCES } from "@drilly/parser";
-import type { Pattern, SourceId } from "@drilly/parser";
+import { parseContent, sortSections, SOURCES } from "@primed/parser";
+import type { Pattern, SourceId } from "@primed/parser";
 import { NavSidebar } from "./components/NavSidebar";
 import { PatternView } from "./components/PatternView";
 import { SettingsPage } from "./components/SettingsPage";
@@ -346,10 +346,10 @@ export default function App() {
           ) : !selected ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 p-12">
               <div className="text-[var(--color-text-strong)] text-5xl font-extrabold tracking-[4px]">
-                DRILLY
+                PRIMED
               </div>
               <div className="text-[var(--color-text-dim)] text-base">
-                Pick a source from the sidebar to start drilling.
+                Pick a source from the sidebar to get primed.
               </div>
             </div>
           ) : (

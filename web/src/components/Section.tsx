@@ -7,7 +7,7 @@ import { AuxDiagram } from "./AuxDiagram";
 import { InlineMermaid } from "./InlineMermaid";
 import { CodeTabs, extractCodeBlocks } from "./CodeTabs";
 import { splitFollowUps, splitDetailedDesign } from "../lib/contentSplit";
-import type { Section as SectionType } from "@drilly/parser";
+import type { Section as SectionType } from "@primed/parser";
 
 interface Props {
   patternId: number;

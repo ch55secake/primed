@@ -1,4 +1,4 @@
-import type { Pattern, SourceConfig } from "@drilly/parser";
+import type { Pattern, SourceConfig } from "@primed/parser";
 import { useTheme } from "../theme/ThemeContext";
 
 interface Props {
