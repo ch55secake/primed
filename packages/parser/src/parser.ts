@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka";
 
 export interface SourceConfig {
   id: SourceId;
@@ -171,6 +171,34 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     storagePrefix: "sdf:sql-practice",
     defaultRevealedSections: ["Problem"],
     sectionOrder: ["Problem", "Pattern", "Explanation", "Solution"],
+  },
+  "event-sourcing": {
+    id: "event-sourcing",
+    file: "/event-sourcing-primer.md",
+    title: "Event Sourcing",
+    category: "Architecture",
+    itemLabel: "Topic",
+    itemsPlural: "Event Sourcing topics",
+    storagePrefix: "ip:event-sourcing",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  kafka: {
+    id: "kafka",
+    file: "/kafka-interview-primer.md",
+    title: "Kafka",
+    category: "Messaging",
+    itemLabel: "Topic",
+    itemsPlural: "Kafka topics",
+    storagePrefix: "ip:kafka",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
   },
 };
 

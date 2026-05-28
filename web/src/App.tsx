@@ -66,6 +66,8 @@ const VALID_SOURCES: SourceId[] = [
   "python",
   "postgres",
   "sql-practice",
+  "event-sourcing",
+  "kafka",
 ];
 
 function readHashView(): { view: "settings" | "source"; source: SourceId } {

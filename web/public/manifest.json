@@ -163,6 +163,20 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "kafka",
+      "file": "/kafka-interview-primer.md",
+      "title": "Kafka",
+      "category": "Messaging",
+      "itemLabel": "Topic",
+      "itemsPlural": "Kafka topics",
+      "storagePrefix": "ip:kafka",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }
