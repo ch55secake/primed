@@ -205,6 +205,31 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "ddia",
+      "file": "/ddia-scenarios.md",
+      "title": "DDIA Scenarios",
+      "category": "System Design",
+      "itemLabel": "Scenario",
+      "itemsPlural": "DDIA scenarios",
+      "storagePrefix": "sdf:ddia",
+      "defaultRevealedSections": ["Problem"],
+      "itemHeadingLevel": 3,
+      "sectionHeadingLevel": 4,
+      "autoNumberItems": false,
+      "sectionOrder": [
+        "Problem",
+        "Summary",
+        "Clarifying Questions",
+        "Requirements",
+        "Scale Estimate",
+        "High-Level Design",
+        "Data Model",
+        "Detailed Design",
+        "Failure Modes",
+        "Talking Points for the Interview"
+      ]
     }
   ]
 }

@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia";
 
 export interface SourceConfig {
   id: SourceId;
@@ -213,6 +213,31 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     sectionHeadingLevel: 3,
     autoNumberItems: true,
     sectionOrder: [],
+  },
+  ddia: {
+    id: "ddia",
+    file: "/ddia-scenarios.md",
+    title: "DDIA Scenarios",
+    category: "System Design",
+    itemLabel: "Scenario",
+    itemsPlural: "DDIA scenarios",
+    storagePrefix: "sdf:ddia",
+    defaultRevealedSections: ["Problem"],
+    itemHeadingLevel: 3,
+    sectionHeadingLevel: 4,
+    autoNumberItems: false,
+    sectionOrder: [
+      "Problem",
+      "Summary",
+      "Clarifying Questions",
+      "Requirements",
+      "Scale Estimate",
+      "High-Level Design",
+      "Data Model",
+      "Detailed Design",
+      "Failure Modes",
+      "Talking Points for the Interview",
+    ],
   },
 };
 
