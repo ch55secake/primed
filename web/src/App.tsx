@@ -69,6 +69,7 @@ const VALID_SOURCES: SourceId[] = [
   "event-sourcing",
   "kafka",
   "cqrs",
+  "ddia",
 ];
 
 function readHashView(): { view: "settings" | "source"; source: SourceId } {
