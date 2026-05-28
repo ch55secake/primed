@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia" | "cassandra";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia" | "cassandra" | "redis";
 
 export interface SourceConfig {
   id: SourceId;
@@ -247,6 +247,20 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     itemLabel: "Topic",
     itemsPlural: "Cassandra topics",
     storagePrefix: "ip:cassandra",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  redis: {
+    id: "redis",
+    file: "/redis-primer.md",
+    title: "Redis",
+    category: "Databases",
+    itemLabel: "Topic",
+    itemsPlural: "Redis topics",
+    storagePrefix: "ip:redis",
     defaultRevealedSections: [],
     itemHeadingLevel: 2,
     sectionHeadingLevel: 3,
