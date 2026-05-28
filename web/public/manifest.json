@@ -230,6 +230,20 @@
         "Failure Modes",
         "Talking Points for the Interview"
       ]
+    },
+    {
+      "id": "cassandra",
+      "file": "/cassandra-primer.md",
+      "title": "Cassandra",
+      "category": "Databases",
+      "itemLabel": "Topic",
+      "itemsPlural": "Cassandra topics",
+      "storagePrefix": "ip:cassandra",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }

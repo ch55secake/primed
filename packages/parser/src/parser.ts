@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia" | "cassandra";
 
 export interface SourceConfig {
   id: SourceId;
@@ -238,6 +238,20 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
       "Failure Modes",
       "Talking Points for the Interview",
     ],
+  },
+  cassandra: {
+    id: "cassandra",
+    file: "/cassandra-primer.md",
+    title: "Cassandra",
+    category: "Databases",
+    itemLabel: "Topic",
+    itemsPlural: "Cassandra topics",
+    storagePrefix: "ip:cassandra",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
   },
 };
 

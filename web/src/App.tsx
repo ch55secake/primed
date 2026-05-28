@@ -70,6 +70,7 @@ const VALID_SOURCES: SourceId[] = [
   "kafka",
   "cqrs",
   "ddia",
+  "cassandra",
 ];
 
 function readHashView(): { view: "settings" | "source"; source: SourceId } {
