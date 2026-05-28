@@ -165,6 +165,20 @@
       "sectionOrder": []
     },
     {
+      "id": "event-sourcing",
+      "file": "/event-sourcing-primer.md",
+      "title": "Event Sourcing",
+      "category": "Architecture",
+      "itemLabel": "Topic",
+      "itemsPlural": "Event Sourcing topics",
+      "storagePrefix": "ip:event-sourcing",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
+    },
+    {
       "id": "kafka",
       "file": "/kafka-interview-primer.md",
       "title": "Kafka",
