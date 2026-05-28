@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs";
 
 export interface SourceConfig {
   id: SourceId;
@@ -194,6 +194,20 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     itemLabel: "Topic",
     itemsPlural: "Kafka topics",
     storagePrefix: "ip:kafka",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  cqrs: {
+    id: "cqrs",
+    file: "/cqrs-primer.md",
+    title: "CQRS",
+    category: "Architecture",
+    itemLabel: "Topic",
+    itemsPlural: "CQRS topics",
+    storagePrefix: "ip:cqrs",
     defaultRevealedSections: [],
     itemHeadingLevel: 2,
     sectionHeadingLevel: 3,

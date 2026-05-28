@@ -191,6 +191,20 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "cqrs",
+      "file": "/cqrs-primer.md",
+      "title": "CQRS",
+      "category": "Architecture",
+      "itemLabel": "Topic",
+      "itemsPlural": "CQRS topics",
+      "storagePrefix": "ip:cqrs",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }
