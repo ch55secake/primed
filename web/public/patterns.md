@@ -10385,3 +10385,203 @@ These are the things a Trade Republic interviewer will be listening for — surf
 - **Stale / gap handling** — regulated broker, you need a story for "what happens when market data is late or missing".
 - **Audit trail** — every fire traceable to the exact tick. For a broker this isn't optional.
 - **Trade-off you'd revisit at 10× scale:** moving the sub index from in-memory-per-shard to a shared low-latency store (Redis / Aerospike) if sub count outgrows RAM; accept a network hop per tick in exchange for unbounded sub scale.
+
+### 42. Design a Top K Trending Items System
+
+#### Problem
+Build a system that returns the top K trending items for a product surface: hashtags, search queries, songs, articles, products, or videos. It should support near-real-time rankings over multiple windows such as 1 minute, 1 hour, and 24 hours, and it should survive viral spikes without scanning the full event stream on every request.
+
+#### Summary
+**The picture in your head:** imagine a giant scoreboard at a stadium. Every time someone mentions a hashtag, plays a song, clicks an article, or buys a product, the scoreboard for that item increments. The interviewer is not asking for a sorted table that you rebuild from scratch every second. They are asking how to keep the scoreboard current while millions of people are changing the numbers at once. The trick is to aggregate events continuously, split the work across shards, keep a small local top K per shard, and merge those small lists into a global top K.
+
+**The single-request walkthrough:** a user opens the app and asks for `GET /trending?surface=hashtags&window=1h&k=50&region=us`. The API does not query raw events. It reads a precomputed ranking from Redis: `topk:hashtags:us:1h`. That sorted set already contains the current best candidates and scores, refreshed every few seconds by a stream processor. The API returns the top 50 plus metadata such as score, rank, and rank_delta. End-to-end read latency is a cache lookup, usually under 10ms.
+
+**The write-side walkthrough:** a user posts `#launchday`. The event collector emits `{ item_id: "launchday", type: "hashtag_mention", user_id, region, ts }` to Kafka, partitioned by `hash(item_id)` or by `(surface, region, item_id)`. Stream workers consume events, bucket them into small time slices, and increment counters such as `count:item:launchday:2026-06-16T10:42`. Every few seconds, each worker computes its local top 1000 for each `(surface, region, window)` and publishes that compact list to an aggregator. The aggregator merges lists from all workers and writes the global top K into Redis.
+
+**The pieces (and what each one is for):**
+- **Event collector** - receives clicks, mentions, plays, searches, and purchases from product services. It validates, stamps server time, and writes to the event log.
+- **Kafka event log** - durable buffer for high-volume event ingestion. It absorbs bursts and lets workers replay after failures.
+- **Stream processor** - maintains rolling counters by item and window. Flink, Kafka Streams, or Spark Structured Streaming are common choices.
+- **Local top K heaps** - each worker keeps a bounded min-heap or sorted map of candidate items so it does not emit every counter.
+- **Global merger** - combines the local top K candidates from all shards into the final global top K.
+- **Serving cache** - Redis sorted sets keyed by surface, region, and window. Reads are simple `ZREVRANGE` calls.
+- **Batch correction path** - recomputes exact rankings from the event archive for audit, backfill, and drift correction.
+
+**The thing that makes it hard:** top K is deceptively simple until you add windows, shards, spam, and hot keys. A celebrity posts a hashtag and 5M events hit the same item in 2 minutes. If all increments for that item go to one partition, that partition lags while the rest of the cluster is idle. If you shard purely by event ID, the same item is counted on every worker and needs a second aggregation stage. If you compute the 24h window by scanning 24 hours of events on every refresh, your ranking system becomes a batch job and misses the product's real-time requirement.
+
+**Why the standard solution works:** separate ingestion from serving and use approximate, incremental aggregation. Events are append-only. Counters are updated continuously in small time buckets. Reads use precomputed Redis rankings. Each worker emits only a local candidate set, not all item counts. The final merger only sorts thousands of candidates, not billions of events. For high-cardinality surfaces, approximate algorithms such as Count-Min Sketch or Space-Saving identify heavy hitters cheaply, then exact counters are maintained only for candidate items.
+
+**If you were building it tomorrow:**
+- Kafka for raw events, partitioned initially by `(surface, region, item_id)`.
+- Flink jobs maintaining tumbling 1-minute buckets and rolling 1m, 1h, and 24h windows.
+- Per-shard min-heaps of top 1000 candidates, published every 5 seconds.
+- Aggregator merges shard candidates, applies spam filters and decay scoring, and writes Redis sorted sets.
+- API serves from Redis and falls back to the last good snapshot if the ranking job is delayed.
+
+#### Clarifying Questions
+- What is the item type: hashtags, products, songs, search queries, articles, or videos?
+- Is the ranking based on raw count, unique users, velocity, engagement quality, or revenue?
+- Which windows matter: 1 minute, 15 minutes, 1 hour, 24 hours, all time?
+- Is the result global, per region, per language, or personalized?
+- How fresh must the ranking be: seconds, minutes, or hourly?
+- How accurate does top K need to be? Is approximate acceptable?
+- How should spam, bots, and repeated actions by one user be handled?
+
+#### Requirements
+- **FR:**
+    - Return top K items for a surface, region, and time window
+    - Support multiple windows: 1m, 1h, 24h
+    - Include score, rank, and rank_delta from the previous refresh
+    - Filter spammy or policy-blocked items before serving
+    - Support backfill when an ingestion or ranking job fails
+- **NFR:**
+    - p99 read latency < 50ms
+    - Ranking freshness < 10s for short windows, < 60s for long windows
+    - Handle 1M events/s peak ingestion
+    - Survive worker crashes without losing events
+    - Avoid one hot item taking down one partition
+
+#### Scale Estimate
+- **Events:** 100M DAU, 20 rankable actions/user/day -> 2B events/day. Average 2B / 86,400 ~= 23k events/s. Use 40x peak for launches and viral moments -> ~1M events/s design target.
+- **Item cardinality:** 100M distinct items/day across hashtags, products, songs, and articles. Most have one or two events; the top 0.1% dominate reads and ranking.
+- **Event size:** ~200B serialized after schema overhead. 2B/day -> 400GB/day raw. With Kafka replication factor 3 -> 1.2TB/day hot log.
+- **Counter buckets:** 1-minute buckets for 24h means 1440 buckets/window. If 10M active item-region pairs appear in a day and each bucket counter is ~32B logical plus state overhead, expect tens of GB in stream state. RocksDB-backed state is appropriate.
+- **Candidate size:** 200 shards * top 1000 candidates * ~100B/candidate = 20MB per refresh. Merging this every 5s is cheap compared with scanning raw events.
+- **Serving cache:** 100 regions * 3 windows * top 1000 * ~100B = ~30MB plus Redis overhead. Serving state is tiny.
+
+#### API Contract
+```
+GET /trending?surface=hashtags&region=us&window=1h&k=50
+  -> {
+       generated_at: "2026-06-16T10:45:05Z",
+       window: "1h",
+       items: [
+         { rank: 1, item_id: "launchday", score: 982341, rank_delta: 4 }
+       ]
+     }
+
+Internal event:
+  { event_id, user_id, surface, item_id, action_type, region, ts }
+```
+
+#### High-Level Design
+```
+Clients / Product Services
+        |
+        v
+ Event Collector  --->  Kafka raw events  --->  Stream Workers
+                                                | counters by time bucket
+                                                | local top K per shard
+                                                v
+                                          Global Top K Merger
+                                                |
+                                                v
+                                       Redis Sorted Sets
+                                                |
+                                                v
+                                         Trending API
+
+Cold path: raw events -> object store -> batch recompute/backfill
+```
+
+**How to read the diagram:** writes flow left to right through an append-only event pipeline. Reads do not touch that pipeline. They hit the already materialized ranking in Redis.
+
+**Why the flow is shaped this way:** top K requests are read-heavy and latency-sensitive, while event processing is write-heavy and bursty. Decoupling them lets the ingestion system lag briefly without taking down the user-facing API.
+
+**What this layout buys you:** fast reads, bounded aggregation cost, replayability, and a clear place to apply ranking policy. The tradeoff is freshness and approximation: the served ranking is usually a few seconds behind the raw event stream.
+
+#### Data Model
+- **Raw event:** `(event_id, user_id, surface, item_id, action_type, region, ts, metadata)`
+- **Minute bucket counter:** key `(surface, region, item_id, minute_ts)` -> `{ count, unique_users_estimate, weighted_score }`
+- **Worker local top K:** key `(worker_id, surface, region, window)` -> list of `(item_id, score)`
+- **Global top K cache:** Redis sorted set `topk:{surface}:{region}:{window}` with `member=item_id`, `score=ranking_score`
+- **Item metadata cache:** `item:{item_id}` -> title, image, safety status, canonical URL
+
+#### Algorithm Comparison
+| Approach | Pros | Cons | Best for |
+|---|---|---|---|
+| Exact counters + heap | Accurate and easy to explain | High state for huge cardinality | Moderate item volume |
+| Count-Min Sketch | Very memory efficient | Overestimates counts; needs candidate tracking | Very high-cardinality streams |
+| Space-Saving heavy hitters | Direct top K approximation | Can miss fast-changing tail items | Trending hashtags/searches |
+| Batch recompute | Exact and auditable | Not fresh enough alone | Backfill and correction |
+| Redis sorted set increments | Simple serving model | Redis becomes write-hot at scale | Small or single-region systems |
+
+#### Detailed Design
+**Rolling windows.** Store minute buckets and compose larger windows from them. A 1h score is the sum of the last 60 buckets. A 24h score is the sum of the last 1440 buckets, usually updated less frequently. Expire buckets after the largest window plus a safety margin.
+
+**Local top K.** Each worker maintains counters for its assigned partitions and a min-heap of top candidates per `(surface, region, window)`. The heap size should be larger than requested K, for example local top 1000 when the API serves top 50, because the global winner might be rank 200 on many shards.
+
+**Global merge.** The merger consumes local candidate snapshots. It sums candidate scores across workers, applies policy filters, computes rank deltas against the previous snapshot, and writes the final list to Redis with an atomic key swap: write `topk:new`, then rename to `topk:current`.
+
+**Hot key mitigation.** If one item gets too hot, split it across sub-shards by `(item_id, hash(event_id) % N)`. Each sub-shard counts a slice of the item events. The global merger sums those sub-shard counts. This prevents one partition from handling every event for the viral item.
+
+**Approximation strategy.** Use exact counters for candidates and approximate heavy-hitter detection for the long tail. Count-Min Sketch can cheaply tell whether an item is worth promoting into the exact candidate set. The served top 50 should be exact among candidates, even if candidate discovery is approximate.
+
+**Ranking score.** Raw count is easy but easy to game. A practical score blends unique users, event type weights, recency decay, and spam penalties:
+```
+score = weighted_actions * freshness_decay * quality_multiplier * spam_penalty
+```
+For example, one purchase or share can weigh more than one impression, and 100 events from 100 users should beat 100 events from one user.
+
+#### Potential Follow-Up Questions
+**Q: Why not run `GROUP BY item_id ORDER BY count DESC LIMIT K` on the events table?**
+Because the raw event table is too large and the query would scan the hottest data repeatedly. Precompute rankings in the stream processor and serve from Redis.
+
+**Q: How do you handle unique-user counts without storing every user ID per item?**
+Use HyperLogLog per item-window for approximate unique users, or keep exact dedupe only for candidate items. For anti-spam, combine this with per-user rate limits and trust scores.
+
+**Q: What fails first during a viral spike?**
+The partition for the hot item or the stream worker state backend. Watch consumer lag by partition and split hot items into sub-shards when lag crosses the freshness SLO.
+
+**Q: How do you avoid serving an empty or broken ranking if the stream job is down?**
+Keep the last good Redis snapshot with `generated_at`. The API serves it with a stale marker until a maximum age, then falls back to a batch-computed ranking.
+
+**Q: How accurate is approximate top K?**
+Approximation is used to find candidates cheaply. Before serving, exact counters are maintained for candidates and merged globally. The main risk is missing a fast-rising item that was not promoted soon enough.
+
+#### Bottlenecks & Mitigations
+- **Hot item partition:** one viral item overloads one worker. Mitigate with dynamic sub-sharding by event hash and aggregate later.
+- **High cardinality:** millions of one-off items bloat state. Mitigate with sketches and promote only likely heavy hitters into exact counters.
+- **Window recomputation cost:** summing 1440 minute buckets for every item every refresh is expensive. Mitigate with incremental rolling sums and periodic compaction.
+- **Spam and bot traffic:** raw count ranking gets gamed. Mitigate with unique-user scoring, trust signals, per-user caps, and policy filters.
+- **Redis write churn:** rewriting huge sorted sets too often wastes CPU. Mitigate by serving top 1000 only, using atomic swaps, and tuning refresh cadence per window.
+- **Late events:** mobile clients can send delayed events. Mitigate with event-time processing, watermarks, and bounded lateness correction.
+
+#### Failure Modes
+| Layer | Failure | Detection | Mitigation |
+|---|---|---|---|
+| Event collector | Drops or duplicates events | event_id gap checks, duplicate-rate metrics | idempotent event IDs, retry to Kafka, dead-letter invalid events |
+| Kafka | Partition lag spikes | consumer lag by partition | scale workers, split hot keys, extend retention for replay |
+| Stream worker | State restore or checkpoint failure | checkpoint age, restart loop alerts | restore from last checkpoint, replay Kafka, fall back to batch snapshot |
+| Global merger | Writes partial ranking | missing shard snapshot count | require quorum of shard snapshots or serve last good ranking |
+| Redis | Cache unavailable | read/write error rate | local API cache of last snapshot, fail over Redis replica |
+| Policy filter | Blocks good items or allows bad ones | moderation audits, appeal events | version filters, log filtering decision per item |
+
+#### Observability — Key Metrics & SLOs
+- **Ranking freshness:** now minus `generated_at`; SLO < 10s for 1m/1h windows.
+- **Kafka consumer lag by partition:** leading signal for hot keys and worker failure.
+- **Top K churn rate:** how many items enter/leave each refresh; spikes can indicate spam or scoring bugs.
+- **Candidate miss rate:** items found by batch recompute but missing from streaming candidates.
+- **Redis read latency and error rate:** user-facing health of the serving path.
+- **Spam suppression rate:** tracks bot attacks and filter regressions.
+
+#### Multi-Region & DR
+- **Regional rankings:** compute per region close to the event source. Global rankings can merge regional top candidates rather than raw events.
+- **Replication:** mirror raw events to object storage and optionally mirror Kafka topics for DR. Redis rankings can be rebuilt from stream state, so they are cache, not source of truth.
+- **Failover:** if one region's ranking job fails, serve the last good regional snapshot and optionally fall back to global ranking with a stale marker.
+- **RPO/RTO:** raw events have near-zero RPO if Kafka acks are durable. Ranking RTO is checkpoint restore plus replay, usually minutes.
+
+#### Common Mistakes / Anti-patterns
+- **Scanning raw events on every request.** Reads must hit materialized rankings.
+- **Using raw count only.** It is easy to game and overweights bots or one noisy user.
+- **Assuming local top K always contains global top K.** Use local K much larger than requested K, and validate with batch recompute.
+- **Ignoring late events.** Event-time windows need watermarks and bounded correction.
+- **No stale-ranking story.** If the stream job lags, the API should make staleness explicit and serve the last known good result.
+
+#### Talking Points for the Interview
+- State the core split early: event pipeline for writes, Redis/materialized ranking for reads.
+- Explain why local top K plus global merge avoids sorting the world.
+- Call out hot-key handling; viral items are the normal case, not an edge case.
+- Use approximate heavy hitters for candidate discovery, exact counters for served candidates.
+- Mention spam resistance and unique-user weighting; raw popularity is not a product-quality ranking.
+- Keep batch recompute as a correction and audit path, not the online serving path.
