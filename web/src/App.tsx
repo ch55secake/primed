@@ -71,6 +71,7 @@ const VALID_SOURCES: SourceId[] = [
   "cqrs",
   "ddia",
   "cassandra",
+  "redis",
 ];
 
 function readHashView(): { view: "settings" | "source"; source: SourceId } {

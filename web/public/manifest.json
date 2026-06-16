@@ -244,6 +244,20 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "redis",
+      "file": "/redis-primer.md",
+      "title": "Redis",
+      "category": "Databases",
+      "itemLabel": "Topic",
+      "itemsPlural": "Redis topics",
+      "storagePrefix": "ip:redis",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }
