@@ -258,6 +258,20 @@
       "sectionHeadingLevel": 3,
       "autoNumberItems": true,
       "sectionOrder": []
+    },
+    {
+      "id": "neo4j-infrastructure",
+      "file": "/neo4j-infrastructure-interview-primer.md",
+      "title": "Neo4j Infrastructure",
+      "category": "Infrastructure",
+      "itemLabel": "Topic",
+      "itemsPlural": "infrastructure topics",
+      "storagePrefix": "ip:neo4j-infrastructure",
+      "defaultRevealedSections": [],
+      "itemHeadingLevel": 2,
+      "sectionHeadingLevel": 3,
+      "autoNumberItems": true,
+      "sectionOrder": []
     }
   ]
 }

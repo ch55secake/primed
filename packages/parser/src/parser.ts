@@ -10,7 +10,7 @@ export interface Pattern {
   sections: Section[];
 }
 
-export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia" | "cassandra" | "redis";
+export type SourceId = "patterns" | "neetcode" | "java" | "kotlin" | "csharp" | "go" | "python" | "postgres" | "sql-practice" | "event-sourcing" | "kafka" | "cqrs" | "ddia" | "cassandra" | "redis" | "neo4j-infrastructure";
 
 export interface SourceConfig {
   id: SourceId;
@@ -261,6 +261,20 @@ export const SOURCES: Record<SourceId, SourceConfig> = {
     itemLabel: "Topic",
     itemsPlural: "Redis topics",
     storagePrefix: "ip:redis",
+    defaultRevealedSections: [],
+    itemHeadingLevel: 2,
+    sectionHeadingLevel: 3,
+    autoNumberItems: true,
+    sectionOrder: [],
+  },
+  "neo4j-infrastructure": {
+    id: "neo4j-infrastructure",
+    file: "/neo4j-infrastructure-interview-primer.md",
+    title: "Neo4j Infrastructure",
+    category: "Infrastructure",
+    itemLabel: "Topic",
+    itemsPlural: "infrastructure topics",
+    storagePrefix: "ip:neo4j-infrastructure",
     defaultRevealedSections: [],
     itemHeadingLevel: 2,
     sectionHeadingLevel: 3,
