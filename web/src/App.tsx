@@ -72,6 +72,7 @@ const VALID_SOURCES: SourceId[] = [
   "ddia",
   "cassandra",
   "redis",
+  "neo4j-infrastructure",
 ];
 
 function readHashView(): { view: "settings" | "source"; source: SourceId } {

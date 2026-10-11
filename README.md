@@ -6,6 +6,7 @@ Personal interview-prep system. Web app for desk study. Sources backed by markdo
 - **DSA** — NeetCode 150 problems with multi-language solutions (Python / Rust / Go / C++), plus DSA patterns primer.
 - **Languages** — Java, Kotlin, C#, Go, Python interview primers. Senior-level Q+A, topic summaries, and question cards.
 - **Databases** — Postgres primer + SQL practice problems.
+- **Infrastructure** — Neo4j infrastructure interview primer based on a Go take-home review.
 
 ## Repo layout
 
