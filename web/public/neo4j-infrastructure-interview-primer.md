@@ -155,6 +155,36 @@ The consumer would read a message, validate and persist its processing decision,
 
 Multiple Deltas are additive, so their order does not matter. `TurnOff` and `Delta` are not commutative, so the current code rejects a group containing both. That is a deterministic choice. An alternative product decision could be “TurnOff wins,” but it must be implemented explicitly rather than relying on stable sort or input order.
 
+For a “TurnOff wins” policy, I would reduce the whole timestamp group in one place:
+
+```go
+func applyTimestampGroup(dimmer float64, events []Event) (float64, error) {
+	var delta float64
+	hasTurnOff := false
+
+	for _, event := range events {
+		switch event.Type {
+		case EventTurnOff:
+			hasTurnOff = true
+		case EventDelta:
+			delta += event.Delta
+		}
+	}
+
+	if hasTurnOff {
+		return 0, nil
+	}
+
+	next := dimmer + delta
+	if next < 0 || next > 1 {
+		return 0, fmt.Errorf("dimmer outside [0.0, 1.0]")
+	}
+	return next, nil
+}
+```
+
+The important design point is that the policy is explicit and independent of input order.
+
 ## Performance and production review
 
 ### Summary
@@ -311,6 +341,19 @@ func main() {
 ```
 
 The important point is to keep a non-zero exit code even if writing the diagnostic itself fails. The command should not log and exit in multiple layers.
+
+The output contract should also be explicit rather than relying on `%g`'s default precision:
+
+```go
+func formatEnergy(energyWh float64) string {
+	const decimalPlaces = 6
+
+	rounded := math.Round(energyWh*1_000_000) / 1_000_000
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
+}
+```
+
+That preserves concise values such as `2.5` and `5.625` while limiting floating-point noise. The number of decimal places is a product decision and should be covered by output tests.
 
 ### Q2. How would you preserve source line numbers through sorting?
 
