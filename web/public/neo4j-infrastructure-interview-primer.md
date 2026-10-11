@@ -440,25 +440,132 @@ The safest interview workflow is: restate the requirement, identify the invarian
 
 Likely files: `normaliser.go`, `energy.go`, and their tests. First clarify whether Deltas are ignored or accumulated before being discarded. Then make timestamp-group reduction explicit and test both input orders. Do not rely on stable sorting to implement the policy.
 
+The core reduction could look like this:
+
+```go
+func applyTimestampGroup(dimmer float64, events []Event) (float64, error) {
+	var delta float64
+	hasTurnOff := false
+
+	for _, event := range events {
+		switch event.Type {
+		case EventTurnOff:
+			hasTurnOff = true
+		case EventDelta:
+			delta += event.Delta
+		}
+	}
+
+	if hasTurnOff {
+		return 0, nil
+	}
+
+	next := dimmer + delta
+	if next < 0 || next > 1 {
+		return 0, fmt.Errorf("dimmer outside [0.0, 1.0]")
+	}
+	return next, nil
+}
+```
+
 ### Q2. Add a maximum event count.
 
 Likely files: `parser.go`, `root.go`, and CLI tests. Decide whether the limit is a parser option or a Cobra flag. Test exactly at the limit and one over it. Explain that this protects the process but does not solve large valid out-of-order streams; external sorting or a stronger protocol would address that.
+
+For a parser-level option:
+
+```go
+type ParserOptions struct {
+	MaxEvents int
+}
+
+if options.MaxEvents > 0 && len(events) >= options.MaxEvents {
+	return nil, fmt.Errorf("input exceeds maximum of %d events", options.MaxEvents)
+}
+```
 
 ### Q3. Improve invalid-state errors with line numbers.
 
 Likely files: `event.go`, `parser.go`, `normaliser.go`, `energy.go`, and tests. Preserve source metadata through sorting and keep it out of the deduplication key. Report one or more lines for the offending timestamp group.
 
+The diagnostic line should not change event identity:
+
+```go
+type Event struct {
+	Timestamp int64
+	Type      EventType
+	Delta     float64
+	Line      int
+}
+
+type eventKey struct {
+	Timestamp int64
+	Type      EventType
+	Delta     float64
+}
+```
+
 ### Q4. Fix output precision.
 
 Likely files: `internal/cli/root.go` and CLI tests. Define a visible output contract first, then add cases for zero, the assignment examples, small values, and values exposing `%g` rounding.
+
+For trimmed output with six decimal places of precision:
+
+```go
+func formatEnergy(energyWh float64) string {
+	rounded := math.Round(energyWh*1_000_000) / 1_000_000
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
+}
+```
 
 ### Q5. Add cancellation.
 
 Likely files: `main.go`, `root.go`, and `parser.go`. Clarify whether cancellation must interrupt blocked stdin. Add `signal.NotifyContext`, pass context explicitly, and define how the input reader is closed. Avoid a goroutine leak.
 
+The parser can check cancellation between lines:
+
+```go
+func Parse(ctx context.Context, input io.Reader) ([]Event, error) {
+	scanner := bufio.NewScanner(input)
+	var events []Event
+
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		event, err := parseLine(scanner.Text())
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+
+	return events, scanner.Err()
+}
+```
+
 ### Q6. Add CI validation.
 
 Likely files: a workflow file and `Makefile`. Run tests, race detection, vet, and the Linux build. Keep benchmarks separate from normal CI unless a stable threshold is required.
+
+The local Makefile target should make the same checks easy to reproduce in CI:
+
+```make
+test:
+	go test ./...
+
+race:
+	go test -race ./...
+
+vet:
+	go vet ./...
+
+build:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/energy-estimator
+```
 
 ## Night-before checklist
 
