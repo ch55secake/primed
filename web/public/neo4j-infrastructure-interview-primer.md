@@ -567,6 +567,193 @@ build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/energy-estimator
 ```
 
+## Neo4j Infrastructure Interview Q&A
+
+### Summary
+
+**What this topic covers**
+
+This set is a rehearsal guide for infrastructure interviews around Kubernetes, distributed systems, Go, operations, and Neo4j Aura. The questions move from hands-on diagnosis to design across many clusters, then finish with behavioural prompts. The strongest responses make a clear claim, explain the evidence or trade-off behind it, and state what you would do next. Keep answers conversational: start with the direct answer, give a concrete sequence, then mention one important caveat. For experience questions, use a real example from your own work; the prompts below are scaffolds, not stories to pass off as yours.
+
+**Mental model**
+
+For a production failure, move from the nearest observable symptom outward: workload state, dependencies, node and cluster, then provider or recent change. Use events and measurements to test hypotheses rather than making several changes at once. For a control-plane design, separate the request from execution: persist intent, reconcile it asynchronously, expose progress, and make every step safe to repeat. For Go, show ownership and lifecycle: bound work, propagate cancellation, synchronize shared state, and preserve enough error context for the right layer to act.
+
+In Kubernetes answers, distinguish control-plane objects from what is actually running: inspect pod conditions and events, then follow selectors, endpoints, DNS, policies, and ingress in the same order a request travels. For stateful workloads, add quorum, fencing, volume topology, backup, and restore to the picture; a replacement pod is not proof of safe recovery. In distributed workflows, assume every boundary can fail after the remote side acted but before the caller recorded success. Stable identity and discoverable effects are what let a restarted worker converge instead of duplicate work.
+
+**Key terms**
+
+- **Desired state** — the durable declaration of what should exist.
+- **Reconciliation** — repeatedly comparing desired and observed state, then applying a safe correction.
+- **Idempotency** — repeating an operation has the same effect as doing it once.
+- **Readiness** — whether a workload should receive traffic; **liveness** — whether it should be restarted.
+- **PVC** — a workload's claim on persistent storage, backed by a PV and StorageClass.
+- **SLO / saturation** — a user-facing reliability target / a resource near its useful limit.
+- **Optimistic concurrency** — reject stale writes using a version, then read and retry deliberately.
+
+**Why interviewers ask this**
+
+These prompts test whether someone can operate a stateful platform without treating Kubernetes as magic. A database pod can be healthy while its Service has no endpoints, and a rescheduled pod can still be unable to attach its volume. Cloud API timeouts and process crashes make “exactly once” an unsafe assumption; the robust answer is durable intent, stable identity, idempotent effects, and reconciliation. At fleet scale, a correct change still needs staged rollout, health gates, and a way to stop or roll back. Clear diagnosis and honest ownership are more persuasive than claiming heroics or naming tools without explaining their role.
+
+Interviewers also listen for prioritisation: what you inspect first, how you protect customers while learning more, and how you know the system recovered. A strong answer separates mitigation from root-cause analysis, immediate evidence from later prevention, and personal contribution from team outcome. In design discussions, state assumptions, walk through a normal request, then deliberately cross the crash or network-partition boundary. That demonstrates operational judgment without requiring a perfect prediction of every failure.
+
+**Common confusions**
+
+- A pod being `Running` does not prove the application is ready or reachable.
+- A StatefulSet provides stable identity and storage association, not database replication or backup by itself.
+- Retrying every error can amplify an outage; retry only bounded, plausibly transient failures, with backoff and jitter.
+- A Kubernetes API write conflict is a signal to re-read and recompute, not to blindly repeat stale data.
+- A green dashboard is not observability unless signals answer a question and alert on actionable symptoms.
+- Do not invent production stories. State your actual role, scope, and evidence; distinguish team outcomes from what you personally did.
+
+**What follows from this topic**
+
+Rehearse a real production ownership story and one incident using a concise situation, action, result, and learning. Practise the diagnostic questions as ordered checklists, but adapt the order to evidence. For system design, draw the API, durable operation record, queue or work trigger, reconciler, target cluster, and status path; then discuss duplicate requests, concurrent workers, cloud timeouts, rollout safety, and recovery. For every proposal, name the failure mode it addresses and the signal that would tell you it worked. Tailor the behavioural answers to your own decisions and motivations rather than memorising generic claims.
+
+For technical topics, rehearse the first two or three checks aloud and say what each result would imply; this sounds more credible than reciting a long tool list. Prepare one example of a mistake or disagreement where you can explain your reasoning and what changed. Before the interview, verify any current product claims, and be ready to say “I haven’t operated that exact system, but here is how I would investigate it” when that is the honest answer. Curiosity, clear boundaries, and a safe next step are better than bluffing.
+
+### Q1. Tell us about a production system you’ve built or operated. What did you personally own?
+
+Use a real system and answer in roughly three minutes: “At **[product/team]**, we ran **[system and purpose]** for **[users or workload]**. The important constraints were **[scale, availability, latency, cost, or compliance]**. I personally owned **[specific components and decisions]**—for example, **[design, deployment, on-call, migration, or reliability work]**—while **[clearly name team-owned areas]** belonged to others. One consequential choice I made was **[decision and alternative]** because **[evidence/trade-off]**. We measured the result with **[metric or concrete outcome]**. The main lesson was **[learning]**, and today I would **[improvement]**.” Be precise about what you did versus what the team delivered. Do not present the take-home exercise as a production system; choose an authentic operational example, even if its scope was smaller.
+
+### Q2. Tell us about a difficult production incident. How did you diagnose it?
+
+Choose an incident you actually worked on. State the customer impact and timeline, then walk through your diagnosis: what alerted, what changed, which dashboards/logs/traces or events you checked, the first hypotheses, and what evidence ruled them in or out. Explain how you mitigated risk (rollback, failover, traffic reduction, or a reversible change) before pursuing root cause. Close with measured recovery and follow-up work such as a regression test, alert, runbook, or architecture change. Emphasise a disciplined loop—observe, form one hypothesis, test it, record the result—not a heroic guess. Be clear if you were incident lead, investigator, or supporting engineer.
+
+### Q3. A Kubernetes pod is stuck in Pending. How do you investigate?
+
+Start with `kubectl describe pod` and recent events; the scheduler's message usually narrows the cause. Check requested CPU/memory against allocatable node capacity and quotas, then inspect PVC binding and StorageClass/provisioner events. Verify node selectors, affinity/anti-affinity, topology constraints, taints and tolerations, and whether any eligible nodes exist. Check autoscaler events and cloud quota if new capacity should be provisioned. Fix the constraint indicated by evidence—don't lower requests blindly, since that can cause runtime contention. Confirm scheduling, image pull, and startup separately; a scheduled pod may still fail later.
+
+### Q4. A pod is running but the application isn't reachable. What do you check?
+
+Follow the traffic path. Confirm the process is listening on the expected interface and port, then inspect readiness and pod conditions. Check the Service selector and `EndpointSlice` membership/ports; a healthy-looking pod that is not ready may correctly receive no traffic. Verify in-cluster DNS resolution and test Service IP versus pod IP to isolate discovery from routing. Inspect NetworkPolicies, ingress/gateway/LB rules, target health, TLS termination, and firewall paths. Compare a failing request with application logs and metrics. Check each hop independently and validate both the fix and its effect on other traffic.
+
+### Q5. What's the difference between a Deployment, StatefulSet and DaemonSet?
+
+A **Deployment** manages interchangeable replicas of a typically stateless application, with declarative rollout and replacement. A **StatefulSet** gives replicas stable ordinal identities and stable storage/network associations, which help operate stateful members; it does not provide replication, consistency, or backups for the database. A **DaemonSet** aims to run a pod on each eligible node (or selected subset), common for node agents such as log collectors. Choose by identity and placement requirements, not just because an app happens to write files.
+
+### Q6. What happens when a Kubernetes node dies?
+
+The control plane stops receiving node heartbeats and marks it `NotReady`/`Unknown`; after configured toleration and eviction behavior, controllers can create replacement pods on healthy eligible nodes. Exact timing depends on node-health settings and workload tolerations. For a StatefulSet, the replacement keeps its ordinal and requests its PVC, but storage must detach safely and attach in a compatible zone; fencing matters to avoid two writers. A quorum database may lose availability or elect a new leader, so understand its replication and recovery semantics. Check node events, pod disruption and volume attachment state, quorum, and data safety before forcing deletion or reattachment. A PodDisruptionBudget does not prevent an abrupt machine failure.
+
+### Q7. Explain Kubernetes reconciliation / the operator pattern. Why must a reconciler be idempotent?
+
+A controller watches a custom resource or built-in object, compares its desired spec with observed cluster/external state, performs a bounded correction, updates status, and requeues when work or a retry is needed. An operator packages domain-specific knowledge—such as safe database membership or backup orchestration—into that loop. Reconcile can run repeatedly, concurrently, after a crash, or after an unrelated event, so repeating the same input must converge without duplicating side effects. Idempotency makes retries and recovery safe; the loop also needs conflict handling, cancellation, backoff, and clear status conditions.
+
+### Q8. Your operator creates a cloud resource, times out, and doesn't know whether creation succeeded. What do you do?
+
+Treat the outcome as unknown, not as failure. Use a stable operation/idempotency key or deterministic resource identity, then query the provider by that key and inspect whether the resource exists and is usable. If it exists, record/adopt it and continue; if absent, retry creation with the same identity; if still indeterminate, requeue with bounded backoff and expose a progressing condition. Persist intent before the external call and make later reconciliation able to recover even if the process dies between provider success and status update. Avoid issuing a fresh create with a new name on every retry.
+
+### Q9. When should you retry a failed operation? When shouldn't you?
+
+Retry bounded, transient failures such as timeouts, throttling, temporary unavailability, and selected server errors—respecting provider `Retry-After` guidance. Use exponential backoff with jitter, a deadline or retry budget, and observability; jitter prevents synchronized clients from creating a retry storm. Do not retry permanent validation/authentication errors unchanged, or unsafe non-idempotent operations with an unknown outcome. Correct the input/credentials or reconcile the outcome first. Retries add load, so fail fast or queue work when the dependency is unhealthy, and make exhaustion visible for operator action.
+
+### Q10. How would you design a service that provisions databases across Kubernetes clusters?
+
+Expose an authenticated API that validates a request and idempotency key, stores a durable operation/desired-state record, and returns an operation ID promptly. An asynchronous worker/controller selects a compatible cluster, writes or applies a database custom resource, and observes its status until ready or failed. Persist user-facing state and conditions so clients can poll or receive events; make retries and cancellation explicit. Keep cluster credentials scoped, enforce quotas and placement policy, and record ownership for cleanup. Add bounded retries, audit events, metrics, traces, and alerts. Do not hold one HTTP request open while provisioning a database.
+
+### Q11. How would you make that service highly available?
+
+Run stateless API and worker replicas across failure domains, behind health-checked load balancing. Keep authoritative request and operation state in a durable shared store; do not rely on a process's memory or local queue as the only record. Workers may use leases/leader election for truly singleton duties, but ordinary work can be partitioned and claimed with durable status/version checks. Make effects idempotent so another replica can resume after a crash. Use database backups/replication, tested restore, dependency timeouts, rate limits, and graceful shutdown. HA is not just replica count: verify the control plane, credentials, queues, databases, and target-cluster connectivity also survive failures.
+
+### Q12. What happens if two instances try to reconcile the same resource simultaneously?
+
+Assume duplicate reconciliation is possible. Read the current resource version, compute from current state, and use conditional updates; on a conflict, re-read and recompute rather than overwrite newer intent. Ensure external operations have deterministic identities/idempotency keys and tolerate duplicate calls. Use per-resource leases or queue partitioning only when serialization is required for a non-idempotent action; broad locks add failure modes and reduce throughput. Kubernetes controllers commonly rely on optimistic concurrency and work-queue de-duplication, but de-duplication is an efficiency feature, not the correctness guarantee.
+
+### Q13. How would you roll out a change across hundreds of Kubernetes clusters safely?
+
+Stage by risk: internal/test clusters, a small canary cohort, then progressively larger cohorts across regions/providers and workload types. Version and record each cluster's desired rollout state; use health gates based on availability, error rate, latency, resource pressure, and database-specific signals. Pause automatically on regression, keep concurrency and blast radius bounded, and make rollback or forward-fix steps explicit. Test the controller and manifest compatibility against old/new versions, account for offline clusters, and avoid assuming every cluster updates at once. Track cohort progress and exceptions centrally; exercise the stop mechanism before broad rollout.
+
+### Q14. What's the difference between readiness and liveness probes? What can go wrong with badly configured liveness probes?
+
+Readiness answers “should this pod receive traffic now?”; failing readiness removes it from Service endpoints without restarting it. Liveness answers “is this process irrecoverably stuck and should kubelet restart it?” A startup probe can protect slow initialization before liveness begins. If liveness is too aggressive—short timeouts, dependency checks, or thresholds that do not allow load spikes—temporary slowness can trigger repeated restarts, reduce capacity, and create a cascading outage. Probe the process's ability to make progress, size thresholds from startup/runtime behavior, and do not use liveness to restart a pod just because a remote dependency is unavailable.
+
+### Q15. Explain requests and limits in Kubernetes.
+
+Requests are scheduling reservations and influence placement; actual usage can exceed a request if capacity permits. CPU limits cap execution through throttling, which can increase latency even when the process is healthy. Memory limits are enforced differently: exceeding one can lead to an OOM kill, and the container may restart. Requests set too low cause contention and misleading scheduling; too high waste cluster capacity or leave pods Pending. Set them from measured workload behavior and headroom, watch throttling/OOM and node pressure, and consider workload-specific policy rather than copying one number everywhere.
+
+### Q16. A customer's database suddenly has much higher latency. How would you investigate?
+
+Scope impact first: which queries, tenants, regions, and percentiles changed, and when? Check application/query metrics and database saturation (CPU, heap/memory, queues, page cache, locks, GC, and connection pools), then disk latency/IOPS and storage throttling. Compare network latency/errors and node pressure; inspect cluster health, replication/leader changes, and cloud-provider dependencies. Correlate with deployments, configuration, traffic shape, backups, and maintenance. Use traces/query plans where safe to identify the slow path. Mitigate customer impact with a reversible action, preserve evidence, and validate recovery against the original symptom before declaring the incident resolved.
+
+### Q17. Explain how DNS works when one pod calls another Kubernetes service.
+
+The pod's resolver uses its configured cluster DNS service (commonly CoreDNS). A name such as `service.namespace.svc.cluster.local` resolves to the Service's virtual IP for a normal ClusterIP Service; kube-proxy or the cluster's data plane routes connections to ready endpoints. A headless Service instead returns endpoint addresses, often useful for StatefulSet discovery. Check namespace/search domains, Service name and ports, DNS policy, CoreDNS health, and EndpointSlices. DNS lookup success only proves name resolution—not that the destination is ready, reachable, or accepting the requested protocol.
+
+### Q18. TCP works but HTTPS fails. What do you investigate?
+
+TCP success narrows the path but doesn't prove TLS or HTTP works. Inspect the TLS handshake, certificate validity/expiry and full trust chain, expected hostname and SNI, protocol/cipher compatibility, and whether the client trusts the issuing CA. Check mTLS client certificates and identity mapping if required. Verify proxy/service-mesh interception, TLS termination and re-encryption, HTTP host routing, and any policy that treats the TLS flow differently. Compare client/server clocks and inspect errors from both sides. Use a controlled TLS diagnostic with the intended hostname; do not disable certificate verification as a “fix.”
+
+### Q19. What is a PVC, and what happens to storage when a StatefulSet pod gets rescheduled?
+
+A PersistentVolumeClaim requests storage with a size and access mode; a StorageClass can dynamically provision a matching PersistentVolume. StatefulSet `volumeClaimTemplates` create a stable claim per ordinal, which normally remains associated with that identity as the pod is recreated. The replacement mounts the same volume after detach/attach and scheduling constraints permit it; zonal storage may restrict eligible nodes. Deletion and retention behavior depends on reclaim and StatefulSet PVC-retention policies. A PVC is not a backup, and access mode is not a substitute for database-level replication or fencing. Check binding, events, topology, attach limits, and recovery procedures.
+
+### Q20. What's the difference between logs, metrics and traces? When would you use each?
+
+**Logs** are timestamped records of discrete events, useful for detail and diagnosis; make them structured and avoid secrets or unbounded high-cardinality fields. **Metrics** are aggregated numeric time series, good for trends, rates, percentiles, saturation, and alerting across many instances. **Traces** connect spans across a single request or operation, showing its path and latency contributors across services. Use metrics to detect and scope, traces to locate a slow or failing hop, and logs for event-level context. Correlate them with trace/request IDs and consistent resource metadata, while sampling and controlling cost.
+
+### Q21. How would you instrument a service you were putting into production?
+
+Define user-facing SLIs first, then instrument request rate, latency histograms, errors, and saturation with bounded-cardinality labels. Add structured logs for decisions and failures, distributed tracing across outbound calls and async operations, and metrics for queue depth/age and reconcile outcomes. Include build/version and resource identity carefully, not raw customer IDs as metric labels. Alert on actionable symptoms and SLO burn, with runbooks and ownership; dashboards should help answer “what is broken and where?” Test that telemetry is emitted and useful, and set retention/sampling to a deliberate cost and privacy budget.
+
+### Q22. How do you use `context.Context` in Go?
+
+Pass context as the first argument through request-scoped calls to carry cancellation and deadlines, and pass it to APIs that can stop work. Derive a timeout for bounded downstream operations and always call the returned cancel function. Check cancellation in long-running loops and ensure goroutines can observe it. Context values are for request-scoped metadata crossing API boundaries, not optional parameters or general storage. Do not store request contexts in long-lived structs; pass them explicitly so lifetime and ownership are clear. Cancellation is cooperative and cannot interrupt an arbitrary blocked reader unless that reader supports it or is closed.
+
+### Q23. When would you use a goroutine/channel versus a mutex?
+
+Use goroutines and channels when they clarify ownership and communication between concurrent tasks—for example, a bounded worker pipeline or a result stream. Use a mutex when several goroutines need efficient shared access to in-memory state and the critical section is easy to define. A channel is not automatically safer, and a mutex is not a design failure. Keep synchronization simple, avoid holding locks across slow I/O, document ownership, and run the race detector. Choose the approach that makes lifecycle, cancellation, and invariants easiest to verify.
+
+### Q24. How do you avoid goroutine leaks?
+
+Give every goroutine a clear owner and exit condition. Propagate context cancellation, close channels from the sending owner, and make sends/receives selectable on `ctx.Done()` when the other side may stop early. Bound worker counts and queues so a stalled dependency cannot create unbounded work. Ensure errors and shutdown paths unblock peers; wait for owned goroutines when appropriate. Test cancellation and early-consumer-exit cases, and use goroutine profiles or leak checks if symptoms persist. A goroutine is cheap to start but not free to leave blocked forever.
+
+### Q25. How do you structure error handling in Go?
+
+Return errors to the layer that can make a decision, adding concise context with `%w` so the cause remains inspectable with `errors.Is`/`errors.As`. Classify errors when policy differs—retryable, permanent, conflict, not found—rather than parsing strings. Handle an error once at the appropriate boundary: retry, translate to an API status, report, or stop. Avoid logging and returning the same error at every layer, and do not swallow it. Keep sentinel or typed errors limited to stable contracts callers need to branch on.
+
+### Q26. What makes a good interface in Go?
+
+A good interface is small, behavior-oriented, and usually defined by the package that consumes it. It expresses the minimum operations that make a function useful, not every capability of a concrete client. Keep concrete types until substitution is genuinely needed; interfaces can help testing or isolate a volatile boundary, but creating one for every struct adds ceremony. Prefer composing small interfaces and verify intended implementations where useful. The goal is decoupling where it pays for itself, not abstraction for its own sake.
+
+### Q27. How would you test code that talks to Kubernetes/cloud APIs?
+
+Separate decision-making/domain logic from API transport so most behavior can be tested with ordinary inputs and outputs. Use narrow client interfaces or fakes at external boundaries, and test retries, conflicts, cancellation, and ambiguous outcomes—not just happy-path method calls. For Kubernetes controllers, use a fake client for fast unit tests but remember it may not reproduce API-server defaulting, admission, or all watch behavior. Add envtest/integration tests against a real API server and provider sandbox or contract tests where value justifies the cost. Keep a small end-to-end suite; don't mock every layer into a test that only verifies your own assumptions.
+
+### Q28. AWS/GCP/Azure returns 200, but your process crashes before recording success. What happens when it restarts?
+
+The durable desired operation remains pending or uncertain, so a new worker reconciles it. It queries the provider using the stable operation/resource identity; if the resource was created, it adopts and records it, otherwise it retries safely with the same idempotency key. Persisting “success” only in process memory loses the result at exactly this crash boundary. Design around at-least-once execution and uncertain outcomes rather than promising exactly-once calls. Make provider resources discoverable by ownership tags/metadata and ensure cleanup/recovery can distinguish this operation from unrelated resources.
+
+### Q29. Tell us about a technical decision where you disagreed with another engineer.
+
+Use a genuine, low-drama example: “We disagreed about **[decision]** because I was concerned about **[risk]**, while my colleague prioritised **[valid concern]**. I suggested **[evidence, experiment, or decision criteria]**. We chose **[outcome]**; I supported the decision and helped with **[implementation/result]**. In retrospect **[what I learned]**.” Show that you listened, made trade-offs explicit, and changed your view if evidence warranted it. Avoid portraying the other person as unreasonable or claiming sole credit for a team decision.
+
+### Q30. Tell us about something you designed that you would do differently today.
+
+Pick a real design whose constraints have changed or whose weakness became visible. Explain the original context and why the choice was reasonable then, the evidence that changed your view, and one specific alternative you would choose now. Include what you did to reduce the cost—migration, guardrail, tests, or documentation—and what the outcome taught you. Do not invent a “weakness” that is actually a humblebrag. Good judgment includes recognising when an initially sensible trade-off stopped fitting the system.
+
+### Q31. How do you decide whether to fix a problem manually or automate it?
+
+First mitigate safely; automation is not a reason to delay customer recovery. Then estimate recurrence, impact, operator time, error risk, and the cost of building and maintaining automation. Automate frequent, well-understood, repeatable tasks with clear inputs, observability, rollback, and an owner. Keep rare or poorly understood work manual until the failure modes are known, but improve the runbook and collect evidence. After an incident, ask whether automation prevents recurrence or merely hides the symptom. Measure whether it reduces toil and mistakes rather than counting scripts shipped.
+
+### Q32. What interests you about infrastructure rather than application development?
+
+Make this personal rather than reciting a company slogan. A useful answer is: “I like work where reliability, performance, and operational simplicity are part of the product. Infrastructure lets me solve recurring problems once for many teams, while staying close to real workloads and customer impact. I enjoy **[specific relevant work you have actually done]**, especially the mix of debugging, systems design, and automation. I also value the responsibility: platform choices have a broad blast radius, so rollout safety and clear operations matter as much as elegant code.” Replace the bracket with a genuine example and be ready to explain why that work was satisfying.
+
+### Q33. Why Neo4j / why Aura?
+
+Connect the product to the work, not just its name: “Neo4j is interesting to me because graph data makes relationships and traversals first-class, and Aura brings that database experience into a managed service. The infrastructure challenge is compelling: deliver a dependable stateful database experience across Kubernetes clusters and AWS, GCP, and Azure while handling upgrades, storage, networking, and recovery safely. I’m interested in the combination of distributed systems and customer-facing reliability. **[Add one specific Neo4j/Aura product or engineering detail you researched and a reason it matters to you.]**” Keep the claim current and verify product specifics before the interview.
+
+### Q34. What do you know about graph databases?
+
+A graph models **nodes** (entities) and **relationships** (typed, directed connections); both can carry properties. This makes traversing connected data—such as paths, recommendations, access relationships, or fraud networks—natural, especially when query cost depends on following relationships rather than joining many tables. A property graph is not automatically better: relational models can be simpler and more efficient for tabular workloads, and graph performance still depends on data shape, indexes, and query plans. Neo4j's declarative query language is Cypher, which expresses patterns of nodes and relationships. Know the concepts and a basic pattern; focus on the infrastructure role rather than pretending to be a graph specialist.
+
+### Q35. Mini system design: Design a service that accepts a request to provision a database and eventually creates it in Kubernetes.
+
+Use an authenticated API with validation, quotas, and a client idempotency key. In one durable transaction, store the requested database and an operation record; return `202 Accepted` plus an operation ID. A work queue or database-backed scheduler wakes stateless workers, which select a cluster using capacity, region, policy, and failure-domain constraints, then create or update a database custom resource with a deterministic identity. A controller reconciles storage, secrets, configuration, and database readiness; status conditions and events flow back to the operation API. Clients poll or subscribe rather than holding the request open.
+
+Call out failure semantics: duplicate requests map to the same operation; workers may run twice; provider/API timeouts are resolved by querying stable identities; conflicts trigger re-read and recompute; permanent validation errors become terminal status, while transient failures retry with bounded jitter. Secure tenant isolation and cluster credentials, audit every transition, and define cancellation/deletion behavior. Instrument operation age, queue depth, provisioning latency, failure class, and cluster saturation. Roll out controller versions by cohort with health gates. Finally discuss the database's own replication, backups, restore, upgrades, and PVC lifecycle—the control plane must not confuse “pod created” with “database safely ready.”
+
 ## Night-before checklist
 
 ### Summary
